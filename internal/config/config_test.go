@@ -14,8 +14,23 @@ func TestLoadExampleNoWarnings(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy-key")
 	t.Setenv("ANTHROPIC_API_KEY", "dummy-key")
 
+	// Se copia el fixture a un archivo temporal con permisos 0600 explícitos:
+	// git no preserva el modo completo (solo el bit ejecutable), así que tras
+	// un clon el archivo puede quedar en 0644 según el umask del checkout, lo
+	// que dispararía una advertencia de permisos ajena a lo que este test
+	// quiere verificar (que el ejemplo no tenga advertencias de contenido).
+	original, err := os.ReadFile("../../config.example.toml")
+	if err != nil {
+		t.Fatalf("no se pudo leer config.example.toml: %v", err)
+	}
+	tmpDir := t.TempDir()
+	tmpPath := filepath.Join(tmpDir, "config.example.toml")
+	if err := os.WriteFile(tmpPath, original, 0o600); err != nil {
+		t.Fatalf("no se pudo escribir copia temporal: %v", err)
+	}
+
 	cfg, err := config.Load(config.Options{
-		UserPath:    "../../config.example.toml",
+		UserPath:    tmpPath,
 		SkipProject: true,
 	})
 	if err != nil {

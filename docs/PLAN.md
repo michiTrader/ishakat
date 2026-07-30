@@ -1643,6 +1643,8 @@ Actualizar al cerrar cada paso. Una línea por entrada: fecha, paso, resultado, 
 |-------|------|-----------|
 | 2026-07-30 | Fase 1 | Cerrada. Cuatro contratos definidos. |
 | — | Paso 0 · Spike | Completado. Pendiente anotar aquí arranque en ms, RSS y estado del DNS. |
+| 2026-07-30 | Paso 1 · Config | Verificado en este entorno: `go build ./...` y `go test ./...` en verde tras instalar Go 1.24 (descarga automática del toolchain 1.26.5 declarado en `go.mod`). Se corrigió `TestLoadExampleNoWarnings`, que dependía de que `config.example.toml` tuviera permisos 0600 en disco; git no preserva el modo completo al clonar, así que el test ahora copia el fixture a un temporal con 0600 explícito antes de cargarlo. |
+| 2026-07-30 | Nota de arquitectura | **Divergencia detectada, no corregida por iniciativa propia:** el contrato §4 (modelo de conversación agnóstico `internal/convo`, con `Message.Blocks []Block`) no se implementó. En su lugar existe `internal/session` con `Message.Content string` plano (sin `BlockKind`, sin `Aborted`, sin `Usage` con reasoning/cache). Es funcional para lo hecho hasta ahora (JSONL append-only, paso 2), pero si se construye el engine/TUI sobre esta forma plana, migrar después a bloques (necesario para `/compact` con `BlockSummary`, adjuntos e imágenes, y degradar tool-calls al hacer hotswap) sale más caro. Pendiente decisión explícita: migrar `session`→`convo` con bloques antes del Paso 8, o aceptar formalmente la simplificación y enmendar el contrato de §4. |
 
 ---
 
