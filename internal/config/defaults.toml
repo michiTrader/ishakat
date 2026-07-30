@@ -1,0 +1,93 @@
+schema = 1
+
+[app]
+default_model = "omniroute/auto/coding"
+compact_model = "omniroute/auto/cheap"
+fallback_model = "omniroute/auto"
+stream = true
+system_prompt = ""
+system_prompt_file = ""
+timeout_s = 120
+connect_timeout_s = 10
+max_retries = 3
+locale = "auto"
+
+[session]
+save = true
+dir = "$XDG_DATA_HOME/ishakat/sessions"
+autoname = true
+keep_last = 50
+resume_last = false
+
+[ui]
+theme = "ascua"
+banner = true
+markdown = true
+syntax = true
+reasoning = "collapsed"
+timestamps = false
+mouse = false
+layout = "auto"
+max_width = 100
+color = "auto"
+
+[ui.animations]
+mode = "auto"
+fps = 12
+spinner = "charm"
+face = true
+gradient_scroll = true
+battery_saver = "auto"
+
+[ui.footer]
+items = ["model", "context", "tokens", "cost", "git", "cwd"]
+
+[keys]
+submit = "enter"
+newline = "ctrl+j"
+cancel = "esc"
+quit = "ctrl+c ctrl+c"
+clear_screen = "ctrl+l"
+model_picker = "ctrl+p"
+model_cycle = "ctrl+o"
+theme_picker = "ctrl+t"
+history_prev = "up"
+history_next = "down"
+copy_last = "ctrl+y"
+
+[catalog]
+sources = ["provider", "modelsdev", "config"]
+modelsdev_url = "https://models.dev/api.json"
+modelsdev_meta_url = "https://models.dev/models.json"
+cache_file = "$XDG_CACHE_HOME/ishakat/catalog.json"
+ttl_h = 24
+refresh = "background"
+offline_ok = true
+hide_deprecated = true
+prefer_free = false
+
+[compact]
+auto = true
+trigger_pct = 80
+keep_last_turns = 4
+summary_tokens = 800
+strategy = "summarize"
+on_error = "drop-oldest"
+
+[favorites]
+list = ["omniroute/auto/coding", "omniroute/auto/fast", "omniroute/auto/cheap"]
+
+[alias]
+smart = "omniroute/auto/coding"
+fast = "omniroute/auto/fast"
+cheap = "omniroute/auto/cheap"
+
+[[provider]]
+id = "omniroute"
+name = "OmniRoute"
+kind = "openai"
+base_url = "http://localhost:20128/v1"
+api_key = "$OMNIROUTE_API_KEY"
+discover = true
+enabled = true
+timeout_s = 180

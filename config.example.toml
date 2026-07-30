@@ -1,0 +1,78 @@
+# Configuración de ejemplo para ishakat v1
+schema = 1
+
+[app]
+default_model = "omniroute/auto/coding"
+compact_model = "omniroute/auto/cheap"
+fallback_model = "omniroute/auto"
+stream = true
+system_prompt = "Eres un asistente de desarrollo conciso."
+timeout_s = 120
+connect_timeout_s = 10
+max_retries = 3
+
+[session]
+save = true
+dir = "$XDG_DATA_HOME/ishakat/sessions"
+autoname = true
+keep_last = 50
+
+[ui]
+theme = "ascua"
+banner = true
+markdown = true
+syntax = true
+reasoning = "collapsed"
+max_width = 100
+
+[ui.animations]
+mode = "auto"
+fps = 12
+battery_saver = "auto"
+
+[keys]
+submit = "enter"
+cancel = "esc"
+
+[catalog]
+ttl_h = 24
+offline_ok = true
+
+[compact]
+auto = true
+trigger_pct = 80
+
+[favorites]
+list = ["omniroute/auto/coding", "omniroute/auto/fast"]
+
+[alias]
+smart = "omniroute/auto/coding"
+fast = "omniroute/auto/fast"
+
+[[provider]]
+id = "omniroute"
+name = "OmniRoute"
+kind = "openai"
+base_url = "http://localhost:20128/v1"
+api_key = "$OMNIROUTE_API_KEY"
+discover = true
+enabled = true
+timeout_s = 180
+
+[[provider]]
+id = "openai"
+name = "OpenAI"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = "$OPENAI_API_KEY"
+discover = true
+enabled = false
+
+[[provider]]
+id = "anthropic"
+name = "Anthropic"
+kind = "anthropic"
+base_url = "https://api.anthropic.com/v1"
+api_key = "$ANTHROPIC_API_KEY"
+discover = true
+enabled = false
