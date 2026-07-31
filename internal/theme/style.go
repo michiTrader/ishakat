@@ -169,6 +169,21 @@ func (s Styles) GradientLines(block string, offset int) string {
 	return strings.Join(lines, "\n")
 }
 
+// DimRender aplica el estilo atenuado (FGDim) a una cadena. Existe como
+// método de conveniencia para que otros paquetes (tui) no tengan que conocer
+// el campo Dim directamente, solo la interfaz mínima que necesitan.
+func (s Styles) DimRender(text string) string { return s.Dim.Render(text) }
+
+// RenderBox dibuja content dentro de la caja de borde redondeado del tema,
+// ajustada al ancho total dado (incluyendo los propios bordes).
+func (s Styles) RenderBox(content string, width int) string {
+	w := width - 2 // descuenta los dos bordes verticales
+	if w < 1 {
+		w = 1
+	}
+	return s.Box.Width(w).Render(content)
+}
+
 func mod(a, n int) int {
 	if n <= 0 {
 		return 0
