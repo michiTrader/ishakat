@@ -1,4 +1,4 @@
-package provider_test
+package openai_test
 
 import (
 	"strings"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/provider/openai"
 )
 
 func TestFromConvoTextoPlano(t *testing.T) {
@@ -14,7 +15,7 @@ func TestFromConvoTextoPlano(t *testing.T) {
 		convo.User("hola"),
 		convo.Assistant("qué tal", "m"),
 	}
-	out, deg := provider.FromConvo(msgs, provider.Caps{})
+	out, deg := openai.FromConvo(msgs, provider.Caps{})
 	if len(out) != 3 {
 		t.Fatalf("esperados 3 mensajes, %d", len(out))
 	}
@@ -38,7 +39,7 @@ func TestFromConvoDegradaImagenesYHerramientas(t *testing.T) {
 		convo.Block{Kind: convo.BlockToolResult, Name: "grep", Text: "3 coincidencias"},
 	)
 
-	out, deg := provider.FromConvo([]convo.Message{m, tool, res}, provider.Caps{})
+	out, deg := openai.FromConvo([]convo.Message{m, tool, res}, provider.Caps{})
 	if deg.ImagesDropped != 1 || deg.ToolsFlattened != 2 {
 		t.Fatalf("degradación mal contada: %+v", deg)
 	}
@@ -60,7 +61,7 @@ func TestFromConvoOmiteRazonamientoYMarcaAbortado(t *testing.T) {
 	)
 	m.Aborted = true
 
-	out, deg := provider.FromConvo([]convo.Message{m}, provider.Caps{})
+	out, deg := openai.FromConvo([]convo.Message{m}, provider.Caps{})
 	if deg.ReasoningDropped != 1 {
 		t.Errorf("el razonamiento debe omitirse: %+v", deg)
 	}
@@ -78,7 +79,7 @@ func TestFromConvoSaltaMensajesVacios(t *testing.T) {
 		convo.NewMessage(convo.RoleAssistant, convo.ReasoningBlock("solo pensé")),
 		convo.User("real"),
 	}
-	out, _ := provider.FromConvo(msgs, provider.Caps{})
+	out, _ := openai.FromConvo(msgs, provider.Caps{})
 	if len(out) != 1 || out[0].Content != "real" {
 		t.Errorf("los mensajes sin contenido enviable se saltan: %+v", out)
 	}
@@ -86,7 +87,7 @@ func TestFromConvoSaltaMensajesVacios(t *testing.T) {
 
 func TestFromConvoResumenSeEnvia(t *testing.T) {
 	m := convo.NewMessage(convo.RoleAssistant, convo.SummaryBlock("hablamos de índices", []int{0, 1}))
-	out, _ := provider.FromConvo([]convo.Message{m}, provider.Caps{})
+	out, _ := openai.FromConvo([]convo.Message{m}, provider.Caps{})
 	if len(out) != 1 || !strings.Contains(out[0].Content, "índices") {
 		t.Fatalf("el resumen debe viajar: %+v", out)
 	}
