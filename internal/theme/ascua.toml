@@ -1,0 +1,33 @@
+name = "ascua"
+dark = true
+
+[gradient]
+space  = "oklab"                          # oklab | oklch | hsl — nunca rgb lineal
+stops  = ["#ff6a3d", "#ffa63d", "#ffe0a3"]
+scroll = true
+
+[colors]
+fg        = "#e8e6e3"
+fg_dim    = "#8a8580"
+accent    = "#ff8a3d"
+user      = "#7fd1b9"
+assistant = "#ffb454"
+border    = "#4a443f"
+success   = "#8ec07c"
+warn      = "#e8b25c"
+error     = "#f2635f"
+code_bg   = "#1c1a18"
+
+[syntax]
+keyword = "#ff8a3d"
+string  = "#8ec07c"
+comment = "#6b655f"
+number  = "#d3869b"
+
+# Overrides opcionales. Bubble Tea v2 hace downsampling automático;
+# esto solo se declara cuando el resultado automático no convence.
+[fallback.256]
+accent = "209"
+
+[fallback.16]
+accent = "yellow"
