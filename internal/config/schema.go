@@ -84,15 +84,15 @@ type Keys struct {
 }
 
 type Catalog struct {
-	Sources           []string `toml:"sources"`
-	ModelsDevURL      string   `toml:"modelsdev_url"`
-	ModelsDevMetaURL  string   `toml:"modelsdev_meta_url"`
-	CacheFile         string   `toml:"cache_file"`
-	TTLHours          int      `toml:"ttl_h"`
-	Refresh           string   `toml:"refresh"`
-	OfflineOK         bool     `toml:"offline_ok"`
-	HideDeprecated    bool     `toml:"hide_deprecated"`
-	PreferFree        bool     `toml:"prefer_free"`
+	Sources          []string `toml:"sources"`
+	ModelsDevURL     string   `toml:"modelsdev_url"`
+	ModelsDevMetaURL string   `toml:"modelsdev_meta_url"`
+	CacheFile        string   `toml:"cache_file"`
+	TTLHours         int      `toml:"ttl_h"`
+	Refresh          string   `toml:"refresh"`
+	OfflineOK        bool     `toml:"offline_ok"`
+	HideDeprecated   bool     `toml:"hide_deprecated"`
+	PreferFree       bool     `toml:"prefer_free"`
 }
 
 type Compact struct {

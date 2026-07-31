@@ -22,10 +22,10 @@ func base(env string, def ...string) string {
 	return filepath.Join(append([]string{home()}, def...)...)
 }
 
-func ConfigDir() string  { return filepath.Join(base("XDG_CONFIG_HOME", ".config"), App) }
-func CacheDir() string   { return filepath.Join(base("XDG_CACHE_HOME", ".cache"), App) }
-func DataDir() string    { return filepath.Join(base("XDG_DATA_HOME", ".local", "share"), App) }
-func StateDir() string   { return filepath.Join(base("XDG_STATE_HOME", ".local", "state"), App) }
+func ConfigDir() string { return filepath.Join(base("XDG_CONFIG_HOME", ".config"), App) }
+func CacheDir() string  { return filepath.Join(base("XDG_CACHE_HOME", ".cache"), App) }
+func DataDir() string   { return filepath.Join(base("XDG_DATA_HOME", ".local", "share"), App) }
+func StateDir() string  { return filepath.Join(base("XDG_STATE_HOME", ".local", "state"), App) }
 
 func ConfigFile() string  { return filepath.Join(ConfigDir(), "config.toml") }
 func ThemesDir() string   { return filepath.Join(ConfigDir(), "themes") }
