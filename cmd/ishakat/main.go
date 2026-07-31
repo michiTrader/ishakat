@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/MichiTrader/ishakat/internal/app"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/netfix"
 	"github.com/MichiTrader/ishakat/internal/xdg"
@@ -33,8 +34,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("ishakat v" + version)
-	fmt.Println("Uso: ishakat [config init|path|check] | [doctor] | [version]")
+	os.Exit(app.Run(version))
 }
 
 func cmdConfig(args []string) int {
