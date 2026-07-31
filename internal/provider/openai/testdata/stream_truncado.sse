@@ -1,0 +1,5 @@
+data: {"id":"chatcmpl-ish2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Voy a explicarlo"}}]}
+
+data: {"id":"chatcmpl-ish2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" en tres pasos"}}]}
+
+data: {"id":"chatcmpl-ish2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":". El prim

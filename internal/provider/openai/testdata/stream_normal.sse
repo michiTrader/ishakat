@@ -1,0 +1,25 @@
+: keep-alive del gateway, no es un evento
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"reasoning_content":"El usuario saluda. "}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"reasoning_content":"Respondo corto."}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"content":"Hola"}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"content":", "}}]}
+
+event: ping
+data: {"t":1}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"content":"ishakat"}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"content":" en línea."}}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-ish1","object":"chat.completion.chunk","model":"claude-sonnet-4-5","choices":[],"usage":{"prompt_tokens":1240,"completion_tokens":68,"total_tokens":1308,"prompt_tokens_details":{"cached_tokens":1024},"completion_tokens_details":{"reasoning_tokens":12}}}
+
+data: [DONE]
+
