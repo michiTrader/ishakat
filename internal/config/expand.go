@@ -52,18 +52,22 @@ func expandString(s string, envUsed map[string]string) (string, string) {
 		var val string
 		var found bool
 
+		// XDG variables expand to the BASE directory, without the "ishakat"
+		// suffix: the §5.2 TOML already writes that suffix itself
+		// ("$XDG_DATA_HOME/ishakat/sessions"). Expanding to xdg.DataDir()
+		// produced ~/.local/share/ishakat/ishakat/sessions.
 		switch varName {
 		case "XDG_CONFIG_HOME":
-			val = xdg.ConfigDir()
+			val = xdg.ConfigHome()
 			found = true
 		case "XDG_CACHE_HOME":
-			val = xdg.CacheDir()
+			val = xdg.CacheHome()
 			found = true
 		case "XDG_DATA_HOME":
-			val = xdg.DataDir()
+			val = xdg.DataHome()
 			found = true
 		case "XDG_STATE_HOME":
-			val = xdg.StateDir()
+			val = xdg.StateHome()
 			found = true
 		default:
 			val, found = os.LookupEnv(varName)
