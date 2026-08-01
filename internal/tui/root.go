@@ -46,7 +46,10 @@ type transcriptEntry struct {
 // maniquí, y se amplían en los pasos siguientes sin tocar la forma general.
 type Root struct {
 	version string
-	cwd     string
+	// cwd arrives already in display form (see xdg.Pretty): the TUI never
+	// touches the filesystem, it only decides how many columns the string is
+	// allowed to use, which is what ShortenPath does at render time.
+	cwd string
 
 	mode Mode
 	lay  Layout
@@ -78,6 +81,10 @@ type Root struct {
 
 	cfgBanner bool
 	fps       int
+
+	// footerItems is ui.footer.items: which footer items to draw and in which
+	// order. Empty means the default order of footerItemOrder.
+	footerItems []string
 
 	help bool
 }
@@ -118,11 +125,14 @@ func NewRoot(o Options) Root {
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
+		r.footerItems = o.Cfg.UI.Footer.Items
 	} else {
 		r.keys = defaultMap
 	}
 	r.lay = NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY)
-	r.footer = FooterState{Model: "auto/coding", CWD: shortCWD(o.CWD)}
+	// CWD is deliberately not stored in the footer state: it depends on the
+	// terminal width, so it is computed on every render by Root.footerState.
+	r.footer = FooterState{Model: "auto/coding"}
 	SetInputWidth(&r.input, r.lay)
 	return r
 }
@@ -132,17 +142,6 @@ func maxWidthOf(cfg *config.Config) int {
 		return 0
 	}
 	return cfg.UI.MaxWidth
-}
-
-func shortCWD(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	parts := strings.Split(strings.TrimRight(cwd, "/"), "/")
-	if len(parts) == 0 {
-		return cwd
-	}
-	return "~/" + parts[len(parts)-1]
 }
 
 // Init satisface tea.Model. No hay nada que arrancar de fondo en el Paso 3:

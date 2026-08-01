@@ -29,7 +29,7 @@ func (m Root) render() string {
 	var b strings.Builder
 
 	if len(m.transcript) == 0 && !m.live.active {
-		if banner := Banner(m.lay, m.styles, m.version, shortCWD(m.cwd), m.footer.Model, m.cfgBanner, m.animOffset); banner != "" {
+		if banner := Banner(m.lay, m.styles, m.version, m.bannerPath(), m.footer.Model, m.cfgBanner, m.animOffset); banner != "" {
 			b.WriteString(banner)
 			b.WriteString("\n\n")
 		}
@@ -47,9 +47,40 @@ func (m Root) render() string {
 
 	b.WriteString(InputBox(m.lay, m.styles, m.lay.InputPrefix(), m.input.Value()))
 	b.WriteString("\n")
-	b.WriteString(RenderFooter(m.lay, m.footer, nil))
+	b.WriteString(RenderFooter(m.lay, m.footerState(), m.footerItems))
 
 	return b.String()
+}
+
+// bannerPath is the working directory as the banner shows it: the whole path,
+// abbreviated only as much as the terminal width forces.
+func (m Root) bannerPath() string {
+	// "ishakat " + version + " · " is everything the line spends before the
+	// path, so that is exactly what the path budget has to give up.
+	spent := len("ishakat ") + len([]rune(m.version)) + len([]rune(" · "))
+	return ShortenPath(m.cwd, m.lay.ContentWidth()-spent)
+}
+
+// footerCWDShare is the fraction of the footer the path is allowed to take.
+// The footer already drops items right to left when it overflows, but a full
+// path would starve the model name — the one item nobody wants to lose —
+// before the dropping logic ever got a chance to run.
+const footerCWDShare = 3
+
+// footerMinCWD is the floor of that share: below six columns the path becomes
+// a single letter plus an ellipsis, which is noise rather than information.
+const footerMinCWD = 6
+
+// footerState fills in the parts of the footer that depend on the current
+// width, leaving everything else as the model holds it.
+func (m Root) footerState() FooterState {
+	st := m.footer
+	budget := m.lay.ContentWidth() / footerCWDShare
+	if budget < footerMinCWD {
+		budget = footerMinCWD
+	}
+	st.CWD = ShortenPath(m.cwd, budget)
+	return st
 }
 
 // cursorFor calcula dónde debe pintarse el cursor real de la terminal: dentro
