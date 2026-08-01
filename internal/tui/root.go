@@ -81,6 +81,17 @@ type Root struct {
 	cfgBanner bool
 	fps       int
 
+	// animMode and cap are ui.animations.mode and the terminal's colour
+	// capability, kept so a resize can re-resolve Layout.AnimationsOff rather
+	// than carry forward whatever it was computed as at 80 columns. "auto"
+	// turns animations off under BPMinimo (§ui.animations.mode's own rule),
+	// and the breakpoint is a function of width — a session that starts wide
+	// and gets narrowed past 40 columns has to lose its spinner without a
+	// restart, not keep whatever NewRoot decided when the window was still
+	// wide.
+	animMode string
+	cap      theme.Capability
+
 	// footerItems is ui.footer.items: which footer items to draw and in which
 	// order. Empty means the default order of footerItemOrder.
 	footerItems []string
@@ -104,20 +115,29 @@ type Options struct {
 	Glyphs theme.GlyphSet
 
 	NoTTY bool
+
+	// Termux says the host is Termux on Android, which is what
+	// battery_saver = "auto" — the documented default — is asking about (§14,
+	// docs/PLAN.md's comment on the key). Like NoTTY and Cap it is resolved by
+	// internal/app and handed over already answered: tui does not read
+	// /proc or the environment itself (§6.1). The zero value is "not a
+	// phone", so a caller that says nothing keeps the desktop frame rate.
+	Termux bool
 }
 
 // NewRoot construye el modelo inicial.
 func NewRoot(o Options) Root {
 	styles := theme.NewStyles(o.Theme, o.Cap, o.Glyphs)
-	fps := AnimFPS
-	if o.Cfg != nil && o.Cfg.UI.Animations.FPS > 0 {
-		fps = o.Cfg.UI.Animations.FPS
-	}
-	batterySaver := o.Cfg != nil && o.Cfg.UI.Animations.BatterySaver == "on"
-	if batterySaver && fps > BatterySaverFPS {
-		fps = BatterySaverFPS
-	}
-	animOff := o.Cfg != nil && o.Cfg.UI.Animations.Mode == "off"
+
+	// The [ui.animations] block is resolved in anim.go, one documented rule
+	// per function. It used to be resolved here, in three lines that between
+	// them honoured fps, half of battery_saver ("on" only, never the
+	// documented default "auto") and none of mode: the boolean computed for
+	// mode ended up in Layout.AnimationsOff, a field nothing in the package
+	// read (see anim.go's package comment).
+	anim := animationsCfg(o.Cfg)
+	fps := FPSFor(anim.FPS, anim.BatterySaver, o.Termux)
+	animOff := AnimationsOffFor(anim.Mode, o.Cap, o.NoTTY, ClassifyBreakpoint(80))
 
 	// The layout comes first: the input prefix depends on the breakpoint, and
 	// the widget has to be built already knowing which prefix it draws. The
@@ -135,6 +155,8 @@ func NewRoot(o Options) Root {
 		input:     NewInput(lay.InputPrefix()),
 		fps:       fps,
 		cfgBanner: o.Cfg == nil || o.Cfg.UI.Banner,
+		animMode:  anim.Mode,
+		cap:       o.Cap,
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
@@ -194,7 +216,8 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// does not take as a parameter — and a repertoire that silently
 		// reverts to Unicode the first time the window changes is worse than
 		// no repertoire at all.
-		m.lay = NewLayout(msg.Width, msg.Height, m.lay.MaxWidth, m.lay.AnimationsOff, m.lay.NoTTY).
+		animOff := AnimationsOffFor(m.animMode, m.cap, m.lay.NoTTY, ClassifyBreakpoint(msg.Width))
+		m.lay = NewLayout(msg.Width, msg.Height, m.lay.MaxWidth, animOff, m.lay.NoTTY).
 			WithGlyphs(m.lay.Glyphs)
 		// Crossing the 40-column breakpoint changes the prefix ("› " to "›"),
 		// and the prefix is part of the widget, so it is re-applied before the
@@ -330,6 +353,14 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	m.live.start(m.footer.Model)
 	m.pendingEcho = []rune(text)
 	m.pendingEchoPos = 0
+	// The stream tick always runs — it is what delivers text. The animation
+	// tick is the spinner's clock, and ui.animations.mode = "off" (or its
+	// "auto" resolution: no TTY, no colour, or under 40 columns, see anim.go)
+	// means exactly "do not run that clock" — not "run it and ignore what it
+	// draws", which is what happened before AnimationsOff had a reader.
+	if m.lay.AnimationsOff {
+		return m, tickStream()
+	}
 	return m, tea.Batch(tickStream(), tickAnim(m.fps))
 }
 
