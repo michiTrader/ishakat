@@ -23,6 +23,20 @@ type echoDoneMsg struct{ text string }
 // ventana de gracia: cancela el estado de "un ctrl+c ya armado" (§7.4).
 type quitConfirmMsg struct{}
 
-// blinkMsg alterna la visibilidad del cursor de texto cuando no hay streaming
-// vivo, para que el input parpadee sin necesitar el reloj de animaciones.
-type blinkMsg struct{}
+// There is deliberately no blink message here.
+//
+// There used to be one, re-armed every 500 ms from Init for the lifetime of the
+// process, and it flipped a boolean that no renderer ever read. Two things were
+// wrong with that. The smaller one is the dead field. The larger one is that
+// §14 asks for zero CPU activity at idle, and a program that wakes up twice a
+// second forever does not have it — on the target platform that is a phone
+// battery paying for a variable nobody looks at.
+//
+// Nothing replaces it because nothing has to: input.go sets
+// SetVirtualCursor(false), so the text cursor is the terminal's own, and every
+// terminal blinks its own cursor without being asked. Drawing a blink ourselves
+// would mean fighting the hardware for it.
+//
+// The rule this file now keeps: a message type may only exist here if a timer
+// that emits it can be shown to stop. streamTickMsg stops when the turn ends,
+// animTickMsg when the mode leaves ModeBusy, quitConfirmMsg after one shot.
