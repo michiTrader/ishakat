@@ -1,0 +1,176 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/MichiTrader/ishakat/internal/theme"
+)
+
+// The reported symptom was a cursor drawn up near the banner instead of inside
+// the input box. The cause is that textarea.Cursor() reports a position
+// relative to the widget, and the view returned it untouched, so row 0 of the
+// widget became row 0 of the whole frame. These tests assert the only thing
+// that actually matters to the user: the terminal cursor sits on the cell where
+// the next character will appear.
+
+func TestCursorSitsOnTheCellAfterTheTypedText(t *testing.T) {
+	for _, width := range []int{80, 60, 44, 32} {
+		t.Run(widthName(width), func(t *testing.T) {
+			var m tea.Model = newVisibleRoot()
+			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			m = typeInto(m, "hola")
+
+			v := m.View()
+			if v.Cursor == nil {
+				t.Fatal("ModeChat must expose a terminal cursor")
+			}
+			lines := strings.Split(v.Content, "\n")
+			y := v.Cursor.Position.Y
+			if y < 0 || y >= len(lines) {
+				t.Fatalf("cursor row %d is outside the %d rendered rows", y, len(lines))
+			}
+			line := lines[y]
+			at := strings.Index(line, "hola")
+			if at < 0 {
+				t.Fatalf("cursor row %d is %q, which is not the input line", y, line)
+			}
+			// The cursor belongs one cell past the last typed rune. The row is
+			// measured in terminal cells, not bytes: styled text carries escape
+			// sequences that occupy no column.
+			want := lipgloss.Width(line[:at]) + lipgloss.Width("hola")
+			if got := v.Cursor.Position.X; got != want {
+				t.Errorf("cursor column = %d, want %d (row %q)", got, want, line)
+			}
+		})
+	}
+}
+
+// TestCursorIsNotAtTheTopOfTheFrame is the regression proper: with the banner
+// on screen the buggy version reported row 0 or 1, which is where the logo is
+// drawn.
+func TestCursorIsNotAtTheTopOfTheFrame(t *testing.T) {
+	var m tea.Model = newVisibleRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m = typeInto(m, "x")
+
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("ModeChat must expose a terminal cursor")
+	}
+	if !strings.Contains(v.Content, "ishakat 0.0.0-test") {
+		t.Fatal("this test needs the banner on screen to be meaningful")
+	}
+	rows := strings.Count(v.Content, "\n") + 1
+	if v.Cursor.Position.Y < rows/2 {
+		t.Errorf("cursor row %d is in the top half of a %d-row frame; it should be down in the input box",
+			v.Cursor.Position.Y, rows)
+	}
+}
+
+// TestCursorFollowsTheTranscriptDown checks the offset is recomputed as the
+// conversation grows instead of being a constant tuned for one screen. The
+// first turn is played out before measuring because committing it also hides
+// the banner, which makes the frame shorter for a reason that has nothing to do
+// with the cursor.
+func TestCursorFollowsTheTranscriptDown(t *testing.T) {
+	var m tea.Model = newVisibleRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m = playTurn(m, "primera pregunta")
+
+	m = typeInto(m, "segunda")
+	before := m.View().Cursor.Position.Y
+	assertCursorOnInputLine(t, m, "segunda")
+
+	m = playTurn(m, "") // commit what is typed, then keep going
+	m = playTurn(m, "tercera pregunta")
+	m = typeInto(m, "cuarta")
+	after := m.View().Cursor.Position.Y
+	assertCursorOnInputLine(t, m, "cuarta")
+
+	if after <= before {
+		t.Errorf("as the transcript grows the cursor row must move down: %d then %d", before, after)
+	}
+}
+
+func assertCursorOnInputLine(t *testing.T, m tea.Model, typed string) {
+	t.Helper()
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("ModeChat must expose a terminal cursor")
+	}
+	lines := strings.Split(v.Content, "\n")
+	y := v.Cursor.Position.Y
+	if y < 0 || y >= len(lines) {
+		t.Fatalf("cursor row %d is outside the %d rendered rows", y, len(lines))
+	}
+	if !strings.Contains(lines[y], typed) {
+		t.Errorf("cursor row %d is %q, which is not the input line holding %q", y, lines[y], typed)
+	}
+}
+
+// playTurn types text (if any), submits it and drains the whole simulated
+// stream, leaving the model back in ModeChat with one more exchange committed.
+func playTurn(m tea.Model, text string) tea.Model {
+	m = typeInto(m, text)
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	for i := 0; i < 5000 && m.(Root).live.active; i++ {
+		m, _ = m.Update(streamTickMsg{})
+	}
+	return m
+}
+
+// TestHeadRowsCountsEveryRowAboveTheInput pins the measurement the offset is
+// built on. head always terminates its blocks with a newline, so the row count
+// is the newline count — if that ever stops being true the cursor drifts by
+// exactly one row and nobody notices until it is on screen.
+func TestHeadRowsCountsEveryRowAboveTheInput(t *testing.T) {
+	cases := []struct {
+		head string
+		want int
+	}{
+		{head: "", want: 0},
+		{head: "one line\n", want: 1},
+		{head: "block\nof three\nlines\n", want: 3},
+		{head: "block\n\n", want: 2},
+	}
+	for _, tc := range cases {
+		if got := headRows(tc.head); got != tc.want {
+			t.Errorf("headRows(%q) = %d, want %d", tc.head, got, tc.want)
+		}
+	}
+}
+
+// newVisibleRoot is newHeadlessRoot's counterpart: it claims to have a TTY so
+// the banner is drawn and the cursor offset has something to be wrong about.
+func newVisibleRoot() Root {
+	return NewRoot(Options{
+		Version: "0.0.0-test",
+		CWD:     "~/projects/ishakat",
+		Theme:   theme.Load(""),
+		Cap:     theme.CapNone,
+	})
+}
+
+func typeInto(m tea.Model, s string) tea.Model {
+	for _, r := range s {
+		m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+	}
+	return m
+}
+
+func widthName(w int) string {
+	switch {
+	case w >= 100:
+		return "wide"
+	case w >= 60:
+		return "normal"
+	case w >= 40:
+		return "narrow"
+	default:
+		return "minimum"
+	}
+}

@@ -26,10 +26,15 @@ func Run(version string) int {
 		return 1
 	}
 
+	// The TUI receives the directory already in display form. Deciding what a
+	// path looks like to a human needs the home directory and the host's
+	// separator, which is filesystem knowledge tui must not have (§6.1); all
+	// the TUI does with it is fit it into the columns it has.
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
 	}
+	cwd = xdg.Pretty(cwd)
 
 	noTTY := !term.IsTerminal(os.Stdout.Fd())
 	cap := theme.Detect(cfg.UI.Color)
