@@ -2,25 +2,33 @@ package tui
 
 import "strings"
 
-// crushFrames es el charset de la animación de "pensando" (§9.3): caracteres
-// cortos que ciclan con el degradado del tema desplazándose por encima. No es
-// bubbles/spinner porque necesitamos que cada carácter reciba un color
-// distinto del degradado, cosa que spinner.Model no ofrece.
-var crushFrames = []rune("▚▞▘▝▚▗▘▚▞")
-
+// crushWidth is how many columns the animation occupies. It is fixed so the
+// text that follows it never shifts sideways between frames.
 const crushWidth = 9
 
-// CrushFrame arma la tira de caracteres de la animación para el fotograma
-// dado por offset.
-func CrushFrame(offset int) string {
-	n := len(crushFrames)
+// CrushFrame builds the strip of characters for the frame at offset, in
+// whichever repertoire lay allows.
+//
+// The strip used to be a hardcoded run of quadrant blocks (U+259A, U+259E,
+// U+2598, U+259D, U+2597) — exactly the family Consolas does not ship, so on
+// the console in the report the "thinking" line was nine boxes crawling across
+// the screen. The Unicode table uses the shading blocks instead: they are in
+// WGL4 and in cp437, and a wave of them reads as motion better than the
+// corners did.
+//
+// It takes the Layout rather than the glyph table because every other renderer
+// in the package takes the Layout, and one function with a different convention
+// is one function whose callers have to think.
+func CrushFrame(lay Layout, offset int) string {
+	frames := lay.glyphs().spinner
+	n := len(frames)
 	if n == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.Grow(crushWidth * 3)
+	b.Grow(crushWidth * 4)
 	for i := 0; i < crushWidth; i++ {
-		b.WriteRune(crushFrames[modCrush(offset+i, n)])
+		b.WriteRune(frames[modCrush(offset+i, n)])
 	}
 	return b.String()
 }

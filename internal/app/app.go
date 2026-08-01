@@ -40,12 +40,21 @@ func Run(version string) int {
 	cap := theme.Detect(cfg.UI.Color)
 	th := theme.Load(cfg.UI.Theme, xdg.ThemesDir())
 
+	// Colour and repertoire are two independent questions about the same
+	// terminal (see theme.GlyphSet), so they are resolved side by side and
+	// both handed over. Resolving one and forgetting the other is not a
+	// hypothetical mistake: the glyph set existed for a whole step without
+	// this line, which meant a cp437 console kept being sent block-drawing
+	// characters no matter what [ui] glyphs said.
+	glyphs := theme.DetectGlyphs(cfg.UI.Glyphs)
+
 	root := tui.NewRoot(tui.Options{
 		Version: version,
 		CWD:     cwd,
 		Cfg:     cfg,
 		Theme:   th,
 		Cap:     cap,
+		Glyphs:  glyphs,
 		NoTTY:   noTTY,
 	})
 
