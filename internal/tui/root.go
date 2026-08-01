@@ -71,7 +71,6 @@ type Root struct {
 	footer FooterState
 
 	animOffset int
-	blinkOn    bool
 
 	// pendingQuit es true entre el primer ctrl+c en ModeBusy/ModeChat y la
 	// ventana de gracia: el segundo ctrl+c dentro de ese margen sí cierra.
@@ -158,16 +157,18 @@ func maxWidthOf(cfg *config.Config) int {
 }
 
 // Init satisface tea.Model. No hay nada que arrancar de fondo en el Paso 3:
-// sin red, sin engine, solo el foco del input y el parpadeo del cursor.
+// sin red, sin engine, solo el foco del input.
+//
+// Nothing here starts a repeating timer, and that is a requirement rather than
+// an accident: §14 asks for zero CPU activity at idle, so an idle ishakat has
+// to be a process asleep in a read on the terminal, with no clock of its own.
+// Every ticker in this file is armed by an event and stops when that event is
+// over (see msgs.go).
 func (m Root) Init() tea.Cmd {
-	return tea.Batch(textareaFocusCmd(&m.input), blinkCmd())
+	return textareaFocusCmd(&m.input)
 }
 
 func textareaFocusCmd(ta *textarea.Model) tea.Cmd { return ta.Focus() }
-
-func blinkCmd() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return blinkMsg{} })
-}
 
 func tickStream() tea.Cmd {
 	return tea.Tick(StreamIntervalMS*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} })
@@ -201,10 +202,6 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		SetInputPrefix(&m.input, m.lay.InputPrefix())
 		SetInputWidth(&m.input, m.lay)
 		return m, nil
-
-	case blinkMsg:
-		m.blinkOn = !m.blinkOn
-		return m, blinkCmd()
 
 	case animTickMsg:
 		if m.mode != ModeBusy {
