@@ -167,8 +167,16 @@ func LoadCatalog(cfg *config.Config) CatalogSnapshot {
 	if snap.Catalog.Len() == 0 {
 		seeded := catalog.SeedCatalog(inputs)
 		if seeded.Len() > 0 {
-			seeded.Notes = append(snap.Catalog.Notes, seeded.Notes...)
+			// Carry over the notes from the empty build, but through
+			// Note() so the duplicates are dropped: both builds walk the
+			// same providers and produce the same "no resolved
+			// credential" line, and printing it twice makes the tool look
+			// like it is stuttering.
+			carried := snap.Catalog.Notes
 			snap.Catalog = seeded
+			for i := len(carried) - 1; i >= 0; i-- {
+				snap.Catalog.Prepend(carried[i])
+			}
 		}
 	}
 	if snap.Catalog.Stale && !snap.Catalog.Seeded {
