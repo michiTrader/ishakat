@@ -310,14 +310,27 @@ func (s Styles) GradientLines(block string, offset int) string {
 // el campo Dim directamente, solo la interfaz mínima que necesitan.
 func (s Styles) DimRender(text string) string { return s.Dim.Render(text) }
 
-// RenderBox dibuja content dentro de la caja de borde redondeado del tema,
-// ajustada al ancho total dado (incluyendo los propios bordes).
+// RenderBox draws content inside the theme's box, occupying exactly width
+// terminal columns in total — the two vertical borders included.
+//
+// The border is *not* subtracted before handing the number to lipgloss, and
+// that is the whole point of this comment: in lipgloss v2 Style.Width is the
+// width of the finished block, frame and all, so Width(n) renders n columns
+// with n-2 of them usable. Subtracting the two borders here as well made the
+// box two columns narrower than the caller asked for, which is only cosmetic
+// on its own — but it also left the content two columns *wider* than the space
+// lipgloss had for it, so lipgloss re-wrapped every line of an already
+// laid-out widget. In the input box that turned each full line of typing into
+// a blank row plus an unindented row, dropped the continuation prompt from all
+// but the last line, and left the terminal cursor pointing at the row the
+// textarea had computed before the re-wrap — the reported "the cursor floats
+// above the line I am typing on".
 func (s Styles) RenderBox(content string, width int) string {
-	w := width - 2 // descuenta los dos bordes verticales
-	if w < 1 {
-		w = 1
+	const minWidth = 3 // two borders plus one usable column
+	if width < minWidth {
+		width = minWidth
 	}
-	return s.Box.Width(w).Render(content)
+	return s.Box.Width(width).Render(content)
 }
 
 func mod(a, n int) int {
