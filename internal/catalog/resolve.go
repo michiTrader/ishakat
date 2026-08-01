@@ -207,7 +207,8 @@ func (c *Catalog) Resolve(text string, opts ResolveOptions) Resolution {
 	// somebody's toml must not hang the program.
 	q := raw
 	via := ""
-	for hop := 0; hop < 4; hop++ {
+	seen := map[string]bool{}
+	for hop := 0; hop < 8; hop++ {
 		// Stage 1, on every hop: an alias that points at a real reference
 		// is resolved here.
 		if m, ok := c.Get(q); ok {
@@ -225,6 +226,17 @@ func (c *Catalog) Resolve(text string, opts ResolveOptions) Resolution {
 		if !ok {
 			break
 		}
+		if seen[strings.ToLower(q)] {
+			// A cycle in the user's alias table. Guessing what they meant
+			// by scoring the last hop —an alias name, not a model— would
+			// pick something arbitrary, so hand it to the picker with the
+			// original query instead.
+			res.Outcome = OutcomePicker
+			res.Query = raw
+			res.Via = via
+			return res
+		}
+		seen[strings.ToLower(q)] = true
 		if via == "" {
 			via = q
 		} else {
