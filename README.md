@@ -22,7 +22,7 @@ no runtime, designed to be usable at 40 columns on a phone.
 | Area | State |
 |------|-------|
 | `ishakat config init/path/check` | ✅ works |
-| `ishakat doctor` | ✅ works (DNS, paths, dialects, Termux detection) |
+| `ishakat doctor` | ✅ works (DNS, paths, dialects, Termux detection, terminal capability + glyph sample) |
 | `ishakat models [--json\|--refresh\|--all] [filter]` | ✅ works (discovery + cache + models.dev + embedded seed) |
 | Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested; not yet wired into `-m` or a picker (steps 8/10) |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
@@ -101,6 +101,35 @@ Either decision can be overridden in `config.toml` when the guess is wrong:
 color  = "truecolor"   # auto | truecolor | 256 | 16 | none
 glyphs = "unicode"     # auto | unicode | ascii
 ```
+
+`ishakat doctor` is what tells you whether you need to. It prints both
+decisions with the reason for each, the environment variables they were read
+from, and then **the characters themselves**, taken from the interface's own
+glyph table:
+
+```
+  cwd          ~/projects/ishakat
+  color        truecolor      WT_SESSION is set (Windows Terminal)
+  glyphs       unicode        WT_SESSION is set (Windows Terminal, UTF-8 and Cascadia Mono)
+  signals      WT_SESSION=…  TERM_PROGRAM=…
+
+  ▀█▀ █▀▀ █ █ ▄▀▄ █ ▄▀ ▄▀▄ ▀█▀
+   █  ▀▀█ █▀█ █▀█ ██   █▀█  █
+  ▄█▄ ▄▄█ █ █ █ █ █ ▀▄ █ █  █
+
+  prompt  ›   marks  ▌ ●   cursor  █
+  footer  • ▪   ·   context  │▓▓▓▓▓▓░░░░
+  rule    ────────   scroll  ↑↓   spinner  ░▒▓█▓▒░▒▓
+```
+
+Read that sample and you know which of three things is happening:
+
+- it draws cleanly → the guess was right, and whatever looks wrong is not a
+  terminal-capability problem;
+- **empty boxes or question marks** → the font lacks these characters, so the
+  repertoire was guessed too generously: set `glyphs = "ascii"`;
+- **garbled pairs** (`â–ˆ`, `catÃ¡logo`) → the console is decoding our UTF-8 as
+  its own code page, which is the same fix: `glyphs = "ascii"`.
 
 ## Termux quickstart
 
@@ -217,6 +246,19 @@ gateway is actually listening (`curl $BASE_URL/models`).
 **`⚠ seed catalog: nothing verified against the provider yet`**
 Expected on a first run with no cache and no reachable provider. Run
 `ishakat models --refresh` once a provider answers.
+
+**The logo is unreadable / everything is blocks and question marks.**
+Run `ishakat doctor` and read the glyph sample it prints (see
+[Which console](#which-console)). Boxes mean the font is missing what we
+chose, garbled pairs mean the console is decoding UTF-8 as its OEM code page;
+either way `glyphs = "ascii"` under `[ui]` is the answer. On Windows, the
+real fix is Windows Terminal.
+
+**There is no colour / the banner is white.**
+Same command: the `color` line names the variable that decided. A console
+that sets no `TERM` and none of `WT_SESSION`, `COLORTERM`, `ConEmuANSI`,
+`TERM_PROGRAM` or `ANSICON` makes no promises about colour, so none is sent.
+`color = "truecolor"` under `[ui]` forces it.
 
 **The interactive UI just repeats what I type.**
 Working as currently designed — that is the step-3 mannequin. Use
