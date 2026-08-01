@@ -278,11 +278,20 @@ func cmdDoctor() int {
 	if len(rep.Servers) > 0 {
 		fmt.Printf("  dns          %s  (%s)\n", strings.Join(rep.Servers, ", "), rep.Source)
 	}
+	cfg, cfgNote := doctorConfig()
+
 	fmt.Println()
 	fmt.Printf("  config path  %s\n", xdg.ConfigFile())
+	fmt.Printf("  config read  %s\n", cfgNote)
 	fmt.Printf("  cache dir    %s\n", xdg.CacheDir())
 	fmt.Printf("  data dir     %s\n", xdg.DataDir())
 	fmt.Printf("  state dir    %s\n", xdg.StateDir())
+	fmt.Println()
+
+	// The terminal section: how the working directory renders, what the
+	// interface decided about colour and characters, and a sample of those
+	// characters so the guess can be checked by eye.
+	reportTerminal(os.Stdout, cfg)
 	fmt.Println()
 
 	// Registered dialects come from app: importing the package is what
