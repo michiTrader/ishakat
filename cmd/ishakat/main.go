@@ -33,7 +33,7 @@ USAGE
 SUBCOMMANDS
   config init|path|check   creates, locates or validates the configuration
   doctor                   network, path and dialect diagnostics
-  models                   model list (Step 6)
+  models [--json] [--refresh] [--all] [filter]   the model catalog
   version                  prints the version
 
 FLAGS
@@ -66,8 +66,7 @@ func main() {
 			fmt.Println("ishakat", version)
 			return
 		case "models":
-			fmt.Fprintln(os.Stderr, "aún no: paso 6")
-			os.Exit(1)
+			os.Exit(cmdModels(os.Args[2:]))
 		case "help":
 			fmt.Print(usage)
 			return
@@ -235,6 +234,34 @@ func cmdConfig(args []string) int {
 		fmt.Fprintf(os.Stderr, "subcomando desconocido: ishakat config %s\n", args[0])
 		return 2
 	}
+}
+
+// cmdModels is the `ishakat models` subcommand of Step 6: a text table or
+// one-JSON-per-line dump of the catalog snapshot, entirely offline unless
+// --refresh is passed.
+func cmdModels(args []string) int {
+	fs := flag.NewFlagSet("models", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	jsonOut := fs.Bool("json", false, "one JSON object per line, for jq")
+	refresh := fs.Bool("refresh", false, "go to the network before printing")
+	all := fs.Bool("all", false, "also show deprecated models hidden by catalog.hide_deprecated")
+	filter := fs.String("filter", "", "keep only refs/names containing this substring")
+	cfgPath := fs.String("config", "", "alternate config.toml path")
+	if err := fs.Parse(args); err != nil {
+		return app.ExitUsage
+	}
+	if rest := fs.Args(); len(rest) > 0 && *filter == "" {
+		*filter = strings.Join(rest, " ")
+	}
+
+	return app.Models(app.ModelsOptions{
+		Version:    version,
+		JSON:       *jsonOut,
+		Refresh:    *refresh,
+		All:        *all,
+		Filter:     *filter,
+		ConfigPath: *cfgPath,
+	})
 }
 
 func cmdDoctor() int {
