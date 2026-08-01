@@ -3,6 +3,8 @@ package engine
 import (
 	"sync"
 	"testing"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
 type errUnitTest string
@@ -36,7 +38,7 @@ func TestStreamBufDrainCoalescesPushesAndResets(t *testing.T) {
 
 func TestStreamBufUsagePersistsAcrossDrains(t *testing.T) {
 	var s StreamBuf
-	u := &Usage{In: 10, Out: 5}
+	u := &convo.Usage{In: 10, Out: 5}
 	s.setUsage(u)
 
 	_, _, got, _, _, _ := s.Drain()

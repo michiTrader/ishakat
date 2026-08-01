@@ -3,6 +3,8 @@ package engine
 import (
 	"strings"
 	"sync"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
 // StreamBuf decouples the arrival rate of tokens from the repaint rate
@@ -16,7 +18,7 @@ type StreamBuf struct {
 	mu        sync.Mutex
 	text      strings.Builder
 	reasoning strings.Builder
-	usage     *Usage
+	usage     *convo.Usage
 	done      bool
 	aborted   bool
 	err       error
@@ -41,7 +43,7 @@ func (s *StreamBuf) pushReasoning(delta string) {
 // setUsage records the running total. Usage can arrive mid-stream
 // (EventUsage) and again, definitively, on EventDone — either call
 // overwrites, since both carry the provider's running total, not a delta.
-func (s *StreamBuf) setUsage(u *Usage) {
+func (s *StreamBuf) setUsage(u *convo.Usage) {
 	s.mu.Lock()
 	s.usage = u
 	s.mu.Unlock()
@@ -64,7 +66,7 @@ func (s *StreamBuf) finish(err error, aborted bool) {
 // the Bubble Tea Update goroutine while push/setUsage/finish run
 // concurrently from the Streamer's goroutine — that's StreamBuf's entire
 // reason to exist.
-func (s *StreamBuf) Drain() (chunk, reasoningChunk string, usage *Usage, done, aborted bool, err error) {
+func (s *StreamBuf) Drain() (chunk, reasoningChunk string, usage *convo.Usage, done, aborted bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	chunk = s.text.String()

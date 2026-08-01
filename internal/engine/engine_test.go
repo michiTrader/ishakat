@@ -5,12 +5,14 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
 // drainUntilDone polls Drain in a tight loop with a timeout, the way the TUI
 // would via repeated streamTickMsg but without needing Bubble Tea's runtime
 // in these tests.
-func drainUntilDone(t *testing.T, buf *StreamBuf, budget time.Duration) (text, reasoning string, usage *Usage, aborted bool, err error) {
+func drainUntilDone(t *testing.T, buf *StreamBuf, budget time.Duration) (text, reasoning string, usage *convo.Usage, aborted bool, err error) {
 	t.Helper()
 	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
@@ -44,7 +46,7 @@ func TestEngineDeliversDeltaReasoningAndUsage(t *testing.T) {
 			Event{Kind: EventReasoning, Text: "thinking... "},
 			Event{Kind: EventDelta, Text: "hel"},
 			Event{Kind: EventDelta, Text: "lo"},
-			Event{Kind: EventUsage, Usage: &Usage{In: 10, Out: 2}},
+			Event{Kind: EventUsage, Usage: &convo.Usage{In: 10, Out: 2}},
 			Event{Kind: EventDone},
 		), nil
 	}
@@ -65,6 +67,33 @@ func TestEngineDeliversDeltaReasoningAndUsage(t *testing.T) {
 	}
 	if aborted || err != nil {
 		t.Errorf("aborted=%v err=%v, want false/nil", aborted, err)
+	}
+}
+
+func TestEngineForwardsTheRequestUnchanged(t *testing.T) {
+	want := Request{
+		Model:    "anthropic/claude-sonnet-4-5",
+		System:   "be terse",
+		Messages: []convo.Message{convo.User("hi")},
+	}
+
+	var got Request
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		got = req
+		return chanOf(Event{Kind: EventDone}), nil
+	}
+
+	e := New(stream, 0)
+	var buf StreamBuf
+	e.Start(context.Background(), want, &buf)
+	drainUntilDone(t, &buf, time.Second)
+
+	if got.Model != want.Model || got.System != want.System {
+		t.Errorf("Streamer received Model=%q System=%q, want Model=%q System=%q",
+			got.Model, got.System, want.Model, want.System)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Text() != "hi" {
+		t.Errorf("Streamer received Messages=%v, want a single 'hi' user message", got.Messages)
 	}
 }
 
