@@ -2,10 +2,13 @@ package theme
 
 import (
 	"image/color"
+	"io"
 	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 )
 
 // Capability es lo que el terminal puede pintar.
@@ -31,47 +34,155 @@ func (c Capability) String() string {
 	}
 }
 
-// Detect resuelve la capacidad de color leyendo el entorno, con override por
-// [ui] color de la configuración ("auto" | "never" | "always" | "16" | "256" |
-// "truecolor").
+// Detect resolves the colour capability from the environment, with an override
+// from [ui] color ("auto" | "never" | "always" | "16" | "256" | "truecolor").
 //
-// Bubble Tea v2 hace el downsampling solo, así que esto se usa para decidir si
-// hay color y para reportarlo en `ishakat doctor`, no para elegir paletas a mano.
+// The detection itself is delegated to charmbracelet/colorprofile, the same
+// library Bubble Tea uses to decide what it may write to the terminal. That is
+// the whole point: when this function and the renderer disagree, the result is
+// the bug reported on Windows — the hand-rolled version below returned "no
+// colour" whenever TERM was empty, which is the normal state of a PowerShell or
+// cmd.exe console (they do not set TERM at all), so every style was built flat
+// and the banner came out white while Termux showed the gradient. colorprofile
+// knows to ask the Windows console API instead, and it also handles NO_COLOR,
+// CLICOLOR, CLICOLOR_FORCE, WT_SESSION, tmux/screen and terminfo, none of which
+// we want to re-implement or keep in sync by hand.
 func Detect(override string) Capability {
+	return DetectEnv(override, os.Environ())
+}
+
+// DetectEnv is Detect against an explicit environment. It exists so the rules
+// can be tested without mutating the process' own environment, and so callers
+// that already carry an environment around (tests, `doctor`) do not have to
+// smuggle it through os.Setenv.
+func DetectEnv(override string, env []string) Capability {
+	if cap, ok := overrideCapability(override); ok {
+		return cap
+	}
+	if v, ok := lookupEnv(env, "NO_COLOR"); ok && v != "" && v != "0" {
+		// no-color.org is a contract between terminal programs; honouring it
+		// explicitly also keeps it winning over the console hints below.
+		return CapNone
+	}
+	cap := capabilityOf(colorprofile.Env(env))
+	if hint := consoleHint(env); hint > cap {
+		cap = hint
+	}
+	return cap
+}
+
+// consoleHint is the capability a Windows console advertises through the
+// environment. It only speaks up when TERM is absent, which is the signature of
+// a console host: every Unix terminal sets TERM, so if it is missing we are
+// either on Windows or talking to something that made no promises at all.
+//
+// colorprofile already asks the Windows console API when it runs on Windows, and
+// that is the primary path; this is the belt to its braces. It costs four
+// lookups, it is the same list every terminal library carries, and it means the
+// answer no longer depends on which OS the binary happens to be built for —
+// which is what makes the behaviour testable at all.
+func consoleHint(env []string) Capability {
+	if term, ok := lookupEnv(env, "TERM"); ok && term != "" {
+		return CapNone
+	}
+	if v, _ := lookupEnv(env, "WT_SESSION"); v != "" {
+		return CapTruecolor // Windows Terminal
+	}
+	if v, _ := lookupEnv(env, "ConEmuANSI"); strings.EqualFold(v, "on") {
+		return CapTruecolor
+	}
+	switch strings.ToLower(first(env, "TERM_PROGRAM")) {
+	case "vscode", "windows_terminal", "hyper":
+		return CapTruecolor
+	}
+	if v, _ := lookupEnv(env, "ANSICON"); v != "" {
+		return Cap256
+	}
+	return CapNone
+}
+
+// lookupEnv reads a KEY=VALUE slice the way os.LookupEnv reads the process
+// environment. The last assignment wins, matching what the OS does when a
+// variable is exported twice.
+func lookupEnv(env []string, key string) (string, bool) {
+	value, found := "", false
+	for _, kv := range env {
+		name, v, ok := strings.Cut(kv, "=")
+		if ok && name == key {
+			value, found = v, true
+		}
+	}
+	return value, found
+}
+
+func first(env []string, key string) string {
+	v, _ := lookupEnv(env, key)
+	return v
+}
+
+// DetectWriter is Detect plus the one question the environment cannot answer:
+// whether out is a terminal at all. A pipe or a redirected file gets no colour
+// even if TERM promises 24 bits, because the escape sequences would end up in
+// the file. An explicit override still wins — `color = "always"` is how you ask
+// for colour through a pager.
+func DetectWriter(override string, out io.Writer) Capability {
+	if cap, ok := overrideCapability(override); ok {
+		return cap
+	}
+	if !isTerminalWriter(out) {
+		return CapNone
+	}
+	env := os.Environ()
+	if v, ok := lookupEnv(env, "NO_COLOR"); ok && v != "" && v != "0" {
+		return CapNone
+	}
+	cap := capabilityOf(colorprofile.Detect(out, env))
+	if hint := consoleHint(env); hint > cap {
+		cap = hint
+	}
+	return cap
+}
+
+// isTerminalWriter answers whether out is a real terminal. It is deliberately
+// duck-typed on Fd() instead of taking an *os.File: tests hand this an
+// in-memory writer, and that must come out as "not a terminal" rather than a
+// type assertion panic.
+func isTerminalWriter(out io.Writer) bool {
+	f, ok := out.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(f.Fd())
+}
+
+// overrideCapability reads [ui] color. The second result is false for "auto"
+// and for anything unrecognised, meaning "no override, go and detect".
+func overrideCapability(override string) (Capability, bool) {
 	switch strings.ToLower(strings.TrimSpace(override)) {
 	case "never", "none", "off", "0":
-		return CapNone
-	case "16":
-		return Cap16
-	case "256":
-		return Cap256
+		return CapNone, true
+	case "16", "ansi":
+		return Cap16, true
+	case "256", "ansi256":
+		return Cap256, true
 	case "always", "truecolor", "24bit":
-		return CapTruecolor
+		return CapTruecolor, true
 	}
+	return CapNone, false
+}
 
-	// NO_COLOR gana sobre cualquier detección: es un contrato entre programas
-	// de terminal y respetarlo cuesta una línea. Una variable definida pero
-	// vacía (como la deja t.Setenv al "limpiarla") no cuenta como activada.
-	if v := os.Getenv("NO_COLOR"); v != "" && v != "0" {
-		return CapNone
-	}
-
-	term := os.Getenv("TERM")
-	if term == "" || term == "dumb" {
-		return CapNone
-	}
-	switch strings.ToLower(os.Getenv("COLORTERM")) {
-	case "truecolor", "24bit":
+// capabilityOf maps a colorprofile profile onto our own three levels. NoTTY,
+// ASCII and Unknown all collapse into CapNone: from the theme's point of view
+// "there is no colour" is one state, and NewStyles turns it into styles that
+// emit no escape sequences at all.
+func capabilityOf(p colorprofile.Profile) Capability {
+	switch p {
+	case colorprofile.TrueColor:
 		return CapTruecolor
-	}
-	if strings.Contains(term, "256") {
+	case colorprofile.ANSI256:
 		return Cap256
+	case colorprofile.ANSI:
+		return Cap16
+	default:
+		return CapNone
 	}
-	if strings.Contains(term, "kitty") || strings.Contains(term, "alacritty") ||
-		strings.Contains(term, "wezterm") || strings.Contains(term, "ghostty") {
-		return CapTruecolor
-	}
-	return Cap16
 }
 
 // Styles son los estilos de lipgloss derivados del tema. Se construyen una vez

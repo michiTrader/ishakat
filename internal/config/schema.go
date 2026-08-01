@@ -42,16 +42,16 @@ type Session struct {
 }
 
 type UI struct {
-	Theme      string     `toml:"theme"`
-	Banner     bool       `toml:"banner"`
-	Markdown   bool       `toml:"markdown"`
-	Syntax     bool       `toml:"syntax"`
-	Reasoning  string     `toml:"reasoning"`
-	Timestamps bool       `toml:"timestamps"`
-	Mouse      bool       `toml:"mouse"`
-	Layout     string     `toml:"layout"`
-	MaxWidth   int        `toml:"max_width"`
-	Color      string     `toml:"color"`
+	Theme      string `toml:"theme"`
+	Banner     bool   `toml:"banner"`
+	Markdown   bool   `toml:"markdown"`
+	Syntax     bool   `toml:"syntax"`
+	Reasoning  string `toml:"reasoning"`
+	Timestamps bool   `toml:"timestamps"`
+	Mouse      bool   `toml:"mouse"`
+	Layout     string `toml:"layout"`
+	MaxWidth   int    `toml:"max_width"`
+	Color      string `toml:"color"`
 
 	// Glyphs decides which characters the interface is allowed to draw:
 	// "auto" | "unicode" | "ascii". It is a separate axis from Color because a
