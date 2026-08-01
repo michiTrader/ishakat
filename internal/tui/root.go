@@ -308,7 +308,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case m.keys.ClearScreen:
 		m.transcript = nil
 		m.printedUpTo = 0
-		return true, m, func() tea.Msg { return tea.ClearScreen() }
+		return true, m, clearScreenCmd
 	}
 	return false, m, nil
 }
@@ -366,6 +366,32 @@ func (m Root) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 // lo que escribiste como si fuera la respuesta (§ Paso 3 del PLAN). Aquí es
 // donde el Paso 8 conectará el engine real sin tocar el resto del Update.
 func (m Root) submit(text string) (tea.Model, tea.Cmd) {
+	// head() only draws the startup banner while transcript is empty and no
+	// turn is live (see its own comment), and this call is the one frame
+	// where that stops being true for the rest of the session: the moment the
+	// first transcriptEntry lands, the banner's rows disappear from head()'s
+	// output and the live-managed region gets shorter by however tall the
+	// banner was.
+	//
+	// A shrinking frame relies on the inline renderer's own diff to erase the
+	// rows that fall outside the new, shorter one, and that diff leans on hard
+	// -scroll/scroll-region optimisations that charm.land/bubbletea disables
+	// only on GOOS=windows ("disable scroll optimization on Windows due to
+	// bugs in some terminals", cursed_renderer.go) — every other OS, Android
+	// included, keeps them on. A real session on Termux reported exactly that
+	// bug: the wordmark stayed on screen underneath the first reply. The same
+	// binary, same config, driven from PowerShell — or from Termux over SSH
+	// with a Windows terminal doing the actual drawing — cleared it correctly,
+	// which is the tell that this is the terminal emulator misdrawing the
+	// shrink, not a mistake in what this package asked it to draw.
+	//
+	// clearScreenCmd sidesteps the diff for this one frame: a full clear does
+	// not need the old frame's rows to disappear correctly, because there
+	// are no old rows left for the optimisation to get wrong. Firing it on
+	// every submit would repaint (and flicker) on every single message for no
+	// reason, so it is gated on the one transition that actually loses rows.
+	clearBanner := len(m.transcript) == 0 && m.lay.ShowBanner(m.cfgBanner)
+
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "user", name: "tú", text: text, ts: time.Now(),
 	})
@@ -384,11 +410,21 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// "auto" resolution: no TTY, no colour, or under 40 columns, see anim.go)
 	// means exactly "do not run that clock" — not "run it and ignore what it
 	// draws", which is what happened before AnimationsOff had a reader.
-	if m.lay.AnimationsOff {
-		return m, tickStream()
+	cmds := []tea.Cmd{tickStream()}
+	if !m.lay.AnimationsOff {
+		cmds = append(cmds, tickAnim(m.fps))
 	}
-	return m, tea.Batch(tickStream(), tickAnim(m.fps))
+	if clearBanner {
+		cmds = append(cmds, clearScreenCmd)
+	}
+	return m, tea.Batch(cmds...)
 }
+
+// clearScreenCmd is tea.ClearScreen wrapped as a tea.Cmd, the same shape
+// handleGlobalKey already uses for ctrl+l. It is its own function rather than
+// a literal repeated at both call sites so a grep for tea.ClearScreen finds
+// every reason this package asks for one.
+func clearScreenCmd() tea.Msg { return tea.ClearScreen() }
 
 // echoChunkSize es cuántos caracteres del eco se liberan por cada drenado del
 // StreamBuf (§7.3): imita la cadencia de un streaming real sin necesitar red.
