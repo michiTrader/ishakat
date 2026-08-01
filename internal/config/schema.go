@@ -52,6 +52,14 @@ type UI struct {
 	Layout     string     `toml:"layout"`
 	MaxWidth   int        `toml:"max_width"`
 	Color      string     `toml:"color"`
+
+	// Glyphs decides which characters the interface is allowed to draw:
+	// "auto" | "unicode" | "ascii". It is a separate axis from Color because a
+	// terminal can paint 16 million colours and still show a box instead of
+	// "▀" — which is exactly what a stock PowerShell console does, and why the
+	// start-up logo was reported as unreadable.
+	Glyphs string `toml:"glyphs"`
+
 	Animations Animations `toml:"animations"`
 	Footer     Footer     `toml:"footer"`
 }

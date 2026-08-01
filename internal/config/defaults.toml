@@ -30,6 +30,7 @@ mouse = false
 layout = "auto"
 max_width = 100
 color = "auto"
+glyphs = "auto"
 
 [ui.animations]
 mode = "auto"
