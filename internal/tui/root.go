@@ -340,7 +340,7 @@ func (m Root) driveEcho() (tea.Model, tea.Cmd) {
 // (liveTurn.aborted); en el Paso 3 esto solo se refleja en el texto, porque
 // convo.Message.Aborted se conecta recién en el Paso 8.
 func (m Root) finishTurn() (tea.Model, tea.Cmd) {
-	text := m.live.text.String()
+	text := m.live.body()
 	if m.live.aborted {
 		text += " [cancelado]"
 	}
