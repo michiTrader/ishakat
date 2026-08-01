@@ -384,6 +384,21 @@ func (c *Catalog) Note(msg string) {
 	c.Notes = append(c.Notes, msg)
 }
 
+// Prepend is Note, but at the front. It exists for the one caller that has
+// to graft the notes of a discarded build onto a replacement catalog and
+// wants them to keep reading in their original order.
+func (c *Catalog) Prepend(msg string) {
+	if msg == "" {
+		return
+	}
+	for _, n := range c.Notes {
+		if n == msg {
+			return
+		}
+	}
+	c.Notes = append([]string{msg}, c.Notes...)
+}
+
 func (c *Catalog) ensureIndex() {
 	if c.index != nil && len(c.index) == len(c.Models) {
 		return
