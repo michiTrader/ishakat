@@ -192,6 +192,11 @@ type Styles struct {
 	Theme Theme
 	Cap   Capability
 
+	// Glyphs is which characters these styles may draw. It lives next to Cap
+	// because both answer the same kind of question about the terminal, and
+	// because the box border is the one style whose *shape* depends on it.
+	Glyphs GlyphSet
+
 	FG        lipgloss.Style
 	Dim       lipgloss.Style
 	Accent    lipgloss.Style
@@ -207,7 +212,11 @@ type Styles struct {
 
 // NewStyles construye los estilos. Con CapNone todos quedan sin color, así el
 // resto del código no tiene que preguntar nunca si hay color o no.
-func NewStyles(t Theme, cap Capability) Styles {
+//
+// The glyph set is a parameter for the same reason: the border characters of
+// the input box depend on it, so no caller has to ask twice whether it may
+// draw "╭".
+func NewStyles(t Theme, cap Capability, glyphs GlyphSet) Styles {
 	plain := cap == CapNone
 	fg := func(c RGB) lipgloss.Style {
 		if plain {
@@ -219,6 +228,7 @@ func NewStyles(t Theme, cap Capability) Styles {
 	s := Styles{
 		Theme:     t,
 		Cap:       cap,
+		Glyphs:    glyphs,
 		FG:        fg(t.FG),
 		Dim:       fg(t.FGDim),
 		Accent:    fg(t.Accent),
@@ -231,9 +241,24 @@ func NewStyles(t Theme, cap Capability) Styles {
 		Code:      fg(t.FG),
 	}
 	s.Box = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(boxBorder(glyphs)).
 		BorderForeground(borderColor(t, plain))
 	return s
+}
+
+// boxBorder picks the border characters for the input box.
+//
+// Note what is *not* here: lipgloss.RoundedBorder. Its corners are U+256D..
+// U+2570, which are not in WGL4 and which Consolas does not ship — so the one
+// box the user stares at while typing was framed in four characters a stock
+// PowerShell cannot draw. NormalBorder is the same shape in ┌─┐│└┘, all of
+// which are WGL4 and all of which are also in cp437, so they survive even a
+// mis-guessed code page. ASCIIBorder is +-| for the rest.
+func boxBorder(glyphs GlyphSet) lipgloss.Border {
+	if glyphs.ASCII() {
+		return lipgloss.ASCIIBorder()
+	}
+	return lipgloss.NormalBorder()
 }
 
 func borderColor(t Theme, plain bool) color.Color {

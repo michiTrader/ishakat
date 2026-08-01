@@ -1,6 +1,7 @@
 package theme_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/MichiTrader/ishakat/internal/theme"
@@ -111,6 +112,34 @@ func TestDetectGlyphsOverride(t *testing.T) {
 	}
 	if got := theme.DetectGlyphsEnv("moño", "linux", []string{"TERM=xterm"}); got != theme.GlyphsUnicode {
 		t.Errorf("un override desconocido debe caer en la detección, obtuve %v", got)
+	}
+}
+
+// The input box is the one frame the user looks at for the whole session, so
+// its corners are the last place to spend characters the font may not have.
+// lipgloss.RoundedBorder's corners are U+256D..U+2570 — not in WGL4, absent
+// from Consolas — which is why this asserts they are never drawn.
+func TestBoxBorderStaysInsideTheRepertoire(t *testing.T) {
+	th := theme.Load("ascua")
+
+	unicodeBox := stripANSI(theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode).RenderBox("hola", 20))
+	for _, forbidden := range []string{"╭", "╮", "╰", "╯"} {
+		if strings.Contains(unicodeBox, forbidden) {
+			t.Errorf("la caja dibuja %q, que no está en WGL4:\n%s", forbidden, unicodeBox)
+		}
+	}
+	if !strings.Contains(unicodeBox, "┌") || !strings.Contains(unicodeBox, "─") {
+		t.Errorf("la caja Unicode debería usar el borde recto de cp437:\n%s", unicodeBox)
+	}
+
+	asciiBox := stripANSI(theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsASCII).RenderBox("hola", 20))
+	for _, r := range asciiBox {
+		if r > 127 {
+			t.Fatalf("la caja ASCII contiene %q (U+%04X):\n%s", r, r, asciiBox)
+		}
+	}
+	if !strings.Contains(asciiBox, "+") || !strings.Contains(asciiBox, "|") {
+		t.Errorf("la caja ASCII debería usar +-|:\n%s", asciiBox)
 	}
 }
 
