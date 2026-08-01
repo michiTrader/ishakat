@@ -73,13 +73,14 @@ func (m Root) head() string {
 		}
 	}
 
+	width := m.lay.ContentWidth()
 	for _, e := range m.transcript {
-		b.WriteString(renderTranscriptLine(g, e.role, e.name, e.text, e.ts))
+		b.WriteString(renderTranscriptLine(g, width, e.role, e.name, e.text, e.ts))
 		b.WriteString("\n\n")
 	}
 
 	if m.live.active {
-		b.WriteString(renderLiveTurn(g, m.live, CrushFrame(m.lay, m.animOffset), " esc cancela\n"))
+		b.WriteString(renderLiveTurn(g, width, m.live, CrushFrame(m.lay, m.animOffset), " esc cancela\n"))
 		b.WriteString("\n")
 	}
 

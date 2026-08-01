@@ -57,25 +57,34 @@ func (t liveTurn) elapsed() time.Duration {
 }
 
 // renderTranscriptLine arma una burbuja de conversación como en §9.3: marcador
-// de rol, nombre y hora, seguido del texto tal cual (el markdown/wrap llega en
-// una fase posterior, fuera del alcance del Paso 3).
-func renderTranscriptLine(g glyphs, role, name, text string, ts time.Time) string {
+// de rol, nombre y hora, seguido del texto.
+//
+// width is the number of columns the text may use, and passing it is not
+// optional. This used to write text verbatim ("el markdown/wrap llega en una
+// fase posterior, fuera del alcance del Paso 3") on the theory that wrapping
+// was a cosmetic step for later — but Bubble Tea's inline renderer clips an
+// overlong row instead of wrapping it, so without this a message longer than
+// the terminal showed only its first row, with the rest gone from the screen
+// (not the model — from the screen, which reads as a truncated answer rather
+// than an error). Markdown is still deferred; making every character the
+// user sent and the model answered actually visible is not a later step.
+func renderTranscriptLine(g glyphs, width int, role, name, text string, ts time.Time) string {
 	marker := g.userMark
 	if role == "assistant" {
 		marker = g.assistantMark
 	}
 	header := fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04"))
-	return header + "\n" + text
+	return wrapText(header, width) + "\n" + wrapText(text, width)
 }
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
 // (§9.3) y, si está en curso, la línea de animación con tiempo/tokens.
-func renderLiveTurn(g glyphs, t liveTurn, crush string, plainCancelHint string) string {
+func renderLiveTurn(g glyphs, width int, t liveTurn, crush string, plainCancelHint string) string {
 	if !t.active {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(renderTranscriptLine(g, "assistant", t.model, t.body()+g.streamCursor, t.startedAt))
+	b.WriteString(renderTranscriptLine(g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokens))
 	b.WriteString(plainCancelHint)
