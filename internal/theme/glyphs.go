@@ -54,11 +54,8 @@ func DetectGlyphs(override string) GlyphSet {
 // which is precisely the platform the test suite does not run on, and a rule
 // that can only be exercised by shipping it is not a rule.
 func DetectGlyphsEnv(override, goos string, env []string) GlyphSet {
-	switch strings.ToLower(strings.TrimSpace(override)) {
-	case "ascii", "plain", "off":
-		return GlyphsASCII
-	case "unicode", "utf8", "utf-8", "on":
-		return GlyphsUnicode
+	if set, ok := overrideGlyphs(override); ok {
+		return set
 	}
 
 	// A dumb terminal gets nothing decorative by definition.
@@ -77,6 +74,21 @@ func DetectGlyphsEnv(override, goos string, env []string) GlyphSet {
 		return GlyphsASCII
 	}
 	return GlyphsUnicode
+}
+
+// overrideGlyphs reads [ui] glyphs. The second result is false for "auto" and
+// for anything unrecognised, meaning "no override, go and detect". It is a
+// separate function rather than a switch inside the detection so that `doctor`
+// can ask whether the user pinned this axis without re-parsing the string and
+// drifting from the accepted spellings.
+func overrideGlyphs(override string) (GlyphSet, bool) {
+	switch strings.ToLower(strings.TrimSpace(override)) {
+	case "ascii", "plain", "off":
+		return GlyphsASCII, true
+	case "unicode", "utf8", "utf-8", "on":
+		return GlyphsUnicode, true
+	}
+	return GlyphsUnicode, false
 }
 
 // windowsGlyphs decides for a Windows host. The default is ASCII, and that is
