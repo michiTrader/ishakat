@@ -22,13 +22,11 @@ import (
 // file is the part of the manual check that a test can do, at all three
 // widths, through every screen the package draws.
 //
-// "The package itself lays out" excludes one thing on purpose: chat.go's
-// renderTranscriptLine writes the message text verbatim, with its own comment
-// saying so — "el markdown/wrap llega en una fase posterior, fuera del
-// alcance del Paso 3". Prose wrapping is a real gap, but it is Step 3's
-// documented gap, not a chrome regression, so the messages used below are
-// short enough that the untested part of the frame — the part every other
-// row here does test — never has to hide it.
+// Prose wrapping (chat.go's renderTranscriptLine/renderLiveTurn) is exercised
+// on its own in prose_internal_test.go, with messages built specifically to
+// force a wrap; the messages here stay short so this file keeps measuring
+// what it is named for — the chrome around the transcript — without the two
+// concerns tripping over each other in the same assertion.
 func TestNoOverflowAtCriticalWidths(t *testing.T) {
 	for _, width := range []int{40, 60, 120} {
 		t.Run(fmt.Sprintf("%dcols", width), func(t *testing.T) {
