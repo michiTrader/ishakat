@@ -3,6 +3,8 @@
 // internal/arch_test.go con `go list -deps`.
 package tui
 
+import "github.com/MichiTrader/ishakat/internal/theme"
+
 // Breakpoint es el ancho de terminal categorizado según §9.1 del plan. Se
 // recalcula en cada tea.WindowSizeMsg y de él cuelgan todas las decisiones de
 // layout: nada de leer m.lay.Width directamente desde los componentes.
@@ -57,7 +59,28 @@ type Layout struct {
 	// NoTTY indica que la salida no es una terminal real (pipe, redirección).
 	// Sin TTY no hay cursor visible ni sentido en animar nada.
 	NoTTY bool
+
+	// Glyphs is which characters the components may draw ([ui] glyphs). It sits
+	// in Layout for the same reason the breakpoint does: it is a property of the
+	// terminal that every component has to respect, and Layout is the only thing
+	// components are allowed to consult. The zero value is theme.GlyphsUnicode,
+	// which keeps every existing caller drawing what it drew before.
+	Glyphs theme.GlyphSet
 }
+
+// WithGlyphs returns a copy of the layout restricted to the given glyph set.
+//
+// It is a method rather than a sixth parameter of NewLayout because a call with
+// three trailing booleans and an enum stops telling the reader anything, and
+// because the glyph set has to survive a resize: Update rebuilds the layout
+// from the new size and then re-applies this.
+func (l Layout) WithGlyphs(g theme.GlyphSet) Layout {
+	l.Glyphs = g
+	return l
+}
+
+// ASCII reports whether this layout is restricted to ASCII decorations.
+func (l Layout) ASCII() bool { return l.Glyphs.ASCII() }
 
 // NewLayout construye un Layout a partir del tamaño reportado por
 // tea.WindowSizeMsg y las opciones fijas de la sesión.
@@ -107,13 +130,18 @@ func (l Layout) ShowBorders() bool { return l.Breakpoint != BPMinimo }
 // BPMinimo el input es una sola línea con "> " de prefijo.
 func (l Layout) ShowBoxedInput() bool { return l.Breakpoint != BPMinimo }
 
-// InputPrefix es el prefijo de la línea de entrada: "> " normalmente, o
+// InputPrefix es el prefijo de la línea de entrada: "› " normalmente, o
 // solo un prefijo de un carácter (bajo 40).
+//
+// With GlyphsASCII the guillemet becomes ">", which is the same width and needs
+// no font: the prompt is the one glyph the user stares at while typing, so it is
+// the last place to gamble on a code page.
 func (l Layout) InputPrefix() string {
+	mark := l.glyphs().inputPrefix
 	if l.Breakpoint == BPMinimo {
-		return "›"
+		return mark
 	}
-	return "› "
+	return mark + " "
 }
 
 // FooterSections indica cuántas secciones debe mostrar el footer: una sola
