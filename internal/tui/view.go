@@ -66,11 +66,9 @@ func (m Root) head() string {
 	g := m.lay.glyphs()
 	var b strings.Builder
 
-	if len(m.transcript) == 0 && !m.live.active {
-		if banner := Banner(m.lay, m.styles, m.version, m.bannerPath(), m.footer.Model, m.cfgBanner, m.animOffset); banner != "" {
-			b.WriteString(banner)
-			b.WriteString("\n\n")
-		}
+	if banner := m.bannerText(); banner != "" {
+		b.WriteString(banner)
+		b.WriteString("\n\n")
 	}
 
 	// Only entries not yet handed to commitEntryCmd are redrawn here.
@@ -98,6 +96,18 @@ func (m Root) head() string {
 // terminal width instead of wrapping it, so a long line still costs one row
 // and no wrap arithmetic is needed here.
 func headRows(head string) int { return strings.Count(head, "\n") }
+
+// bannerText is the startup banner's rendered form, or "" once it should no
+// longer be part of the live-managed region — the same condition head() used
+// to check inline before submit (see its own comment) also needed this exact
+// string, to hand to tea.Println instead of to head() on the one frame the
+// condition flips from true to false.
+func (m Root) bannerText() string {
+	if len(m.transcript) != 0 || m.live.active {
+		return ""
+	}
+	return Banner(m.lay, m.styles, m.version, m.bannerPath(), m.footer.Model, m.cfgBanner, m.animOffset)
+}
 
 // bannerPath is the working directory as the banner shows it: the whole path,
 // abbreviated only as much as the terminal width forces.
