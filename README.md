@@ -264,6 +264,18 @@ that sets no `TERM` and none of `WT_SESSION`, `COLORTERM`, `ConEmuANSI`,
 Working as currently designed — that is the step-3 mannequin. Use
 `ishakat -p` until step 8 lands.
 
+**On Termux, swiping up to scroll back snaps straight back to the input box.**
+Termux's own terminal view auto-follows the cursor whenever the program
+writes new output — while a reply streams, that is happening dozens of times
+a second, so a manual scroll gets overridden almost immediately. This is not
+specific to ishakat (the same report exists against other terminal-UI tools
+run on Termux); there is no escape sequence a program can send to hold the
+viewport or to learn that the user has scrolled. Termux 0.119.0+ ships a
+**SCROLL** toggle for exactly this — add it to the extra-keys row (Termux
+settings → Extra keys), tap it before scrolling back to freeze the viewport,
+tap it again to resume auto-follow. Update Termux if you do not have the
+button yet.
+
 ## Layout
 
 ```

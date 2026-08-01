@@ -367,30 +367,38 @@ func (m Root) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 // donde el Paso 8 conectará el engine real sin tocar el resto del Update.
 func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// head() only draws the startup banner while transcript is empty and no
-	// turn is live (see its own comment), and this call is the one frame
+	// turn is live (see bannerText's comment), and this call is the one frame
 	// where that stops being true for the rest of the session: the moment the
 	// first transcriptEntry lands, the banner's rows disappear from head()'s
 	// output and the live-managed region gets shorter by however tall the
 	// banner was.
 	//
-	// A shrinking frame relies on the inline renderer's own diff to erase the
-	// rows that fall outside the new, shorter one, and that diff leans on hard
-	// -scroll/scroll-region optimisations that charm.land/bubbletea disables
-	// only on GOOS=windows ("disable scroll optimization on Windows due to
-	// bugs in some terminals", cursed_renderer.go) — every other OS, Android
-	// included, keeps them on. A real session on Termux reported exactly that
-	// bug: the wordmark stayed on screen underneath the first reply. The same
-	// binary, same config, driven from PowerShell — or from Termux over SSH
-	// with a Windows terminal doing the actual drawing — cleared it correctly,
-	// which is the tell that this is the terminal emulator misdrawing the
-	// shrink, not a mistake in what this package asked it to draw.
+	// A first attempt at this fix sent tea.ClearScreen on this transition,
+	// reasoning that a shrinking frame relies on the inline renderer's own
+	// diff to erase the rows that fall outside the new, shorter one. That
+	// reasoning was half right and the fix did not hold: read against
+	// charm.land/bubbletea's own source, ClearScreen does not emit a literal
+	// "erase display" escape in inline mode either — it only sets a "redraw
+	// everything" flag that the *same* diff-and-move-cursor machinery then
+	// paints through (cursed_renderer.go's clearScreen, ultraviolet's
+	// TerminalRenderer.Erase). A second Termux session, and then a PowerShell
+	// one, both still showed the wordmark surviving under the first reply
+	// after that fix had already shipped — so the bug was never "the diff
+	// runs unprotected on a shrink", it is that the diff itself is not
+	// trustworthy for a shrink on some emulators, and no flag that still
+	// routes through it closes that gap.
 	//
-	// clearScreenCmd sidesteps the diff for this one frame: a full clear does
-	// not need the old frame's rows to disappear correctly, because there
-	// are no old rows left for the optimisation to get wrong. Firing it on
-	// every submit would repaint (and flicker) on every single message for no
-	// reason, so it is gated on the one transition that actually loses rows.
-	clearBanner := len(m.transcript) == 0 && m.lay.ShowBanner(m.cfgBanner)
+	// bannerText, below, sidesteps the diff instead of asking it to behave:
+	// tea.Println/insertAbove is the same mechanism evictOverflow already
+	// uses to retire finished transcript entries into real scrollback (see
+	// commitEntryCmd's comment), and that path has drawn correctly on every
+	// host this project has been run on so far — because it scrolls the
+	// terminal with literal newlines and a bare CSI L (insert line), not with
+	// the cursor-repositioning-and-selective-erase sequences the diff's shrink
+	// path depends on. Printing the banner through the exact same door means
+	// the live region never shrinks out from under a banner at all: from the
+	// very next frame it was never there to erase.
+	bannerText := m.bannerText()
 
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "user", name: "tú", text: text, ts: time.Now(),
@@ -414,16 +422,20 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
-	if clearBanner {
-		cmds = append(cmds, clearScreenCmd)
+	if bannerText != "" {
+		// The trailing "\n" is the same blank separator line head() used to
+		// leave between the banner and whatever came after it (see the "\n\n"
+		// after Banner()'s call in head()); tea.Println already supplies the
+		// one line break that ends bannerText's own last line.
+		cmds = append(cmds, tea.Println(bannerText+"\n"))
 	}
 	return m, tea.Batch(cmds...)
 }
 
-// clearScreenCmd is tea.ClearScreen wrapped as a tea.Cmd, the same shape
-// handleGlobalKey already uses for ctrl+l. It is its own function rather than
-// a literal repeated at both call sites so a grep for tea.ClearScreen finds
-// every reason this package asks for one.
+// clearScreenCmd is tea.ClearScreen wrapped as a tea.Cmd, the shape
+// handleGlobalKey's /clear (ctrl+l) needs: unlike the banner-retirement case
+// above, a user-requested clear has no "print it to scrollback first" option
+// — the whole point of ctrl+l is discarding the transcript, not archiving it.
 func clearScreenCmd() tea.Msg { return tea.ClearScreen() }
 
 // echoChunkSize es cuántos caracteres del eco se liberan por cada drenado del
