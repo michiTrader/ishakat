@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
@@ -152,5 +154,36 @@ func TestGlyphSetString(t *testing.T) {
 	}
 	if !theme.GlyphsASCII.ASCII() || theme.GlyphsUnicode.ASCII() {
 		t.Error("ASCII() no distingue los dos sets")
+	}
+}
+
+// TestRenderBoxIsExactlyAsWideAsAsked pins the contract the caller depends on:
+// the number handed to RenderBox is the number of terminal columns the finished
+// box occupies, borders included — because that is the number the caller
+// budgeted for it, and because a box narrower than its content makes lipgloss
+// re-wrap whatever was put inside it.
+//
+// The reported bug was the same subtraction applied twice: lipgloss v2's
+// Style.Width already counts the frame, so RenderBox's own "width - 2" made
+// every box two columns narrow. Two columns is invisible on the border and
+// fatal to the content — see internal/tui's TestTypingPastTheEdge... for what it
+// did to the input box.
+func TestRenderBoxIsExactlyAsWideAsAsked(t *testing.T) {
+	st := theme.NewStyles(theme.Load("ascua"), theme.CapTruecolor, theme.GlyphsUnicode)
+	for _, width := range []int{20, 40, 60, 120} {
+		// A line that exactly fills the inside of the box: it must come out
+		// on one row, untouched. One column more and lipgloss would have to
+		// wrap it, which is the failure this guards.
+		content := strings.Repeat("z", width-2)
+		box := stripANSI(st.RenderBox(content, width))
+		for i, line := range strings.Split(box, "\n") {
+			if got := lipgloss.Width(line); got != width {
+				t.Errorf("RenderBox(_, %d): row %d is %d columns wide:\n%s", width, i, got, box)
+			}
+		}
+		if rows := strings.Count(box, "\n") + 1; rows != 3 {
+			t.Errorf("RenderBox(_, %d) re-wrapped a line that fitted: %d rows instead of 3:\n%s",
+				width, rows, box)
+		}
 	}
 }
