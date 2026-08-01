@@ -3,13 +3,16 @@
 A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
 no runtime, designed to be usable at 40 columns on a phone.
 
-> **Status: Phase 2 (prototype), step 6 of 13 closed.**
+> **Status: Phase 2 (prototype), step 7 of 13 closed.**
 > The headless pipeline (`ishakat -p "…"`) and the model catalog
-> (`ishakat models`) are real and wired end to end. The interactive TUI is
-> still the step-3 mannequin: it draws the final layout but it echoes your
-> input instead of calling a model, because the engine is not connected to
-> it until step 8. See [What works today](#what-works-today) before filing a
-> bug — most of the "it looks raw" is scheduled, not broken.
+> (`ishakat models`) are real and wired end to end, and the catalog now
+> resolves fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5 —
+> that resolver isn't wired into headless `-m` or a picker yet, both are
+> later steps. The interactive TUI is still the step-3 mannequin: it draws
+> the final layout but it echoes your input instead of calling a model,
+> because the engine is not connected to it until step 8. See
+> [What works today](#what-works-today) before filing a bug — most of the
+> "it looks raw" is scheduled, not broken.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
@@ -21,6 +24,7 @@ no runtime, designed to be usable at 40 columns on a phone.
 | `ishakat config init/path/check` | ✅ works |
 | `ishakat doctor` | ✅ works (DNS, paths, dialects, Termux detection) |
 | `ishakat models [--json\|--refresh\|--all] [filter]` | ✅ works (discovery + cache + models.dev + embedded seed) |
+| Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested; not yet wired into `-m` or a picker (steps 8/10) |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
 | `ishakat` (interactive TUI) | ⚠️ **mannequin** — real layout, echoes your text, no network |
 | `/model`, model picker, hot swap, `/compact`, `--resume` | ❌ steps 8–13, not written yet |
