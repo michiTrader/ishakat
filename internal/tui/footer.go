@@ -32,7 +32,8 @@ func RenderFooter(lay Layout, st FooterState, items []string) string {
 	if len(items) == 0 {
 		items = footerItemOrder
 	}
-	parts := renderItems(st, items)
+	g := lay.glyphs()
+	parts := renderItems(g, st, items)
 
 	line := strings.Join(parts, "  ")
 	line = " " + line
@@ -41,7 +42,7 @@ func RenderFooter(lay Layout, st FooterState, items []string) string {
 	// Recorta de derecha a izquierda: se van soltando ítems del final de la
 	// lista mientras la línea no entre en el ancho disponible.
 	for i := len(items); i > 0 && lipglossWidth(line) > w; i-- {
-		parts = renderItems(st, items[:i-1])
+		parts = renderItems(g, st, items[:i-1])
 		line = " " + strings.Join(parts, "  ")
 	}
 	if lipglossWidth(line) > w && w > 1 {
@@ -53,23 +54,23 @@ func RenderFooter(lay Layout, st FooterState, items []string) string {
 	return line
 }
 
-func renderItems(st FooterState, items []string) []string {
+func renderItems(g glyphs, st FooterState, items []string) []string {
 	var parts []string
 	for _, it := range items {
 		switch it {
 		case "model":
 			if st.Model != "" {
-				parts = append(parts, "◍ "+st.Model)
+				parts = append(parts, g.modelMark+" "+st.Model)
 			}
 		case "context":
-			parts = append(parts, contextBar(st.ContextPct))
+			parts = append(parts, contextBar(g, st.ContextPct))
 		case "tokens":
 			parts = append(parts, formatTokens(st.Tokens))
 		case "cost":
 			parts = append(parts, fmt.Sprintf("$%.2f", st.CostUSD))
 		case "git":
 			if st.GitBranch != "" {
-				parts = append(parts, "⎇"+st.GitBranch)
+				parts = append(parts, g.gitMark+st.GitBranch)
 			}
 		case "cwd":
 			if st.CWD != "" {
@@ -80,8 +81,14 @@ func renderItems(st FooterState, items []string) []string {
 	return parts
 }
 
-// contextBar dibuja la barra de contexto restante estilo "▍▓░ 18%".
-func contextBar(pct float64) string {
+// contextBar draws the remaining-context meter, "│▓░ 18%" in the Unicode
+// repertoire and "|#. 18%" in ASCII.
+//
+// The percentage is spelled out next to the bar on purpose: two slots of shading
+// can only ever show three states, so the bar is the glance and the number is
+// the answer. That is also why the bar losing its shading to ASCII costs
+// nothing readable.
+func contextBar(g glyphs, pct float64) string {
 	if pct < 0 {
 		pct = 0
 	}
@@ -90,8 +97,8 @@ func contextBar(pct float64) string {
 	}
 	const slots = 2
 	filled := int(pct*slots + 0.5)
-	bar := strings.Repeat("▓", filled) + strings.Repeat("░", slots-filled)
-	return fmt.Sprintf("▍%s %d%%", bar, int(pct*100))
+	bar := strings.Repeat(g.barFull, filled) + strings.Repeat(g.barEmpty, slots-filled)
+	return fmt.Sprintf("%s%s %d%%", g.barLead, bar, int(pct*100))
 }
 
 func formatTokens(n int) string {
