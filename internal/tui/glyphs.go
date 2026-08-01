@@ -1,0 +1,104 @@
+package tui
+
+import "github.com/MichiTrader/ishakat/internal/theme"
+
+// glyphs is every decorative character the interface draws, in one table per
+// repertoire. Having them in a table rather than as literals sprinkled through
+// six files is the actual fix for the "logo shows as boxes" report: a literal
+// in the middle of a render function is a decision nobody can review, whereas
+// this list can be read top to bottom and checked against a font.
+//
+// The unicode column is restricted to WGL4 (see theme.GlyphsUnicode). Anything
+// that used to reach outside it is noted below with what it was, because the
+// temptation to put "◆" back is real and the reason it left should not have to
+// be rediscovered.
+type glyphs struct {
+	// inputPrefix is the prompt at the left of the entry box. U+203A is in
+	// WGL4's punctuation block, so it stays.
+	inputPrefix string
+
+	// userMark and assistantMark head each transcript bubble. The assistant
+	// used to be "◆" (U+25C6), which is not in WGL4; "●" (U+25CF) is, and
+	// reads as clearly against "▌".
+	userMark      string
+	assistantMark string
+
+	// streamCursor is the block trailing the text being generated. It used to
+	// be "▊" (U+258A, an eighth block — not in WGL4); the full block is.
+	streamCursor string
+
+	// modelMark and gitMark label those two footer items. They used to be "◍"
+	// (U+25CD) and "⎇" (U+2387), neither of which is in WGL4 and the second of
+	// which is missing from most fonts on any platform.
+	modelMark string
+	gitMark   string
+
+	// barLead, barFull and barEmpty draw the context meter. The lead used to be
+	// "▍" (U+258D, another eighth block).
+	barLead  string
+	barFull  string
+	barEmpty string
+
+	// rule is the horizontal line of the help screen, drawn repeated.
+	rule string
+
+	// dot is the separator between fields on one line. U+00B7 is Latin-1, which
+	// every font has — but on a console decoding our UTF-8 as cp437 it arrives
+	// as two wrong characters, which is why ASCII gets its own.
+	dot string
+
+	// scrollHint names the keys that scroll, spelled out when the arrows
+	// themselves cannot be drawn.
+	scrollHint string
+
+	// spinner is the strip of the "thinking" animation, one rune per column.
+	// It used to be built from quadrant blocks (▚ ▞ ▘ ▝ ▗) — the exact family
+	// Consolas is missing. The shading blocks are in WGL4 and in cp437, and a
+	// wave of them reads better as motion anyway.
+	spinner []rune
+}
+
+var unicodeGlyphs = glyphs{
+	inputPrefix:   "›",
+	userMark:      "▌",
+	assistantMark: "●",
+	streamCursor:  "█",
+	modelMark:     "•",
+	gitMark:       "▪",
+	barLead:       "│",
+	barFull:       "▓",
+	barEmpty:      "░",
+	rule:          "─",
+	dot:           "·",
+	scrollHint:    "↑↓",
+	spinner:       []rune("░▒▓█▓▒░▒▓"),
+}
+
+var asciiGlyphs = glyphs{
+	inputPrefix:   ">",
+	userMark:      "|",
+	assistantMark: "*",
+	streamCursor:  "_",
+	modelMark:     "*",
+	gitMark:       "#",
+	barLead:       "|",
+	barFull:       "#",
+	barEmpty:      ".",
+	rule:          "-",
+	dot:           "-",
+	scrollHint:    "up/down",
+	spinner:       []rune(".:-=+=-:."),
+}
+
+// glyphsFor returns the table for a set. Every field of both tables is filled
+// in, so no caller has to handle an empty string.
+func glyphsFor(set theme.GlyphSet) glyphs {
+	if set.ASCII() {
+		return asciiGlyphs
+	}
+	return unicodeGlyphs
+}
+
+// glyphs is the accessor the components use: they already consult Layout for
+// every other rendering decision, so they consult it for this one too.
+func (l Layout) glyphs() glyphs { return glyphsFor(l.Glyphs) }

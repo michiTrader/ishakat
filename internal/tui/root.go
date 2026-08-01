@@ -98,12 +98,18 @@ type Options struct {
 	Cfg     *config.Config
 	Theme   theme.Theme
 	Cap     theme.Capability
-	NoTTY   bool
+
+	// Glyphs is which characters this terminal may be given ([ui] glyphs,
+	// resolved by theme.DetectGlyphs). The zero value is GlyphsUnicode, so a
+	// caller that says nothing keeps the preferred look.
+	Glyphs theme.GlyphSet
+
+	NoTTY bool
 }
 
 // NewRoot construye el modelo inicial.
 func NewRoot(o Options) Root {
-	styles := theme.NewStyles(o.Theme, o.Cap)
+	styles := theme.NewStyles(o.Theme, o.Cap, o.Glyphs)
 	fps := AnimFPS
 	if o.Cfg != nil && o.Cfg.UI.Animations.FPS > 0 {
 		fps = o.Cfg.UI.Animations.FPS

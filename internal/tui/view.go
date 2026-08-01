@@ -76,8 +76,11 @@ func headRows(head string) int { return strings.Count(head, "\n") }
 // abbreviated only as much as the terminal width forces.
 func (m Root) bannerPath() string {
 	// "ishakat " + version + " · " is everything the line spends before the
-	// path, so that is exactly what the path budget has to give up.
-	spent := len("ishakat ") + len([]rune(m.version)) + len([]rune(" · "))
+	// path, so that is exactly what the path budget has to give up. The
+	// separator is measured rather than assumed: it is a glyph now, so its
+	// width is a property of the terminal, and len() would have counted the
+	// two bytes of "·" as two columns.
+	spent := lipglossWidth("ishakat  "+m.lay.glyphs().dot+" ") + lipglossWidth(m.version)
 	return ShortenPath(m.cwd, m.lay.ContentWidth()-spent)
 }
 

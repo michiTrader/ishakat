@@ -234,7 +234,7 @@ func TestDetect(t *testing.T) {
 
 func TestStylesSinColorNoEmiteEscapes(t *testing.T) {
 	th := theme.Load("ascua")
-	s := theme.NewStyles(th, theme.CapNone)
+	s := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
 	out := s.Accent.Render("hola") + s.Gradient("mundo", 0)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("con CapNone no debe haber secuencias ANSI: %q", out)
@@ -246,7 +246,7 @@ func TestStylesSinColorNoEmiteEscapes(t *testing.T) {
 
 func TestGradientPreservaTexto(t *testing.T) {
 	th := theme.Load("ascua")
-	s := theme.NewStyles(th, theme.CapTruecolor)
+	s := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 	out := s.Gradient("ishakat", 0)
 	plain := stripANSI(out)
 	if plain != "ishakat" {
