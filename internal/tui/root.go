@@ -121,8 +121,11 @@ func NewRoot(o Options) Root {
 	animOff := o.Cfg != nil && o.Cfg.UI.Animations.Mode == "off"
 
 	// The layout comes first: the input prefix depends on the breakpoint, and
-	// the widget has to be built already knowing which prefix it draws.
-	lay := NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY)
+	// the widget has to be built already knowing which prefix it draws. The
+	// glyph set has to be applied here too, not just handed to the styles:
+	// Layout is what every component asks about characters, so a layout built
+	// without it leaves the whole repertoire mechanism drawing Unicode.
+	lay := NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY).WithGlyphs(o.Glyphs)
 
 	r := Root{
 		version:   o.Version,
@@ -185,7 +188,13 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Capa 1: mensajes globales, aplican en cualquier modo.
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.lay = NewLayout(msg.Width, msg.Height, m.lay.MaxWidth, m.lay.AnimationsOff, m.lay.NoTTY)
+		// The glyph set is carried over explicitly. NewLayout knows only about
+		// the terminal's size, so rebuilding on a resize resets everything it
+		// does not take as a parameter — and a repertoire that silently
+		// reverts to Unicode the first time the window changes is worse than
+		// no repertoire at all.
+		m.lay = NewLayout(msg.Width, msg.Height, m.lay.MaxWidth, m.lay.AnimationsOff, m.lay.NoTTY).
+			WithGlyphs(m.lay.Glyphs)
 		// Crossing the 40-column breakpoint changes the prefix ("› " to "›"),
 		// and the prefix is part of the widget, so it is re-applied before the
 		// width: SetInputWidth reserves whatever the prompt currently costs.
