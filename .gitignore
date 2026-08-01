@@ -1,3 +1,10 @@
 dist/
 *.log
 .toolchain/
+
+# Build output. A compiled binary in the repository is not just clutter: what
+# was committed here was a Linux ELF named "ishakat", with no extension, so a
+# Windows user who cloned the project found a file the loader does not recognise
+# as a program and PowerShell opened it in an editor. Binaries come from
+# `make build`, per host.
+bin/

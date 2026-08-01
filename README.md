@@ -52,6 +52,56 @@ make build            # -> bin/ishakat
 
 Other targets: `make test`, `make race`, `make check`, `make fmt`.
 
+## Windows
+
+The binary **must** be called `ishakat.exe`. On Windows a file without that
+extension is not a program as far as the loader is concerned, so PowerShell
+falls back to its file associations and opens it in an editor — which is
+exactly what happens if you copy the output of a Linux build across, or run
+`go build -o ishakat`. Nothing is wrong with the program in that case; the
+name is.
+
+```powershell
+git clone https://github.com/michiTrader/ishakat.git
+cd ishakat
+go build -trimpath -ldflags "-s -w" -o bin\ishakat.exe .\cmd\ishakat
+.\bin\ishakat.exe doctor
+```
+
+`make build` inside Git Bash, MSYS2 or a native `cmd`/PowerShell with GNU
+Make installed adds the `.exe` itself. To cross-compile from Linux or macOS:
+
+```sh
+make windows          # -> bin/ishakat-windows-amd64.exe
+make windows-arm64    # -> bin/ishakat-windows-arm64.exe
+```
+
+`go run ./cmd/ishakat` works on Windows regardless, because the temporary
+binary the toolchain builds is named correctly for you.
+
+### Which console
+
+Both problems people hit on Windows are properties of the console, not of the
+program, and `ishakat doctor` prints what was detected:
+
+- **Windows Terminal** (the default on Windows 11, and installable from the
+  Store on 10) renders 24-bit colour and the block characters the logo and
+  the context bar are drawn with. This is the recommended host.
+- **`powershell.exe` / `cmd.exe` opened from the Start menu** run in
+  `conhost.exe`, whose output code page is the system's OEM one (cp437,
+  cp850, …), not UTF-8. There the program deliberately drops to an
+  ASCII-only look: a plain wordmark, `>` as the prompt, `#`/`.` in the
+  context bar. That is not a downgrade in error — sending UTF-8 to that
+  console produces `catÃ¡logo`, not a missing glyph.
+
+Either decision can be overridden in `config.toml` when the guess is wrong:
+
+```toml
+[ui]
+color  = "truecolor"   # auto | truecolor | 256 | 16 | none
+glyphs = "unicode"     # auto | unicode | ascii
+```
+
 ## Termux quickstart
 
 This is the target platform, so it gets the full recipe.
