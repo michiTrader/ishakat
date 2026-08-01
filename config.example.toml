@@ -24,6 +24,12 @@ markdown = true
 syntax = true
 reasoning = "collapsed"
 max_width = 100
+# color: auto | truecolor | 256 | 16 | off
+color = "auto"
+# glyphs: auto | unicode | ascii — "ascii" draws the logo, borders, footer and
+# spinner with plain ASCII, for consoles whose font shows boxes instead of
+# block-drawing characters (a stock Windows PowerShell, for one).
+glyphs = "auto"
 
 [ui.animations]
 mode = "auto"
