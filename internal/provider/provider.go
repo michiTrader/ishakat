@@ -290,6 +290,18 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
+// Retry es el engranaje estructural del Paso 8: internal/engine define una
+// interfaz retryHint con esta misma firma y la detecta vía errors.As, sin
+// importar nunca este paquete (que trae net/http, prohibido en la frontera
+// de internal/tui). El método se llama Retry, no Retryable/RetryAfter,
+// porque un método no puede compartir nombre con un campo del mismo tipo.
+func (e *Error) Retry() (wait time.Duration, retryable bool) {
+	if e == nil {
+		return 0, false
+	}
+	return e.RetryAfter, e.Retryable
+}
+
 // Temporary conserva la convención de net.Error para que el engine pueda
 // tratar de la misma forma un 503 y un socket caído.
 func (e *Error) Temporary() bool { return e != nil && e.Retryable }
