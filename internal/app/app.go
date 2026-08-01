@@ -56,6 +56,11 @@ func Run(version string) int {
 		Cap:     cap,
 		Glyphs:  glyphs,
 		NoTTY:   noTTY,
+		// battery_saver = "auto" (the default) means "6fps on Termux", not "6fps
+		// literally everywhere": without this, every desktop session with no
+		// override would have read the same false that a phone should, and the
+		// key would have had no effect for the one host it names.
+		Termux: xdg.IsTermux(),
 	})
 
 	p := tea.NewProgram(root)

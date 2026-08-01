@@ -151,7 +151,14 @@ func newVisibleRoot() Root {
 		Version: "0.0.0-test",
 		CWD:     "~/projects/ishakat",
 		Theme:   theme.Load(""),
-		Cap:     theme.CapNone,
+		// CapTruecolor, not CapNone: this builder claims a fully capable
+		// terminal on purpose, because AnimationsOffFor now treats CapNone as
+		// "this terminal asked for NO_COLOR/TERM=dumb, turn animations off
+		// too" (anim.go, following ui.animations.mode's own "auto" rule). A
+		// helper named "visible" is precisely the one that should not trip
+		// that rule by accident — TestBusyDoesArmItsTickers below depends on
+		// the animation ticker actually arming.
+		Cap: theme.CapTruecolor,
 	})
 }
 
