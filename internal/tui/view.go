@@ -73,8 +73,13 @@ func (m Root) head() string {
 		}
 	}
 
+	// Only entries not yet handed to commitEntryCmd are redrawn here.
+	// Printed ones already live in the terminal's real scrollback (§7.5);
+	// keeping them here too would be drawing the same line twice and, past a
+	// certain history length, is exactly what grew the live region past the
+	// terminal's height (see commitEntryCmd's comment).
 	width := m.lay.ContentWidth()
-	for _, e := range m.transcript {
+	for _, e := range m.transcript[m.printedUpTo:] {
 		b.WriteString(renderTranscriptLine(g, width, e.role, e.name, e.text, e.ts))
 		b.WriteString("\n\n")
 	}

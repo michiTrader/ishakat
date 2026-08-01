@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // liveTurn es el turno en curso: vive en el modelo mientras genera y se
@@ -89,4 +91,28 @@ func renderLiveTurn(g glyphs, width int, t liveTurn, crush string, plainCancelHi
 	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokens))
 	b.WriteString(plainCancelHint)
 	return b.String()
+}
+
+// commitEntryCmd hands a finished transcript entry to the real terminal via
+// tea.Println (§7.5) instead of leaving it for the live region to keep
+// redrawing forever. tea.Println's own output is, per its doc comment,
+// "unmanaged by the program and will persist across renders" — exactly the
+// permanent-scrollback behaviour a finished message needs once nothing about
+// it can change again.
+//
+// This exists because redrawing the *entire* history inline, every frame, is
+// what let the live-managed region grow taller than the terminal. Bubble
+// Tea's inline renderer tracks "how many rows did I draw last frame" to move
+// the cursor back up before repainting; once that number exceeds the
+// terminal's own height the terminal has already scrolled some of those rows
+// out from under it, so the bookkeeping and the real cursor position part
+// ways and drift a row further apart on every subsequent frame. That is the
+// "el cursor se pasa del todo abajo" report: once enough turns accumulated to
+// fill the screen, the input box kept sliding down and off it.
+//
+// The trailing "\n" is not tea.Println's own line break (it supplies that):
+// it is the blank separator line the old inline loop in head() used to leave
+// between bubbles, kept here so scrollback looks the same as it always did.
+func commitEntryCmd(g glyphs, width int, e transcriptEntry) tea.Cmd {
+	return tea.Println(renderTranscriptLine(g, width, e.role, e.name, e.text, e.ts) + "\n")
 }

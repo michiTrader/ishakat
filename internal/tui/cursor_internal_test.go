@@ -96,6 +96,37 @@ func TestCursorFollowsTheTranscriptDown(t *testing.T) {
 	}
 }
 
+// TestManyShortTurnsKeepTheFrameWithinTheTerminalHeight is the reported bug,
+// reproduced directly: a long-running chat of short messages ("h", "s", "d"…)
+// eventually fills a normal-sized terminal, and the input box's cursor was
+// seen sliding further down — and eventually off the visible box — with every
+// turn once that happened. It never showed up in TestCursorFollowsTheTranscriptDown
+// above because that test's terminal (40 rows) never actually fills up over
+// its three exchanges; this one uses a realistic 24-row terminal and enough
+// turns to guarantee the live region would have outgrown it under the old
+// "redraw the whole history every frame" design.
+func TestManyShortTurnsKeepTheFrameWithinTheTerminalHeight(t *testing.T) {
+	const height = 24
+	var m tea.Model = newVisibleRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
+
+	for i, letter := range "hsdghjkqwertyuiopzxcvbnm" { // 24 one-character turns
+		m = playTurn(m, string(letter))
+
+		v := m.View()
+		rows := strings.Count(v.Content, "\n") + 1
+		if rows > height {
+			t.Fatalf("turn %d: frame is %d rows tall in a %d-row terminal — the live region outgrew the screen", i, rows, height)
+		}
+		if v.Cursor == nil {
+			t.Fatalf("turn %d: ModeChat must expose a terminal cursor", i)
+		}
+		if v.Cursor.Position.Y < 0 || v.Cursor.Position.Y >= height {
+			t.Fatalf("turn %d: cursor row %d is outside the %d-row terminal (this is exactly the reported drift)", i, v.Cursor.Position.Y, height)
+		}
+	}
+}
+
 func assertCursorOnInputLine(t *testing.T, m tea.Model, typed string) {
 	t.Helper()
 	v := m.View()

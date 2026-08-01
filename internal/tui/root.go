@@ -68,6 +68,13 @@ type Root struct {
 
 	transcript []transcriptEntry
 
+	// printedUpTo is how many of transcript's leading entries have already
+	// been handed to commitEntryCmd (tea.Println) and therefore live in the
+	// terminal's real scrollback. head() only redraws transcript[printedUpTo:]
+	// — see evictOverflow, which is what advances this once the live region
+	// grows taller than the terminal.
+	printedUpTo int
+
 	footer FooterState
 
 	animOffset int
@@ -204,10 +211,23 @@ func tickAnim(fps int) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return animTickMsg{t: t} })
 }
 
-// Update satisface tea.Model. El despacho va en dos capas, en este orden
+// Update satisface tea.Model. Every path through it — every case below, not
+// just the ones that fall through to submit/finishTurn — has to pass through
+// evictOverflow before returning, because the live turn's own text can push
+// the frame past the terminal's height on a plain streamTickMsg with no new
+// transcript entry involved at all. Doing that check in one wrapper instead
+// of at every return statement in updateDispatch is what keeps it from being
+// forgotten the next time a case grows a new early return.
+func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.updateDispatch(msg)
+	root, evictCmd := next.(Root).evictOverflow()
+	return root, tea.Batch(cmd, evictCmd)
+}
+
+// updateDispatch is Update's actual logic, in two layers in this order
 // (§7.1): mensajes/teclas globales, y solo al final el switch de modo.
 // Invertir el orden hace que esc deje de cancelar con un overlay abierto.
-func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Capa 1: mensajes globales, aplican en cualquier modo.
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -287,6 +307,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 
 	case m.keys.ClearScreen:
 		m.transcript = nil
+		m.printedUpTo = 0
 		return true, m, func() tea.Msg { return tea.ClearScreen() }
 	}
 	return false, m, nil
@@ -348,6 +369,11 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "user", name: "tú", text: text, ts: time.Now(),
 	})
+	// The new entry is not printed to real scrollback here: evictOverflow
+	// (run once after every Update, see the wrapper above) is the only place
+	// that decides an entry is old enough to leave the live region, and it
+	// always keeps the most recent exchange redrawn inline regardless of
+	// height — see its comment for why.
 	m.input.Reset()
 	m.mode = ModeBusy
 	m.live.start(m.footer.Model)
@@ -413,4 +439,47 @@ func (m Root) cancelTurn() (tea.Model, tea.Cmd) {
 	m.live.aborted = true
 	m.pendingEcho = m.pendingEcho[:m.pendingEchoPos] // no sigue "generando"
 	return m, nil
+}
+
+// keepInline is how many of the transcript's most recent entries evictOverflow
+// never touches, even while the live region is over height. Two is "the last
+// full exchange": one user entry plus the assistant entry that answered it.
+// Below that there is nothing left that is safe to call "old" — evicting the
+// only entry on screen would print a message that had not, from the user's
+// point of view, gone anywhere yet.
+const keepInline = 2
+
+// evictOverflow keeps the live-managed region (banner/live turn/input/footer,
+// everything render() draws every frame) from ever growing taller than the
+// terminal by handing the oldest still-inline transcript entries to
+// commitEntryCmd — tea.Println, which prints once and then belongs to the
+// terminal's own scrollback instead of to something this package redraws.
+//
+// This is the actual fix for the reported bug, not cursorFor's offset
+// arithmetic: no offset is correct once the thing it is measuring already
+// does not fit on screen. A frame taller than the terminal means some of what
+// Bubble Tea thinks it drew last time has already scrolled past the top under
+// its own weight, and "move the cursor up N rows" stops matching reality by
+// exactly the number of rows over — which is why the input box was reported
+// sliding further down with every message once the screen filled: N grew by
+// one turn's worth every time, forever.
+//
+// It runs from Update, not View, because printing is an I/O side effect and
+// View has to stay pure — cursorFor and render both call it, and calling it
+// twice cannot be allowed to print anything twice.
+func (m Root) evictOverflow() (Root, tea.Cmd) {
+	if m.mode == ModeHelp || m.lay.Height <= 0 {
+		return m, nil
+	}
+	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
+	var cmds []tea.Cmd
+	for len(m.transcript)-m.printedUpTo > keepInline {
+		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
+			break
+		}
+		cmds = append(cmds, commitEntryCmd(g, width, m.transcript[m.printedUpTo]))
+		m.printedUpTo++
+	}
+	return m, tea.Batch(cmds...)
 }
