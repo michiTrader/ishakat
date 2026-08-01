@@ -59,10 +59,10 @@ func (t liveTurn) elapsed() time.Duration {
 // renderTranscriptLine arma una burbuja de conversación como en §9.3: marcador
 // de rol, nombre y hora, seguido del texto tal cual (el markdown/wrap llega en
 // una fase posterior, fuera del alcance del Paso 3).
-func renderTranscriptLine(role, name, text string, ts time.Time) string {
-	marker := "▌"
+func renderTranscriptLine(g glyphs, role, name, text string, ts time.Time) string {
+	marker := g.userMark
 	if role == "assistant" {
-		marker = "◆"
+		marker = g.assistantMark
 	}
 	header := fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04"))
 	return header + "\n" + text
@@ -70,14 +70,14 @@ func renderTranscriptLine(role, name, text string, ts time.Time) string {
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
 // (§9.3) y, si está en curso, la línea de animación con tiempo/tokens.
-func renderLiveTurn(t liveTurn, crush string, plainCancelHint string) string {
+func renderLiveTurn(g glyphs, t liveTurn, crush string, plainCancelHint string) string {
 	if !t.active {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(renderTranscriptLine("assistant", t.model, t.body()+"▊", t.startedAt))
+	b.WriteString(renderTranscriptLine(g, "assistant", t.model, t.body()+g.streamCursor, t.startedAt))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("%s pensando %.1fs · %d tok\n", crush, t.elapsed().Seconds(), t.tokens))
+	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokens))
 	b.WriteString(plainCancelHint)
 	return b.String()
 }

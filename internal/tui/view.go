@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,6 +23,25 @@ func (m Root) View() tea.View {
 // hay transcript todavía), transcript comprometido, turno vivo si lo hay, y
 // la caja de entrada con el footer.
 func (m Root) render() string {
+	return m.fold(m.renderRaw())
+}
+
+// fold is the single point where a restricted terminal gets a string it can
+// actually represent. It sits on the way out of render rather than inside each
+// component for the reason the glyph table exists at all: a rule applied at one
+// choke point can be checked, and a rule applied in six render functions is a
+// rule that will be forgotten in the seventh.
+//
+// Escape sequences are ASCII, so folding the finished frame does not touch the
+// colours the styles put in.
+func (m Root) fold(s string) string {
+	if !m.lay.ASCII() {
+		return s
+	}
+	return foldASCII(s)
+}
+
+func (m Root) renderRaw() string {
 	if m.mode == ModeHelp {
 		return m.renderHelp()
 	}
@@ -43,6 +63,7 @@ func (m Root) render() string {
 // height down to the row. Measuring one thing and drawing another is precisely
 // how the cursor ended up next to the banner.
 func (m Root) head() string {
+	g := m.lay.glyphs()
 	var b strings.Builder
 
 	if len(m.transcript) == 0 && !m.live.active {
@@ -53,12 +74,12 @@ func (m Root) head() string {
 	}
 
 	for _, e := range m.transcript {
-		b.WriteString(renderTranscriptLine(e.role, e.name, e.text, e.ts))
+		b.WriteString(renderTranscriptLine(g, e.role, e.name, e.text, e.ts))
 		b.WriteString("\n\n")
 	}
 
 	if m.live.active {
-		b.WriteString(renderLiveTurn(m.live, CrushFrame(m.animOffset), " esc cancela\n"))
+		b.WriteString(renderLiveTurn(g, m.live, CrushFrame(m.lay, m.animOffset), " esc cancela\n"))
 		b.WriteString("\n")
 	}
 
@@ -133,8 +154,9 @@ func (m Root) cursorFor() *tea.Cursor {
 // commands llega en el Paso 9; hasta entonces esta lista es estática y
 // documenta el mismo contrato que consumirá slash.Registry.
 func (m Root) renderHelp() string {
+	g := m.lay.glyphs()
 	var b strings.Builder
-	b.WriteString("── ishakat · comandos ────────────────\n\n")
+	b.WriteString(helpHeading(g, "ishakat "+g.dot+" comandos") + "\n\n")
 	for _, line := range []string{
 		"/help              esta pantalla",
 		"/model [texto]     cambiar modelo",
@@ -153,7 +175,7 @@ func (m Root) renderHelp() string {
 	} {
 		b.WriteString(" " + line + "\n")
 	}
-	b.WriteString("\n── atajos ────────────────────────────\n\n")
+	b.WriteString("\n" + helpHeading(g, "atajos") + "\n\n")
 	for _, line := range []string{
 		"ctrl+p   selector de modelos",
 		"ctrl+o   rotar favoritos",
@@ -166,6 +188,26 @@ func (m Root) renderHelp() string {
 	} {
 		b.WriteString(" " + line + "\n")
 	}
-	b.WriteString("\n ↑↓ desplazar · esc volver")
+	b.WriteString(fmt.Sprintf("\n %s desplazar %s esc volver", g.scrollHint, g.dot))
 	return b.String()
+}
+
+// helpWidth is how wide the help screen's rules are drawn. The screen is a
+// fixed list of short lines, so it does not follow the terminal width.
+const helpWidth = 38
+
+// helpHeading draws a section heading padded out to helpWidth with the rule
+// glyph.
+//
+// The headings used to be literal runs of U+2500 counted out by hand, which had
+// two problems: the two of them came out different lengths (visible on screen,
+// and impossible to keep aligned when either title is edited), and the box
+// drawing character is one more thing a legacy console renders as garbage.
+func helpHeading(g glyphs, title string) string {
+	const lead = 2
+	prefix := strings.Repeat(g.rule, lead) + " " + title + " "
+	if fill := helpWidth - lipglossWidth(prefix); fill > 0 {
+		return prefix + strings.Repeat(g.rule, fill)
+	}
+	return prefix
 }
