@@ -27,6 +27,23 @@ func (m Root) render() string {
 	}
 
 	var b strings.Builder
+	b.WriteString(m.head())
+	b.WriteString(InputBox(m.lay, m.styles, m.input.View()))
+	b.WriteString("\n")
+	b.WriteString(RenderFooter(m.lay, m.footerState(), m.footerItems))
+
+	return b.String()
+}
+
+// head is everything drawn above the input box: the start-up banner (only
+// while there is nothing in the transcript), the committed transcript and the
+// live turn.
+//
+// It is a method of its own because render and cursorFor must agree on its
+// height down to the row. Measuring one thing and drawing another is precisely
+// how the cursor ended up next to the banner.
+func (m Root) head() string {
+	var b strings.Builder
 
 	if len(m.transcript) == 0 && !m.live.active {
 		if banner := Banner(m.lay, m.styles, m.version, m.bannerPath(), m.footer.Model, m.cfgBanner, m.animOffset); banner != "" {
@@ -45,12 +62,15 @@ func (m Root) render() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(InputBox(m.lay, m.styles, m.lay.InputPrefix(), m.input.Value()))
-	b.WriteString("\n")
-	b.WriteString(RenderFooter(m.lay, m.footerState(), m.footerItems))
-
 	return b.String()
 }
+
+// headRows is how many terminal rows head occupies. Every block head writes
+// ends with a newline, so the number of rows above the input box is exactly
+// the number of newlines. Bubble Tea's inline renderer clips content to the
+// terminal width instead of wrapping it, so a long line still costs one row
+// and no wrap arithmetic is needed here.
+func headRows(head string) int { return strings.Count(head, "\n") }
 
 // bannerPath is the working directory as the banner shows it: the whole path,
 // abbreviated only as much as the terminal width forces.
@@ -86,11 +106,24 @@ func (m Root) footerState() FooterState {
 // cursorFor calcula dónde debe pintarse el cursor real de la terminal: dentro
 // del textarea cuando el input tiene foco, o nil cuando no hay nada que
 // editar (ModeBusy, ModeHelp).
+//
+// textarea.Cursor() reports a position relative to the widget's own top-left
+// corner, which the widget documents and which is easy to miss: returning it
+// untouched puts the cursor at row 0 of the whole view — right next to the
+// banner — instead of inside the input box. The offset added here is the box
+// origin plus every row drawn above it.
 func (m Root) cursorFor() *tea.Cursor {
 	if m.mode != ModeChat {
 		return nil
 	}
-	return m.input.Cursor()
+	c := m.input.Cursor()
+	if c == nil {
+		return nil
+	}
+	dx, dy := InputOrigin(m.lay)
+	c.Position.X += dx
+	c.Position.Y += dy + headRows(m.head())
+	return c
 }
 
 // renderHelp dibuja la pantalla de ayuda de §9.7. El registro de slash

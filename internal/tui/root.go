@@ -114,12 +114,17 @@ func NewRoot(o Options) Root {
 	}
 	animOff := o.Cfg != nil && o.Cfg.UI.Animations.Mode == "off"
 
+	// The layout comes first: the input prefix depends on the breakpoint, and
+	// the widget has to be built already knowing which prefix it draws.
+	lay := NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY)
+
 	r := Root{
 		version:   o.Version,
 		cwd:       o.CWD,
 		mode:      ModeChat,
+		lay:       lay,
 		styles:    styles,
-		input:     NewInput(),
+		input:     NewInput(lay.InputPrefix()),
 		fps:       fps,
 		cfgBanner: o.Cfg == nil || o.Cfg.UI.Banner,
 	}
@@ -129,7 +134,6 @@ func NewRoot(o Options) Root {
 	} else {
 		r.keys = defaultMap
 	}
-	r.lay = NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY)
 	// CWD is deliberately not stored in the footer state: it depends on the
 	// terminal width, so it is computed on every render by Root.footerState.
 	r.footer = FooterState{Model: "auto/coding"}
@@ -176,6 +180,10 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.lay = NewLayout(msg.Width, msg.Height, m.lay.MaxWidth, m.lay.AnimationsOff, m.lay.NoTTY)
+		// Crossing the 40-column breakpoint changes the prefix ("› " to "›"),
+		// and the prefix is part of the widget, so it is re-applied before the
+		// width: SetInputWidth reserves whatever the prompt currently costs.
+		SetInputPrefix(&m.input, m.lay.InputPrefix())
 		SetInputWidth(&m.input, m.lay)
 		return m, nil
 
