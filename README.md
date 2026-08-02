@@ -3,16 +3,14 @@
 A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
 no runtime, designed to be usable at 40 columns on a phone.
 
-> **Status: Phase 2 (prototype), step 7 of 13 closed.**
-> The headless pipeline (`ishakat -p "…"`) and the model catalog
-> (`ishakat models`) are real and wired end to end, and the catalog now
-> resolves fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5 —
-> that resolver isn't wired into headless `-m` or a picker yet, both are
-> later steps. The interactive TUI is still the step-3 mannequin: it draws
-> the final layout but it echoes your input instead of calling a model,
-> because the engine is not connected to it until step 8. See
-> [What works today](#what-works-today) before filing a bug — most of the
-> "it looks raw" is scheduled, not broken.
+> **Status: Phase 2 (prototype), step 8 of 13 closed.**
+> The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
+> and interactive TUI are wired end to end. The catalog resolves
+> fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, while the
+> interactive UI now streams real provider responses through the engine when
+> a provider is configured and reachable. See [What works today](#what-works-today)
+> before filing a bug — model selection and conversation-management commands
+> remain scheduled work.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
