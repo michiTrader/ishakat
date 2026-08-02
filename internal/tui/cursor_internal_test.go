@@ -178,7 +178,7 @@ func TestHeadRowsCountsEveryRowAboveTheInput(t *testing.T) {
 // newVisibleRoot is newHeadlessRoot's counterpart: it claims to have a TTY so
 // the banner is drawn and the cursor offset has something to be wrong about.
 func newVisibleRoot() Root {
-	return NewRoot(Options{
+	root := NewRoot(Options{
 		Version: "0.0.0-test",
 		CWD:     "~/projects/ishakat",
 		Theme:   theme.Load(""),
@@ -191,6 +191,8 @@ func newVisibleRoot() Root {
 		// the animation ticker actually arming.
 		Cap: theme.CapTruecolor,
 	})
+	eng, _ := echoEngine(false)
+	return withEngine(root, eng)
 }
 
 func typeInto(m tea.Model, s string) tea.Model {
