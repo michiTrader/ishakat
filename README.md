@@ -3,14 +3,15 @@
 A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
 no runtime, designed to be usable at 40 columns on a phone.
 
-> **Status: Phase 2 (prototype), step 8 of 13 closed.**
+> **Status: Phase 2 (prototype), step 9 of 13 closed.**
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
-> fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, while the
-> interactive UI now streams real provider responses through the engine when
-> a provider is configured and reachable. See [What works today](#what-works-today)
-> before filing a bug — model selection and conversation-management commands
-> remain scheduled work.
+> fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, the
+> interactive UI streams real provider responses through the engine when
+> a provider is configured and reachable, and the chat input now understands
+> slash commands (`/help`, `/clear`, `/new`, `/exit`) with an autocomplete
+> dropdown. See [What works today](#what-works-today) before filing a bug —
+> model selection and conversation-management commands remain scheduled work.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
@@ -25,7 +26,8 @@ no runtime, designed to be usable at 40 columns on a phone.
 | Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested; not yet wired into `-m` or a picker (steps 8/10) |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
 | `ishakat` (interactive TUI) | ✅ streams real provider responses when a provider is configured and reachable |
-| `/model`, model picker, hot swap, `/compact`, `--resume` | ❌ steps 8–13, not written yet |
+| Slash commands: `/help`, `/clear`, `/new`, `/exit`, plus autocomplete dropdown (§9.6) | ✅ implemented in `internal/slash` + `internal/tui`; the other §13 commands are listed and reply "not implemented yet" |
+| `/model`, model picker, hot swap, `/compact`, `--resume` | ❌ steps 10–13, not written yet |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly
