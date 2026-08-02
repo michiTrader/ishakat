@@ -52,6 +52,11 @@ func (m Root) updateSlashMenu(key string) (bool, tea.Model, tea.Cmd) {
 func (m Root) runSlashLine(text string) (tea.Model, tea.Cmd) {
 	p := slash.Parse(text, m.commands)
 	if !p.Found {
+		// Recorded even on an unknown command — that is exactly the case
+		// where recalling the failed line with up-arrow to fix a typo is
+		// most useful, and runSlashCommand (the other path in here that
+		// records history) never sees an unresolved name at all.
+		m = m.recordHistory(text)
 		return m.slashNotice(m.lay.glyphs().warnMark + " comando desconocido: /" + p.Raw)
 	}
 	return m.runSlashCommand(p.Command, p.Args)
@@ -63,7 +68,17 @@ func (m Root) runSlashLine(text string) (tea.Model, tea.Cmd) {
 // (KindHelp/KindClear/KindNew/KindExit all take none); it is threaded
 // through now so Step 10's /model and later /theme, /copy, /compact do not
 // need this signature to change again.
+//
+// It is also the single funnel that records input history for every slash
+// command, regardless of whether it arrived through a full typed line
+// (runSlashLine, enter with the dropdown closed) or by accepting the
+// dropdown's own highlighted row (updateSlashMenu's m.keys.Submit case,
+// which calls straight in here with args == "" and never goes through
+// runSlashLine) — recording it there instead would miss the second path.
 func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cmd) {
+	if typed := strings.TrimSpace(m.input.Value()); typed != "" {
+		m = m.recordHistory(typed)
+	}
 	m.input.Reset()
 	m.menu = slashMenu{}
 

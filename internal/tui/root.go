@@ -203,6 +203,17 @@ type Root struct {
 	// same role m.cancel plays for an ordinary turn (§7.4, see
 	// cancelCompact).
 	compactCancel context.CancelFunc
+
+	// inputHistory, historyIdx and historyDraft are the up/down input
+	// history of Step 13 (§11), implemented in history.go. inputHistory
+	// holds every line submit/runRetry has actually sent, oldest first;
+	// historyIdx is where the browse cursor sits (len(inputHistory) means
+	// "not browsing, showing the live draft"); historyDraft is what the
+	// textarea held right before the first up-arrow of a browse, restored
+	// by historyNext once the cursor returns past the newest entry.
+	inputHistory []string
+	historyIdx   int
+	historyDraft string
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -637,6 +648,24 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.keys.Newline:
 			m.input.InsertRune('\n')
 			return m, nil
+		case m.keys.HistoryPrev:
+			// Only claims the key on the textarea's first visual line: on
+			// any line below that, up is ordinary cursor movement inside a
+			// multi-line draft, exactly like a shell's line editor leaves
+			// up/down alone once the cursor is not on the edge line.
+			if m.input.Line() == 0 {
+				if next, ok := m.historyPrev(); ok {
+					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					return next, nil
+				}
+			}
+		case m.keys.HistoryNext:
+			if m.input.Line() == m.input.LineCount()-1 {
+				if next, ok := m.historyNext(); ok {
+					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					return next, nil
+				}
+			}
 		}
 	}
 	var cmd tea.Cmd
@@ -720,6 +749,7 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// that decides an entry is old enough to leave the live region, and it
 	// always keeps the most recent exchange redrawn inline regardless of
 	// height — see its comment for why.
+	m = m.recordHistory(text)
 	m.input.Reset()
 	m.mode = ModeBusy
 	m.live.start(m.footer.Model)
