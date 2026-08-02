@@ -56,6 +56,9 @@ type glyphs struct {
 	// Consolas is missing. The shading blocks are in WGL4 and in cp437, and a
 	// wave of them reads better as motion anyway.
 	spinner []rune
+
+	// warnMark prefixes an error that belongs to a completed turn.
+	warnMark string
 }
 
 var unicodeGlyphs = glyphs{
