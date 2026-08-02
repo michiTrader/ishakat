@@ -41,6 +41,20 @@ const (
 	// trigger at [compact].trigger_pct runs the same underlying flow without
 	// going through this Kind at all.
 	KindCompact
+	// KindCopy copies an assistant response to the system clipboard via
+	// OSC52 (§13, Step 13). "" copies the last response; an argument is the
+	// 1-based count of responses back from the end ("/copy 2" is the answer
+	// before the last one). ctrl+y is the same behaviour with no argument.
+	KindCopy
+	// KindRetry drops the assistant response the last turn produced (if
+	// any) and asks the same last user message again (§13, Step 13) —
+	// useful after a cancelled or unsatisfying answer without retyping the
+	// question.
+	KindRetry
+	// KindStats reports the session's token and cost accounting (§13, Step
+	// 13): the running totals convo.Conversation.Usage already sums, priced
+	// against the active model's catalog.Cost.
+	KindStats
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -87,9 +101,9 @@ var Commands = []Command{
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
 	{Name: "resume", Describe: "reabrir una sesion", Kind: KindUnimplemented},
 	{Name: "clear", Describe: "limpiar pantalla", Kind: KindClear},
-	{Name: "copy", ArgHint: "[n]", Describe: "copiar respuesta", Kind: KindUnimplemented},
-	{Name: "retry", Describe: "reintentar ultimo", Kind: KindUnimplemented},
-	{Name: "stats", Describe: "tokens y costo", Kind: KindUnimplemented},
+	{Name: "copy", ArgHint: "[n]", Describe: "copiar respuesta", Kind: KindCopy},
+	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
+	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindUnimplemented},
 	{Name: "debug", Describe: "diagnostico", Kind: KindUnimplemented},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},

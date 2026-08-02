@@ -203,6 +203,17 @@ type Root struct {
 	// same role m.cancel plays for an ordinary turn (§7.4, see
 	// cancelCompact).
 	compactCancel context.CancelFunc
+
+	// inputHistory, historyIdx and historyDraft are the up/down input
+	// history of Step 13 (§11), implemented in history.go. inputHistory
+	// holds every line submit/runRetry has actually sent, oldest first;
+	// historyIdx is where the browse cursor sits (len(inputHistory) means
+	// "not browsing, showing the live draft"); historyDraft is what the
+	// textarea held right before the first up-arrow of a browse, restored
+	// by historyNext once the cursor returns past the newest entry.
+	inputHistory []string
+	historyIdx   int
+	historyDraft string
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -548,6 +559,17 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		}
 		next, cmd := m.openPicker("")
 		return true, next, cmd
+
+	case m.keys.CopyLast:
+		// Same ModeChat-only gating as ModelPicker above: ModeBusy is
+		// generating and every overlay mode owns the keyboard outright, so
+		// there is either nothing settled to copy yet or a chord that
+		// belongs to whatever is on screen instead.
+		if m.mode != ModeChat {
+			return true, m, nil
+		}
+		next, cmd := m.runCopy("")
+		return true, next, cmd
 	}
 	return false, m, nil
 }
@@ -637,6 +659,24 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.keys.Newline:
 			m.input.InsertRune('\n')
 			return m, nil
+		case m.keys.HistoryPrev:
+			// Only claims the key on the textarea's first visual line: on
+			// any line below that, up is ordinary cursor movement inside a
+			// multi-line draft, exactly like a shell's line editor leaves
+			// up/down alone once the cursor is not on the edge line.
+			if m.input.Line() == 0 {
+				if next, ok := m.historyPrev(); ok {
+					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					return next, nil
+				}
+			}
+		case m.keys.HistoryNext:
+			if m.input.Line() == m.input.LineCount()-1 {
+				if next, ok := m.historyNext(); ok {
+					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					return next, nil
+				}
+			}
 		}
 	}
 	var cmd tea.Cmd
@@ -720,15 +760,28 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// that decides an entry is old enough to leave the live region, and it
 	// always keeps the most recent exchange redrawn inline regardless of
 	// height — see its comment for why.
+	m = m.recordHistory(text)
 	m.input.Reset()
-	m.mode = ModeBusy
-	m.live.start(m.footer.Model)
 
 	// The user's turn joins the history before the request is built, because
 	// the request is the history: Active() has to already contain what we are
 	// asking about. The assistant's side is added by finishTurn, once there
 	// is something to add.
 	m.conv.Add(convo.User(text))
+
+	return m.startEngineTurn(bannerText)
+}
+
+// startEngineTurn is submit's and runRetry's shared tail: everything past
+// "the request's messages are already in m.conv" — switching to ModeBusy,
+// opening the cancellable context, and starting the engine and its ticks.
+// submit builds bannerText itself (it is the one call site where the
+// transcript was still empty a few lines up); runRetry never draws a
+// banner, since retrying only happens once the transcript already has
+// something in it, so it always passes "".
+func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
+	m.mode = ModeBusy
+	m.live.start(m.footer.Model)
 
 	// context.Background rather than a parent: the program's lifetime is the
 	// terminal's, and there is no ctx to inherit here — Bubble Tea does not
