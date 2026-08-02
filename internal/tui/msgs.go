@@ -18,6 +18,14 @@ type animTickMsg struct{ t time.Time }
 // ventana de gracia: cancela el estado de "un ctrl+c ya armado" (§7.4).
 type quitConfirmMsg struct{}
 
+// modelChosenMsg is the model picker's only output (§9.4/Step 10): the
+// reference the user picked, or that /model resolved unambiguously without
+// even opening the overlay. Routing the choice through a message instead of
+// having the picker mutate Root directly keeps picker.go ignorant of
+// anything but the catalog it was handed — the same separation slash.Kind
+// already buys internal/slash from internal/tui.
+type modelChosenMsg struct{ Ref string }
+
 // There is deliberately no blink message here.
 //
 // There used to be one, re-armed every 500 ms from Init for the lifetime of the
