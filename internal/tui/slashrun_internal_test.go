@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
@@ -109,16 +110,99 @@ func TestSlashUnknownCommandReportsANoticeWithoutTouchingHistory(t *testing.T) {
 }
 
 func TestSlashUnimplementedCommandSaysSoInsteadOfDoingNothing(t *testing.T) {
+	// /model closed in Step 10 (see the tests below); /theme is still a
+	// KindUnimplemented row in the registry, which is exactly what this
+	// test needs to exercise.
 	var m tea.Model = newHeadlessRoot()
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = typeAndEnter(m, "/model son45")
+	m = typeAndEnter(m, "/theme dracula")
 
 	root := m.(Root)
 	if len(root.transcript) != 1 {
 		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
 	}
-	if !strings.Contains(root.transcript[0].text, "/model") {
+	if !strings.Contains(root.transcript[0].text, "/theme") {
 		t.Errorf("notice should name the command, got %q", root.transcript[0].text)
+	}
+}
+
+// catalogWithModels builds a *catalog.Catalog directly from refs, skipping
+// catalog.Build entirely: these tests are about /model's dispatch, not about
+// merging sources, and a Catalog literal is a lot easier to read than a
+// BuildInput that produces the same two rows.
+func catalogWithModels(refs ...string) *catalog.Catalog {
+	cat := &catalog.Catalog{}
+	for _, ref := range refs {
+		provider, _, _ := catalog.SplitRef(ref)
+		cat.Models = append(cat.Models, catalog.Model{Ref: ref, Provider: provider})
+	}
+	return cat
+}
+
+// rootWithCatalog is newHeadlessRoot plus a catalog attached directly to the
+// unexported field: Options.Catalog is exercised separately by the app.go
+// wiring, this only needs Root to actually have one to dispatch against.
+func rootWithCatalog(cat *catalog.Catalog) Root {
+	root := newHeadlessRoot()
+	root.cat = cat
+	return root
+}
+
+func TestSlashModelWithNoArgsOpensThePicker(t *testing.T) {
+	var m tea.Model = rootWithCatalog(catalogWithModels("omni/son45"))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model")
+
+	root := m.(Root)
+	if root.mode != ModePicker {
+		t.Fatalf("mode = %v, want ModePicker", root.mode)
+	}
+	if !root.picker.Active() {
+		t.Error("the picker should be active once opened")
+	}
+	if root.picker.query != "" {
+		t.Errorf("picker.query = %q, want empty for a bare /model", root.picker.query)
+	}
+}
+
+func TestSlashModelWithAnUnambiguousMatchSwitchesDirectly(t *testing.T) {
+	var m tea.Model = rootWithCatalog(catalogWithModels("omni/son45", "other/unrelated"))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model omni/son45")
+
+	root := m.(Root)
+	if root.mode != ModeChat {
+		t.Fatalf("mode = %v, want ModeChat: an exact match must never open the picker", root.mode)
+	}
+	if root.model != "omni/son45" {
+		t.Errorf("model = %q, want %q", root.model, "omni/son45")
+	}
+	if len(root.transcript) != 1 {
+		t.Fatalf("expected one confirmation notice, got %d: %v", len(root.transcript), root.transcript)
+	}
+	if !strings.Contains(root.transcript[0].text, "omni/son45") {
+		t.Errorf("confirmation line should name the model, got %q", root.transcript[0].text)
+	}
+}
+
+func TestSlashModelWithAnAmbiguousQueryOpensThePickerPrefiltered(t *testing.T) {
+	// Two providers serving the exact same leaf model: §4.5's suffix stage
+	// finds both and refuses to guess between them (OutcomePicker), which
+	// is exactly the case /model must hand to the overlay instead of
+	// picking one arbitrarily.
+	var m tea.Model = rootWithCatalog(catalogWithModels("a/gpt-5", "b/gpt-5"))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model gpt5")
+
+	root := m.(Root)
+	if root.mode != ModePicker {
+		t.Fatalf("mode = %v, want ModePicker for an ambiguous query", root.mode)
+	}
+	if root.picker.query != "gpt5" {
+		t.Errorf("picker.query = %q, want the typed text %q", root.picker.query, "gpt5")
+	}
+	if got := countModelRows(root.picker.rows); got != 2 {
+		t.Errorf("picker should list both candidates, got %d model rows", got)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
@@ -26,7 +27,7 @@ const (
 	ModeChat Mode = iota
 	// ModeBusy: generando; solo esc y ctrl+c hacen algo.
 	ModeBusy
-	// ModePicker: overlay de modelos (Paso 10, todavía no implementado).
+	// ModePicker: overlay de modelos (§9.4, Paso 10).
 	ModePicker
 	// ModeConfirm: diálogo de cambio con conflicto (Paso 11).
 	ModeConfirm
@@ -140,6 +141,28 @@ type Root struct {
 	// menu is the autocomplete dropdown's own state (§9.6), recomputed from
 	// the input on every keystroke by slashMenuFor.
 	menu slashMenu
+
+	// cat is the model catalog snapshot (§4.2). Never touched over the
+	// network from this package (§6.1) — it is handed over once, already
+	// built by internal/app, and read by both /model's direct resolution
+	// and the picker's incremental search.
+	cat *catalog.Catalog
+
+	// alias is [alias] from the configuration, keyed case-insensitively —
+	// the same map catalog.Resolve/Filter expect through ResolveOptions.
+	alias map[string]string
+
+	// preferFree mirrors [catalog].prefer_free (§4.5's bonusFree).
+	preferFree bool
+
+	// favorites is [favorites].list, kept in configuration order (Picker
+	// turns it into a set for membership tests, but the order itself is
+	// what a future ctrl+o rotation would walk).
+	favorites []string
+
+	// picker is the Step 10 overlay's own state (§9.4), live only while
+	// mode == ModePicker.
+	picker Picker
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -186,6 +209,22 @@ type Options struct {
 	// /proc or the environment itself (§6.1). The zero value is "not a
 	// phone", so a caller that says nothing keeps the desktop frame rate.
 	Termux bool
+
+	// Catalog is the model catalog snapshot (§4.4), already built on disk by
+	// internal/app.LoadCatalog — this package never touches the network
+	// (§6.1). nil is a supported value: Picker.Active reports false and
+	// /model falls back to its "no catalog loaded yet" message instead of
+	// panicking on a nil receiver.
+	Catalog *catalog.Catalog
+
+	// Alias is [alias] from the configuration, keyed case-insensitively.
+	Alias map[string]string
+
+	// Favorites is [favorites].list, in configuration order.
+	Favorites []string
+
+	// PreferFree mirrors [catalog].prefer_free.
+	PreferFree bool
 }
 
 // NewRoot construye el modelo inicial.
@@ -220,20 +259,24 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:   o.Version,
-		cwd:       o.CWD,
-		mode:      ModeChat,
-		lay:       lay,
-		styles:    styles,
-		input:     NewInput(lay.InputPrefix()),
-		fps:       fps,
-		cfgBanner: o.Cfg == nil || o.Cfg.UI.Banner,
-		animMode:  anim.Mode,
-		cap:       o.Cap,
-		eng:       engineOr(o.Engine),
-		model:     model,
-		system:    o.System,
-		commands:  slash.Default(),
+		version:    o.Version,
+		cwd:        o.CWD,
+		mode:       ModeChat,
+		lay:        lay,
+		styles:     styles,
+		input:      NewInput(lay.InputPrefix()),
+		fps:        fps,
+		cfgBanner:  o.Cfg == nil || o.Cfg.UI.Banner,
+		animMode:   anim.Mode,
+		cap:        o.Cap,
+		eng:        engineOr(o.Engine),
+		model:      model,
+		system:     o.System,
+		commands:   slash.Default(),
+		cat:        o.Catalog,
+		alias:      o.Alias,
+		preferFree: o.PreferFree,
+		favorites:  o.Favorites,
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
@@ -333,6 +376,9 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingQuit = false
 		return m, nil
 
+	case modelChosenMsg:
+		return m.applyModelChosen(msg.Ref)
+
 	case tea.KeyPressMsg:
 		if handled, next, cmd := m.handleGlobalKey(msg); handled {
 			return next, cmd
@@ -345,6 +391,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateHelp(msg)
 	case ModeBusy:
 		return m.updateBusy(msg)
+	case ModePicker:
+		return m.updatePicker(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -376,8 +424,54 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		m.transcript = nil
 		m.printedUpTo = 0
 		return true, m, clearScreenCmd
+
+	case m.keys.ModelPicker:
+		// Only opens from ModeChat: ModeBusy is generating (§7.4 already
+		// reserves esc/ctrl+c there) and ModePicker/ModeHelp own the
+		// keyboard outright while active, so a second ctrl+p is swallowed
+		// rather than reopening a picker that is already open.
+		if m.mode != ModeChat {
+			return true, m, nil
+		}
+		next, cmd := m.openPicker("")
+		return true, next, cmd
 	}
 	return false, m, nil
+}
+
+// openPicker switches to ModePicker with a Picker built from the current
+// catalog and prefiltered with query — "" for ctrl+p and a bare /model, or
+// whatever text the user typed after /model when it did not resolve
+// unambiguously (§4.5's OutcomePicker).
+func (m Root) openPicker(query string) (tea.Model, tea.Cmd) {
+	m.picker = newPicker(m.cat, m.resolveOptions(), m.favorites, m.model, query)
+	m.mode = ModePicker
+	return m, nil
+}
+
+// resolveOptions is the catalog.ResolveOptions every lookup in this package
+// shares: /model's direct resolution and the picker's incremental search
+// both have to agree with §4.5's own scorer, or the picker would rank
+// results in an order the command line disagreed with.
+func (m Root) resolveOptions() catalog.ResolveOptions {
+	return catalog.ResolveOptions{Alias: m.alias, PreferFree: m.preferFree}
+}
+
+// applyModelChosen is modelChosenMsg's only handler: switch the active
+// model, leave the §4.6 confirmation line behind, and return to ModeChat.
+// Step 10 closes with an unconditional switch — §4.6's CheckSwap (a
+// confirmation dialog when a turn is in flight) is Step 11's job, not this
+// one's; the picker cannot even be open during ModeBusy today (see
+// handleGlobalKey above), so there is nothing to conflict with yet.
+func (m Root) applyModelChosen(ref string) (tea.Model, tea.Cmd) {
+	m.mode = ModeChat
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return m, nil
+	}
+	m.model = ref
+	m.footer.Model = ref
+	return m.slashNotice(confirmLine(m.lay.glyphs(), ref))
 }
 
 // updateChat maneja ModeChat: el input tiene el foco, enter envía (en el

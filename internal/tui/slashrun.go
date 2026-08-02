@@ -5,6 +5,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -88,9 +89,30 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 	case slash.KindExit:
 		m.quitting = true
 		return m, tea.Quit
+	case slash.KindModel:
+		return m.runModelCommand(args)
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + cmd.Usage() + " todavia no esta implementado")
 	}
+}
+
+// runModelCommand implements /model's three closing behaviors (§12, Step
+// 10): no argument opens the picker unfiltered; an argument that §4.5
+// resolves unambiguously switches straight away with the §4.6 confirmation
+// line, with no overlay ever drawn; anything else opens the picker
+// prefiltered with what the user typed, exactly like an ambiguous /model
+// query already does for the command line's own error message (there isn't
+// one — §4.5 forbids a bare "model not found").
+func (m Root) runModelCommand(args string) (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(args)
+	if text == "" {
+		return m.openPicker("")
+	}
+	res := m.cat.Resolve(text, m.resolveOptions())
+	if res.Outcome.Decided() {
+		return m.applyModelChosen(res.Model.Ref)
+	}
+	return m.openPicker(res.Query)
 }
 
 // slashNotice appends text as a transcript entry without adding anything to

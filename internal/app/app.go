@@ -48,6 +48,32 @@ func Run(version string) int {
 	// characters no matter what [ui] glyphs said.
 	glyphs := theme.DetectGlyphs(cfg.UI.Glyphs)
 
+	// The catalog is loaded from disk only (§4.4's non-negotiable budget:
+	// no network on the critical path), which is why this is safe to call
+	// unconditionally before the interface is drawn — RefreshCatalog, the
+	// one that goes to the network, is Step 11's background-refresh
+	// concern, not this one's.
+	snap := LoadCatalog(cfg)
+
+	// A model/provider that fails to resolve is not fatal here the way it
+	// is in Headless (headless.go's own step 4): there is no prompt on the
+	// command line that would otherwise have nothing to answer, only an
+	// interface the user can still open, read /help in, and fix the
+	// configuration from without restarting. tui.Options.Engine already
+	// documents nil as a supported value for exactly this reason.
+	eng, ref, system, warn, buildErr := BuildEngine(cfg, "", version)
+	model := ref.Ref
+	if buildErr != nil {
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", buildErr)
+		eng = nil
+	}
+	if warn != "" {
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", warn)
+	}
+	for _, w := range cfg.Warnings {
+		fmt.Fprintf(os.Stderr, "⚠ [%s] %s\n", w.Where, w.Msg)
+	}
+
 	root := tui.NewRoot(tui.Options{
 		Version: version,
 		CWD:     cwd,
@@ -60,7 +86,14 @@ func Run(version string) int {
 		// literally everywhere": without this, every desktop session with no
 		// override would have read the same false that a phone should, and the
 		// key would have had no effect for the one host it names.
-		Termux: xdg.IsTermux(),
+		Termux:     xdg.IsTermux(),
+		Engine:     eng,
+		Model:      model,
+		System:     system,
+		Catalog:    &snap.Catalog,
+		Alias:      cfg.Alias,
+		Favorites:  cfg.Favorites.List,
+		PreferFree: cfg.Catalog.PreferFree,
 	})
 
 	p := tea.NewProgram(root)
