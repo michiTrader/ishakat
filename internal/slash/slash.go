@@ -33,6 +33,9 @@ const (
 	KindNew
 	// KindExit quits the program.
 	KindExit
+	// KindModel opens the model picker (§9.4) or switches directly when the
+	// argument resolves unambiguously (§4.5). Step 10.
+	KindModel
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -72,7 +75,7 @@ func (c Command) Usage() string {
 // order and Filter's tie-break both follow this order.
 var Commands = []Command{
 	{Name: "help", Describe: "esta pantalla", Kind: KindHelp},
-	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindUnimplemented},
+	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
 	{Name: "models", Describe: "explorar catalogo", Kind: KindUnimplemented},
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindUnimplemented},
