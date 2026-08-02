@@ -26,6 +26,17 @@ type quitConfirmMsg struct{}
 // already buys internal/slash from internal/tui.
 type modelChosenMsg struct{ Ref string }
 
+// compactDoneMsg is startCompact's async result (§9.8/Step 12): the summary
+// engine.Summarize produced, or the error that made compact_model's call
+// fail — never both, engine.Summarize's own contract. Like modelChosenMsg it
+// is a one-shot result rather than a repeating tick, so it needs no "does
+// the timer stop" story: the goroutine that produces it runs exactly once
+// per compaction, started by startCompact and never re-armed.
+type compactDoneMsg struct {
+	summary string
+	err     error
+}
+
 // There is deliberately no blink message here.
 //
 // There used to be one, re-armed every 500 ms from Init for the lifetime of the

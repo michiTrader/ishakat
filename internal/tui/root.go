@@ -33,6 +33,8 @@ const (
 	ModeConfirm
 	// ModeHelp: pantalla de ayuda (§9.7).
 	ModeHelp
+	// ModeCompact: /compact resumiendo con compact_model (§9.8, Paso 12).
+	ModeCompact
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -167,6 +169,40 @@ type Root struct {
 	// confirm is the Step 11 conflict dialog's own state (§9.5), live only
 	// while mode == ModeConfirm.
 	confirm confirmDialog
+
+	// compactEng runs compact_model's summarization call (§10, Step 12).
+	// nil means [app].compact_model never resolved to a working engine —
+	// every compaction then skips straight to the drop-oldest fallback,
+	// exactly like [compact].strategy = "drop-oldest" (see startCompact).
+	// It is deliberately a second, independent *engine.Engine from m.eng:
+	// compact_model can name a different provider than the conversation's
+	// own model, and internal/app.NewStreamer binds one Engine to exactly
+	// one provider at construction time.
+	compactEng *engine.Engine
+
+	// compactModel is compact_model's resolved reference (§4.2's Ref),
+	// sent as engine.Request.Model on every Summarize call.
+	compactModel string
+
+	// compactAuto, compactTriggerPct, compactKeepLastTurns,
+	// compactStrategy and compactOnError mirror [compact] verbatim
+	// (config.Compact). This package never stores *config.Config itself
+	// (see Options.Cfg's comment on NewRoot) — these are the scalars
+	// finishTurn's auto-trigger check and startCompact actually need.
+	compactAuto          bool
+	compactTriggerPct    int
+	compactKeepLastTurns int
+	compactStrategy      string
+	compactOnError       string
+
+	// compact is the Step 12 overlay's own state (§9.8), live only while
+	// mode == ModeCompact.
+	compact compactState
+
+	// compactCancel closes the in-flight Summarize call's context — the
+	// same role m.cancel plays for an ordinary turn (§7.4, see
+	// cancelCompact).
+	compactCancel context.CancelFunc
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -229,6 +265,28 @@ type Options struct {
 
 	// PreferFree mirrors [catalog].prefer_free.
 	PreferFree bool
+
+	// CompactEngine is compact_model's turn runner (§10, Step 12), already
+	// built over its own provider by internal/app.BuildEngine — see
+	// Root.compactEng's comment on why it is a separate *engine.Engine
+	// from Engine above. nil means compaction never calls a model at all,
+	// only convo.DropOldest.
+	CompactEngine *engine.Engine
+
+	// CompactModel is compact_model's resolved reference, in the same Ref
+	// form as Model above.
+	CompactModel string
+
+	// CompactAuto, CompactTriggerPct, CompactKeepLastTurns,
+	// CompactStrategy and CompactOnError mirror [compact] from the
+	// configuration (config.Compact) — internal/app.Run is where they are
+	// read off cfg and handed over already resolved, the same rule Model/
+	// System/Alias/Favorites above already follow.
+	CompactAuto          bool
+	CompactTriggerPct    int
+	CompactKeepLastTurns int
+	CompactStrategy      string
+	CompactOnError       string
 }
 
 // NewRoot construye el modelo inicial.
@@ -262,6 +320,27 @@ func NewRoot(o Options) Root {
 		model = "auto/coding"
 	}
 
+	// A Root built from a bare Options (most of this package's own tests,
+	// and any caller that leaves [compact] unset) must never hand
+	// convo.PlanCompact keepLastTurns == 0: that reads as "keep nothing",
+	// which is a real configuration this package has no way to ask for
+	// today (there is no UI for it, and defaults.toml never ships it),
+	// and PlanCompact's own boundary arithmetic assumes at least one turn
+	// survives. Falling back to the documented default here is the same
+	// "test-friendly, still correct" rule model/keys above already apply.
+	compactKeepLastTurns := o.CompactKeepLastTurns
+	if compactKeepLastTurns <= 0 {
+		compactKeepLastTurns = 4
+	}
+	compactStrategy := o.CompactStrategy
+	if compactStrategy == "" {
+		compactStrategy = "summarize"
+	}
+	compactOnError := o.CompactOnError
+	if compactOnError == "" {
+		compactOnError = "drop-oldest"
+	}
+
 	r := Root{
 		version:    o.Version,
 		cwd:        o.CWD,
@@ -281,6 +360,14 @@ func NewRoot(o Options) Root {
 		alias:      o.Alias,
 		preferFree: o.PreferFree,
 		favorites:  o.Favorites,
+
+		compactEng:           o.CompactEngine,
+		compactModel:         o.CompactModel,
+		compactAuto:          o.CompactAuto,
+		compactTriggerPct:    o.CompactTriggerPct,
+		compactKeepLastTurns: compactKeepLastTurns,
+		compactStrategy:      compactStrategy,
+		compactOnError:       compactOnError,
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
@@ -364,7 +451,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case animTickMsg:
-		if m.mode != ModeBusy {
+		if m.mode != ModeBusy && m.mode != ModeCompact {
 			return m, nil
 		}
 		m.animOffset++
@@ -383,6 +470,17 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelChosenMsg:
 		return m.applyModelChosen(msg.Ref)
 
+	case compactDoneMsg:
+		// A stale result from a compaction cancelCompact already closed —
+		// its context is cancelled, but the goroutine already past the
+		// point of checking ctx.Err() still sends its answer. Dropping it
+		// here is the same "outlived its turn" guard drainStream applies
+		// to a tick after cancelTurn/finishTurn (see its own comment).
+		if m.mode != ModeCompact {
+			return m, nil
+		}
+		return m.finishCompact(msg.summary, msg.err)
+
 	case tea.KeyPressMsg:
 		if handled, next, cmd := m.handleGlobalKey(msg); handled {
 			return next, cmd
@@ -399,6 +497,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updatePicker(msg)
 	case ModeConfirm:
 		return m.updateConfirm(msg)
+	case ModeCompact:
+		return m.updateCompact(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -417,6 +517,13 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			// es demasiado fácil perder una respuesta larga por reflejo si
 			// un solo ctrl+c pudiera cerrar la aplicación mientras genera.
 			next, cmd := m.cancelTurn()
+			return true, next, cmd
+		}
+		if m.mode == ModeCompact {
+			// Same reasoning as ModeBusy above: a compaction is also a
+			// model call in flight, and a lone ctrl+c should cancel it
+			// rather than risk closing the whole program by reflex.
+			next, cmd := m.cancelCompact()
 			return true, next, cmd
 		}
 		if m.pendingQuit {
@@ -737,6 +844,23 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 	m.live = liveTurn{}
 	m.mode = ModeChat
 	m.animOffset = 0
+
+	// The §10 auto-trigger: once this turn's own answer lands, check
+	// whether the conversation just crossed [compact].trigger_pct of the
+	// active model's window and, if so, compact before the next prompt
+	// rather than waiting for the user to notice and type /compact
+	// themselves. m.cat.Get can fail (no catalog, or a model the catalog
+	// does not know) — same as applyModelChosen's own CheckSwap guard,
+	// that leaves nothing trustworthy to compare against, so the trigger
+	// simply does not fire rather than guessing a window.
+	if m.compactAuto {
+		if model, ok := m.cat.Get(m.model); ok {
+			window := model.EffectiveContext()
+			if convo.NeedsCompact(m.conv.ContextTokens(), window, m.compactTriggerPct) {
+				return m.startCompact("")
+			}
+		}
+	}
 	return m, nil
 }
 

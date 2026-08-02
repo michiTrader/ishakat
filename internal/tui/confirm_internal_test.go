@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,6 +11,22 @@ import (
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
 )
+
+// fakeCompactStreamer answers every request with text as a single delta —
+// exactly the shape engine.Summarize's own RunToCompletion call expects
+// (one finished string, §12) — so the confirm-dialog tests below can drive
+// a real round trip through ModeCompact instead of falling into the
+// no-engine drop-oldest fallback startCompact takes when root.compactEng is
+// nil (see rootWithCatalog, which never sets it).
+func fakeCompactStreamer(text string) engine.Streamer {
+	return func(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
+		ch := make(chan engine.Event, 2)
+		ch <- engine.Event{Kind: engine.EventDelta, Text: text}
+		ch <- engine.Event{Kind: engine.EventDone}
+		close(ch)
+		return ch, nil
+	}
+}
 
 // catalogModel builds a catalog.Model directly, for the confirm-dialog tests
 // below that need specific Context/Caps/Health values catalogWithModels'
@@ -69,6 +86,12 @@ func TestConfirmAcceptingCompactSwitchesAndShrinksTheConversation(t *testing.T) 
 
 	root := rootWithCatalog(catalogOf(from, to))
 	root.model = from.Ref
+	// A real compact engine (Step 12): without one, startCompact skips
+	// straight to the drop-oldest fallback (see fakeCompactStreamer's own
+	// comment), which is a different code path than this test means to
+	// cover.
+	root.compactEng = engine.New(fakeCompactStreamer("resumen de prueba."), 0)
+	root.compactModel = "compact/model"
 	for i := 0; i < 20; i++ {
 		root.conv.Add(bigConfirmMessage(convo.RoleUser, 3500))
 		root.conv.Add(bigConfirmMessage(convo.RoleAssistant, 3500))
@@ -82,13 +105,28 @@ func TestConfirmAcceptingCompactSwitchesAndShrinksTheConversation(t *testing.T) 
 		t.Fatalf("setup failed: mode = %v, want ModeConfirm", m.(Root).mode)
 	}
 
-	// The compact row is selected by default (index 0): enter accepts it
-	// without needing to move the cursor first.
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// The compact row is selected by default (index 0): enter starts the
+	// async compaction (Step 12), which opens ModeCompact until
+	// compact_model answers instead of finishing the switch on the spot.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.(Root).mode != ModeCompact {
+		t.Fatalf("mode = %v, want ModeCompact while compact_model answers", m.(Root).mode)
+	}
+	if cmd == nil {
+		t.Fatal("accepting compact should schedule the summarize call")
+	}
+	done, ok := cmd().(compactDoneMsg)
+	if !ok {
+		t.Fatalf("expected a compactDoneMsg from the scheduled command, got %T", cmd())
+	}
+	if done.err != nil {
+		t.Fatalf("fakeCompactStreamer should not fail: %v", done.err)
+	}
+	m, _ = m.Update(done)
 
 	got := m.(Root)
 	if got.mode != ModeChat {
-		t.Fatalf("mode = %v, want ModeChat after accepting compact", got.mode)
+		t.Fatalf("mode = %v, want ModeChat after the summary lands", got.mode)
 	}
 	if got.model != to.Ref {
 		t.Errorf("model = %q, want %q", got.model, to.Ref)
@@ -99,15 +137,26 @@ func TestConfirmAcceptingCompactSwitchesAndShrinksTheConversation(t *testing.T) 
 	if after := got.conv.ContextTokens(); after >= before {
 		t.Errorf("context after compacting = %d, want it smaller than the original %d", after, before)
 	}
-	if len(got.transcript) != 1 || !strings.Contains(got.transcript[0].text, to.Ref) {
-		t.Errorf("expected one confirmation notice naming %q, got %v", to.Ref, got.transcript)
+	// One notice for the §9.8 "compactado: ... tokens" line, one for the
+	// §4.6 "── now: ... ──" switch confirmation — startCompact's
+	// reportCompactDone and finishSwitchAfterCompact each append their own.
+	if len(got.transcript) != 2 {
+		t.Fatalf("expected two notices (compaction summary + model switch), got %v", got.transcript)
 	}
-	// The picker's own confirmation line is a marker, not a real summary
-	// from a model: it has to say so on disk (compact.go's ApplySummary is
-	// the source of truth for what a future /compact call can trust).
+	if !strings.Contains(got.transcript[0].text, "compactado") {
+		t.Errorf("first notice should report the compaction, got %q", got.transcript[0].text)
+	}
+	if !strings.Contains(got.transcript[1].text, to.Ref) {
+		t.Errorf("second notice should confirm the switch to %q, got %q", to.Ref, got.transcript[1].text)
+	}
+	// The summary text itself has to be the one the fake model answered
+	// with, not a placeholder or a discard marker.
 	last := got.conv.Messages[len(got.conv.Messages)-1]
 	if !last.Has(convo.BlockSummary) {
 		t.Fatalf("expected the last message to carry a BlockSummary after compacting, got %+v", last)
+	}
+	if got, want := last.Text(), "resumen de prueba."; got != want {
+		t.Errorf("summary text = %q, want %q (the fake model's own answer)", got, want)
 	}
 }
 

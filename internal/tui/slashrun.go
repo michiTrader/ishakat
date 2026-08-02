@@ -91,6 +91,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m, tea.Quit
 	case slash.KindModel:
 		return m.runModelCommand(args)
+	case slash.KindCompact:
+		return m.startCompact("")
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + cmd.Usage() + " todavia no esta implementado")
 	}

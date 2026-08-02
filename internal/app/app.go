@@ -74,6 +74,26 @@ func Run(version string) int {
 		fmt.Fprintf(os.Stderr, "⚠ [%s] %s\n", w.Where, w.Msg)
 	}
 
+	// compact_model gets its own Engine (§10, Step 12): it can name a
+	// different provider than the conversation's own model, and
+	// BuildEngine's NewStreamer binds one Engine to exactly one provider
+	// at construction time — there is no way to reuse eng above for a
+	// second provider. ResolveModel's own empty-string rule ("" falls back
+	// to app.default_model) means a configuration that never mentions
+	// compact_model still compacts, with whatever model the conversation
+	// already uses. A resolution failure here is not fatal any more than
+	// eng's own is above: it only means /compact falls back to
+	// convo.DropOldest (see tui.Root.startCompact), not that the whole
+	// interface refuses to start.
+	compactEng, compactRef, _, compactWarn, compactErr := BuildEngine(cfg, cfg.App.CompactModel, version)
+	if compactErr != nil {
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", compactErr)
+		compactEng = nil
+	}
+	if compactWarn != "" {
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", compactWarn)
+	}
+
 	root := tui.NewRoot(tui.Options{
 		Version: version,
 		CWD:     cwd,
@@ -94,6 +114,14 @@ func Run(version string) int {
 		Alias:      cfg.Alias,
 		Favorites:  cfg.Favorites.List,
 		PreferFree: cfg.Catalog.PreferFree,
+
+		CompactEngine:        compactEng,
+		CompactModel:         compactRef.Ref,
+		CompactAuto:          cfg.Compact.Auto,
+		CompactTriggerPct:    cfg.Compact.TriggerPct,
+		CompactKeepLastTurns: cfg.Compact.KeepLastTurns,
+		CompactStrategy:      cfg.Compact.Strategy,
+		CompactOnError:       cfg.Compact.OnError,
 	})
 
 	p := tea.NewProgram(root)
