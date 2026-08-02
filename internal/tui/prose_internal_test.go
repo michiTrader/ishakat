@@ -65,17 +65,21 @@ func TestTheLiveTurnWrapsWhileItStreams(t *testing.T) {
 	const width = 40
 	const n = 300 // strings.Repeat("z", n) below; keep the two in sync
 
-	var m tea.Model = newVisibleRoot()
+	root := newVisibleRoot()
+	eng, advance := echoEngine(true)
+	root = withEngine(root, eng)
+	var m tea.Model = root
 	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 	m = typeInto(m, strings.Repeat("z", n))
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	released := 0 // characters driveEcho has handed to the live turn so far
-	for tick := 0; tick < n/echoChunkSize+5; tick++ {
+	released := 0
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
 		content := m.View().Content
 		for row, line := range strings.Split(content, "\n") {
 			if got := lipgloss.Width(line); got > width {
-				t.Fatalf("tick %d: row %d is %d columns wide in a %d-column terminal: %q", tick, row, got, width, stripANSI(line))
+				t.Fatalf("row %d is %d columns wide in a %d-column terminal: %q", row, got, width, stripANSI(line))
 			}
 		}
 
@@ -83,18 +87,16 @@ func TestTheLiveTurnWrapsWhileItStreams(t *testing.T) {
 		if echoed > n {
 			echoed = n
 		}
-		// The user's own message (n characters) is always fully committed
-		// above the live turn; the answer contributes however much of it
-		// has streamed (or, once finishTurn has run, all of it) on top.
 		want := n + echoed
 		if got := strings.Count(stripANSI(content), "z"); got != want {
-			t.Fatalf("tick %d: %d characters on screen, want %d (released so far: %d, live active: %v)",
-				tick, got, want, released, m.(Root).live.active)
+			t.Fatalf("%d characters on screen, want %d (released so far: %d, live active: %v)",
+				got, want, released, m.(Root).live.active)
 		}
 
 		if !m.(Root).live.active {
-			return // finishTurn already ran and the screen above was already checked against it
+			return
 		}
+		advance()
 		m, _ = m.Update(streamTickMsg{})
 		released += echoChunkSize
 	}
