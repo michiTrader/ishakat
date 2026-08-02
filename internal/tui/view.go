@@ -51,6 +51,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeConfirm {
 		return m.renderConfirm()
 	}
+	if m.mode == ModeCompact {
+		return m.renderCompact()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

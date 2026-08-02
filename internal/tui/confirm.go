@@ -49,9 +49,9 @@ func newConfirmDialog(from, to catalog.Model, plan engine.Plan) confirmDialog {
 // confirmOptionsFor decides which rows the dialog offers, by conflict
 // priority — a Plan can carry more than one Conflict at once, and only one
 // row set can be shown. A context conflict is the one this package can
-// remedy mechanically (§4.6): compact now — with a placeholder summary,
-// since the real compact_model call is Step 12's — or drop the oldest turns
-// outright, exactly the two choices §9.5's wireframe draws; it takes
+// remedy mechanically (§4.6): compact now (Step 12's startCompact, a real
+// compact_model summary) or drop the oldest turns outright, exactly the two
+// choices §9.5's wireframe draws; it takes
 // priority because switching without fixing it would just fail on the very
 // next request. Failing that, a missing credential (NoAuth) also offers only
 // cancel: §4.6 says the credential has to exist "before you're allowed to
@@ -125,53 +125,37 @@ func (m Root) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// resolveConfirm applies whichever option was selected and, unless it was
-// cancel, finishes the switch the same way an unconflicted applyModelChosen
-// always has (§4.6's confirmation line included).
+// resolveConfirm applies whichever option was selected. The proceed and
+// drop-oldest remedies are instant and finish the switch right here, the
+// same way an unconflicted applyModelChosen always has (§4.6's confirmation
+// line included); the compact remedy hands off to startCompact (Step 12),
+// which is asynchronous — it draws its own ModeCompact screen and finishes
+// the switch itself once engine.Summarize answers (see compact.go's
+// finishCompact).
 func (m Root) resolveConfirm() (tea.Model, tea.Cmd) {
 	opt := m.confirm.selected()
-	to := m.confirm.to.Ref
-	m.mode = ModeChat
+	to := m.confirm.to
+	m.confirm = confirmDialog{}
 
 	switch {
 	case opt.proceed:
 		// "Switch anyway" past a caps warning: nothing to mutate, the
 		// conversation's history is unchanged and only future turns degrade.
+		m.mode = ModeChat
 	case opt.action == engine.ActionCompact:
-		m.applyPlaceholderCompact()
+		return m.startCompact(to.Ref)
 	case opt.action == engine.ActionDropOldest:
-		m.applyDropOldest(m.confirm.to.EffectiveContext())
+		m.applyDropOldest(to.EffectiveContext())
+		m.mode = ModeChat
 	default: // engine.ActionCancel
-		m.confirm = confirmDialog{}
+		m.mode = ModeChat
 		return m, nil
 	}
 
-	m.confirm = confirmDialog{}
-	m.model = to
-	m.footer.Model = to
-	return m.slashNotice(confirmLine(m.lay.glyphs(), to))
+	m.model = to.Ref
+	m.footer.Model = to.Ref
+	return m.slashNotice(confirmLine(m.lay.glyphs(), to.Ref))
 }
-
-// applyPlaceholderCompact appends a summary message that replaces the
-// oldest turns, using defaultCompactKeepTurns' own window (see
-// engine.CheckSwap's EstAfter, which scored this same plan for the dialog's
-// label). The summary's text says plainly that it is a placeholder: Step 12
-// is what teaches /compact to actually call compact_model and write a real
-// one, and the JSONL on disk must never claim a model wrote prose it did
-// not.
-func (m *Root) applyPlaceholderCompact() {
-	p := convo.PlanCompact(m.conv.Messages, defaultConfirmKeepTurns)
-	if p.Empty() {
-		return
-	}
-	m.conv.ApplySummary(p, "(resumen provisional: /compact aún no genera resúmenes reales — Paso 12)", "")
-}
-
-// defaultConfirmKeepTurns mirrors engine.defaultCompactKeepTurns (unexported
-// there, so this package keeps its own copy) — the dialog's own compaction
-// has to keep the same turns EstAfter already estimated, or the label the
-// user just read would stop matching what actually happens.
-const defaultConfirmKeepTurns = 4
 
 // applyDropOldest discards the oldest messages until the conversation fits
 // under window, using the exact same "append a marker, never delete" shape

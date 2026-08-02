@@ -3,7 +3,7 @@
 A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
 no runtime, designed to be usable at 40 columns on a phone.
 
-> **Status: Phase 2 (prototype), step 11 of 13 closed.**
+> **Status: Phase 2 (prototype), step 12 of 13 closed.**
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
 > fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, `/model`
@@ -11,8 +11,11 @@ no runtime, designed to be usable at 40 columns on a phone.
 > mid-conversation, and a switch that would lose context, drop an
 > unsupported block or hit a provider with no credential stops for
 > confirmation (§4.6/§9.5) instead of failing silently on the next turn.
-> See [What works today](#what-works-today) before filing a bug — `/compact`
-> and `--resume` remain scheduled work.
+> `/compact` now actually calls `compact_model` to summarize older turns —
+> by hand, from the confirmation dialog's remedy, or automatically once
+> `[compact].trigger_pct` is crossed — with a `drop-oldest` fallback if the
+> summary call fails. See [What works today](#what-works-today) before
+> filing a bug — `--resume` remains scheduled work.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
@@ -27,10 +30,11 @@ no runtime, designed to be usable at 40 columns on a phone.
 | Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested, and wired into both `/model` and the `ctrl+p` picker |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
 | `ishakat` (interactive TUI) | ✅ streams real provider responses when a provider is configured and reachable |
-| Slash commands: `/help`, `/clear`, `/new`, `/exit`, `/model`, plus autocomplete dropdown (§9.6) | ✅ implemented in `internal/slash` + `internal/tui`; the other §13 commands are listed and reply "not implemented yet" |
+| Slash commands: `/help`, `/clear`, `/new`, `/exit`, `/model`, `/compact`, plus autocomplete dropdown (§9.6) | ✅ implemented in `internal/slash` + `internal/tui`; the other §13 commands are listed and reply "not implemented yet" |
 | Model picker (`ctrl+p`, §9.4) | ✅ implemented in `internal/tui.Picker`: fuzzy search, provider grouping, filters (all/free/tools/vision/favorites) |
 | Hot swap confirmation (§4.6/§9.5) | ✅ `engine.CheckSwap` plus the `internal/tui` conflict dialog: compact/drop-oldest for a context conflict, switch-anyway for a capability warning, cancel-only when the destination has no credential |
-| `/compact`, `--resume` | ❌ steps 12–13, not written yet |
+| `/compact` client-side summarization (§9.8/§10) | ✅ `engine.Summarize` calls `compact_model` to replace older turns with a summary, kept auditable via `convo.ApplySummary`; falls back to `drop-oldest` per `[compact].on_error` if the call fails, and auto-triggers once `[compact].trigger_pct` is crossed |
+| `--resume` | ❌ step 13, not written yet |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly

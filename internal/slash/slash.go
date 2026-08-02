@@ -36,6 +36,11 @@ const (
 	// KindModel opens the model picker (§9.4) or switches directly when the
 	// argument resolves unambiguously (§4.5). Step 10.
 	KindModel
+	// KindCompact summarizes the older turns with compact_model, replacing
+	// them with a BlockSummary (§10, Step 12). Manual only — the automatic
+	// trigger at [compact].trigger_pct runs the same underlying flow without
+	// going through this Kind at all.
+	KindCompact
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -78,7 +83,7 @@ var Commands = []Command{
 	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
 	{Name: "models", Describe: "explorar catalogo", Kind: KindUnimplemented},
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
-	{Name: "compact", Describe: "resumir contexto", Kind: KindUnimplemented},
+	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
 	{Name: "resume", Describe: "reabrir una sesion", Kind: KindUnimplemented},
 	{Name: "clear", Describe: "limpiar pantalla", Kind: KindClear},
