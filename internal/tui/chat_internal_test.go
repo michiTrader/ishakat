@@ -132,11 +132,13 @@ func TestElapsedIsZeroBeforeTheTurnStarts(t *testing.T) {
 // newHeadlessRoot builds a Root that never needs a real terminal: no TTY means
 // no banner and no cursor, which keeps these tests about state, not pixels.
 func newHeadlessRoot() Root {
-	return NewRoot(Options{
+	root := NewRoot(Options{
 		Version: "0.0.0-test",
 		CWD:     "/home/user/projects/ishakat",
 		Theme:   theme.Load(""),
 		Cap:     theme.CapNone,
 		NoTTY:   true,
 	})
+	eng, _ := echoEngine(false)
+	return withEngine(root, eng)
 }
