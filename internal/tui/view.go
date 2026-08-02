@@ -48,11 +48,25 @@ func (m Root) renderRaw() string {
 
 	var b strings.Builder
 	b.WriteString(m.head())
+	if menu := m.slashMenuBlock(); menu != "" {
+		b.WriteString(menu)
+	}
 	b.WriteString(InputBox(m.lay, m.styles, m.input.View()))
 	b.WriteString("\n")
 	b.WriteString(RenderFooter(m.lay, m.footerState(), m.footerItems))
 
 	return b.String()
+}
+
+// slashMenuBlock is the §9.6 dropdown as drawn directly above the input box,
+// or "" when it has nothing to show. It is a method of its own — like
+// head() — because render and cursorFor must agree on its height down to the
+// row.
+func (m Root) slashMenuBlock() string {
+	if !m.menu.Active() {
+		return ""
+	}
+	return renderSlashMenu(m.lay, m.styles, m.menu) + "\n"
 }
 
 // head is everything drawn above the input box: the start-up banner (only
@@ -162,33 +176,19 @@ func (m Root) cursorFor() *tea.Cursor {
 	}
 	dx, dy := InputOrigin(m.lay)
 	c.Position.X += dx
-	c.Position.Y += dy + headRows(m.head())
+	c.Position.Y += dy + headRows(m.head()) + headRows(m.slashMenuBlock())
 	return c
 }
 
-// renderHelp dibuja la pantalla de ayuda de §9.7. El registro de slash
-// commands llega en el Paso 9; hasta entonces esta lista es estática y
-// documenta el mismo contrato que consumirá slash.Registry.
+// renderHelp draws the §9.7 help screen. The command list is generated from
+// m.commands (internal/slash.Registry.HelpLines) rather than hand-written:
+// Step 9 closes the gap this function's comment used to document — the
+// dropdown (slashMenuBlock) reads the very same table.
 func (m Root) renderHelp() string {
 	g := m.lay.glyphs()
 	var b strings.Builder
 	b.WriteString(helpHeading(g, "ishakat "+g.dot+" comandos") + "\n\n")
-	for _, line := range []string{
-		"/help              esta pantalla",
-		"/model [texto]     cambiar modelo",
-		"/models            explorar catálogo",
-		"/theme [nombre]    cambiar tema",
-		"/compact           resumir contexto",
-		"/new               conversación nueva",
-		"/resume            reabrir una sesión",
-		"/clear             limpiar pantalla",
-		"/copy [n]          copiar respuesta",
-		"/retry             reintentar último",
-		"/stats             tokens y costo",
-		"/config            config efectiva",
-		"/debug             diagnóstico",
-		"/exit              salir",
-	} {
+	for _, line := range m.commands.HelpLines() {
 		b.WriteString(" " + line + "\n")
 	}
 	b.WriteString("\n" + helpHeading(g, "atajos") + "\n\n")

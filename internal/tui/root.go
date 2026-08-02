@@ -11,6 +11,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/slash"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
@@ -130,6 +131,15 @@ type Root struct {
 	footerItems []string
 
 	help bool
+
+	// commands is the declarative slash-command table (§9.6/§9.7), resolved
+	// once at construction. Every /help line and every dropdown row is
+	// generated from it, never hand-duplicated.
+	commands slash.Registry
+
+	// menu is the autocomplete dropdown's own state (§9.6), recomputed from
+	// the input on every keystroke by slashMenuFor.
+	menu slashMenu
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -223,6 +233,7 @@ func NewRoot(o Options) Root {
 		eng:       engineOr(o.Engine),
 		model:     model,
 		system:    o.System,
+		commands:  slash.Default(),
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
@@ -375,6 +386,14 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		key := keyPressString(msg)
+		// The §9.6 dropdown claims up/down/tab, plus enter/esc repurposed to
+		// accept/close it, before they reach the switch below. Any key it
+		// does not recognise falls through unchanged.
+		if m.menu.Active() {
+			if handled, next, cmd := m.updateSlashMenu(key); handled {
+				return next, cmd
+			}
+		}
 		switch key {
 		case m.keys.Cancel:
 			return m, nil // nada que cancelar en ModeChat
@@ -382,6 +401,9 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				return m, nil
+			}
+			if slash.IsCommand(text) {
+				return m.runSlashLine(text)
 			}
 			return m.submit(text)
 		case m.keys.Newline:
@@ -391,6 +413,9 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	// Recomputed after every keystroke — printable rune, backspace, paste —
+	// so the dropdown always reflects what the textarea now holds.
+	m.menu = slashMenuFor(m.input.Value(), m.commands, m.menu)
 	return m, cmd
 }
 
