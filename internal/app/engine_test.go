@@ -1,0 +1,91 @@
+package app
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/provider/fake"
+)
+
+func TestBuildEngineResolvesTheDefaultModelAndRunsARealTurn(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{
+		fake.SSEDelta("hi"),
+		fake.SSEDone(),
+	}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+
+	eng, ref, system, warn, err := BuildEngine(cfg, "", "0.0.0-test")
+	if err != nil {
+		t.Fatalf("BuildEngine returned an error: %v", err)
+	}
+	if ref.Ref != "omniroute/auto/coding" {
+		t.Errorf("ref.Ref = %q, want %q", ref.Ref, "omniroute/auto/coding")
+	}
+	if system != "" {
+		t.Errorf("system = %q, want empty (cfgFor sets no system_prompt)", system)
+	}
+	if warn != "" {
+		t.Errorf("warn = %q, want empty", warn)
+	}
+
+	var buf engine.StreamBuf
+	req := engine.Request{Model: ref.WireID, Messages: []convo.Message{convo.User("hi there")}}
+	eng.Start(context.Background(), req, &buf)
+
+	text, _, _, _, turnErr := drainEngineTest(t, &buf)
+	if turnErr != nil {
+		t.Errorf("turn error = %v, want nil", turnErr)
+	}
+	if text != "hi" {
+		t.Errorf("text = %q, want %q", text, "hi")
+	}
+}
+
+func TestBuildEngineHonoursTheModelFlagOverTheDefault(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{fake.SSEDone()}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	_, ref, _, _, err := BuildEngine(cfg, "omniroute/gpt-5", "0.0.0-test")
+	if err != nil {
+		t.Fatalf("BuildEngine returned an error: %v", err)
+	}
+	if ref.WireID != "gpt-5" {
+		t.Errorf("ref.WireID = %q, want %q", ref.WireID, "gpt-5")
+	}
+}
+
+func TestBuildEngineFailsWithoutAnEnabledProvider(t *testing.T) {
+	cfg := &config.Config{Schema: config.Schema}
+	if _, _, _, _, err := BuildEngine(cfg, "", "0.0.0-test"); err == nil {
+		t.Fatal("BuildEngine with no providers configured should return an error, not a usable engine")
+	}
+}
+
+// drainEngineTest polls Drain the same way internal/engine's own tests do
+// (see drainUntilDone in engine_test.go), without needing Bubble Tea's
+// runtime.
+func drainEngineTest(t *testing.T, buf *engine.StreamBuf) (text, reasoning string, usage any, aborted bool, err error) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		chunk, rChunk, u, done, isAborted, e := buf.Drain()
+		text += chunk
+		reasoning += rChunk
+		if u != nil {
+			usage = u
+		}
+		if done {
+			return text, reasoning, usage, isAborted, e
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("turn never finished: the engine is stuck")
+	return "", "", nil, false, nil
+}

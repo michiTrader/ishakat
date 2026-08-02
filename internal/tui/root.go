@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -8,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
@@ -60,11 +63,34 @@ type Root struct {
 	input textarea.Model
 	live  liveTurn
 
-	// pendingEcho es el texto que el maniquí del Paso 3 "responde": sin
-	// engine todavía, el input hace eco de lo escrito para poder ver el
-	// streaming simulado y las transiciones de modo sin red real.
-	pendingEcho    []rune
-	pendingEchoPos int
+	// eng runs the turn (§7.3). Never nil: NewRoot pushes Options.Engine
+	// through engineOr, so a Root built without a provider still has
+	// something to call — it just fails the handshake with ErrNoProvider.
+	eng *engine.Engine
+
+	// buf is the landing zone for the turn currently in flight: the engine's
+	// goroutine writes into it, and streamTickMsg drains it on the repaint
+	// clock (that decoupling is StreamBuf's whole purpose). Non-nil exactly
+	// while a turn is live, which is also how drainStream tells "the tick
+	// arrived after the turn already closed" from a real drain.
+	buf *engine.StreamBuf
+
+	// cancel closes the live turn's context. It is the entire implementation
+	// of esc/ctrl+c per §7.4: the engine's run loop notices ctx.Err() and
+	// calls buf.finish(nil, true), so cancellation travels the same path as a
+	// normal ending instead of needing a second one.
+	cancel context.CancelFunc
+
+	// conv is the history that travels on every request. Root owns it because
+	// it is the only component that knows when a turn actually committed —
+	// the engine sees one Request at a time and has no memory between them.
+	conv convo.Conversation
+
+	// model is the resolved model reference (§4.2's Ref, the human-facing
+	// "provider/model", never the wire ID) and system the effective system
+	// prompt (§5.2's file-over-inline rule already applied by internal/app).
+	model  string
+	system string
 
 	transcript []transcriptEntry
 
@@ -123,6 +149,26 @@ type Options struct {
 
 	NoTTY bool
 
+	// Engine is the turn runner (§7.3), already built over a concrete
+	// provider by internal/app.BuildEngine. nil is a supported value and
+	// means "no provider configured": every turn then fails immediately with
+	// ErrNoProvider instead of panicking (see engineOr in engine.go). That
+	// default is what keeps this package's tests — which care about layout,
+	// not about the network — buildable from a bare Options.
+	Engine *engine.Engine
+
+	// Model is the model reference to show and to send, in §4.2's Ref form
+	// ("provider/model" or a bare alias as the user typed it), never the wire
+	// ID: the wire ID is the Streamer's business. Empty falls back to the
+	// placeholder the banner and footer have shown since Step 3.
+	Model string
+
+	// System is the effective system prompt (§5.2), already resolved by
+	// internal/app — file wins over inline, and an unreadable file has
+	// already been downgraded to a warning there. Empty means the request
+	// carries no system message at all, which is a legitimate configuration.
+	System string
+
 	// Termux says the host is Termux on Android, which is what
 	// battery_saver = "auto" — the documented default — is asking about (§14,
 	// docs/PLAN.md's comment on the key). Like NoTTY and Cap it is resolved by
@@ -153,6 +199,16 @@ func NewRoot(o Options) Root {
 	// without it leaves the whole repertoire mechanism drawing Unicode.
 	lay := NewLayout(80, 24, maxWidthOf(o.Cfg), animOff, o.NoTTY).WithGlyphs(o.Glyphs)
 
+	model := o.Model
+	if model == "" {
+		// Nothing resolved a model for us (a test, or a caller that only
+		// wants the frame). The banner and the footer still have to say
+		// something, and this is the placeholder they have shown since Step
+		// 3 — an actual turn will fail on ErrNoProvider long before the
+		// string is sent anywhere.
+		model = "auto/coding"
+	}
+
 	r := Root{
 		version:   o.Version,
 		cwd:       o.CWD,
@@ -164,6 +220,9 @@ func NewRoot(o Options) Root {
 		cfgBanner: o.Cfg == nil || o.Cfg.UI.Banner,
 		animMode:  anim.Mode,
 		cap:       o.Cap,
+		eng:       engineOr(o.Engine),
+		model:     model,
+		system:    o.System,
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
@@ -173,7 +232,7 @@ func NewRoot(o Options) Root {
 	}
 	// CWD is deliberately not stored in the footer state: it depends on the
 	// terminal width, so it is computed on every render by Root.footerState.
-	r.footer = FooterState{Model: "auto/coding"}
+	r.footer = FooterState{Model: model}
 	SetInputWidth(&r.input, r.lay)
 	return r
 }
@@ -257,10 +316,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.live.active {
 			return m, nil
 		}
-		return m.driveEcho()
-
-	case echoDoneMsg:
-		return m.finishTurn()
+		return m.drainStream()
 
 	case quitConfirmMsg:
 		m.pendingQuit = false
@@ -362,9 +418,12 @@ func (m Root) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// submit arranca el turno maniquí: sin red, sin engine, el input hace eco de
-// lo que escribiste como si fuera la respuesta (§ Paso 3 del PLAN). Aquí es
-// donde el Paso 8 conectará el engine real sin tocar el resto del Update.
+// submit opens a real turn against the engine (§7.3). Everything above the
+// engine call is unchanged from the Step 3 mannequin on purpose: the point of
+// that mannequin was that swapping it for the real runner would touch this
+// function and nothing else in Update, and that is what happened — the mode
+// change, the tickers, the transcript entry and the banner retirement below
+// are all exactly as they were.
 func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// head() only draws the startup banner while transcript is empty and no
 	// turn is live (see bannerText's comment), and this call is the one frame
@@ -411,8 +470,25 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.mode = ModeBusy
 	m.live.start(m.footer.Model)
-	m.pendingEcho = []rune(text)
-	m.pendingEchoPos = 0
+
+	// The user's turn joins the history before the request is built, because
+	// the request is the history: Active() has to already contain what we are
+	// asking about. The assistant's side is added by finishTurn, once there
+	// is something to add.
+	m.conv.Add(convo.User(text))
+
+	// context.Background rather than a parent: the program's lifetime is the
+	// terminal's, and there is no ctx to inherit here — Bubble Tea does not
+	// hand one to Update. Cancellation flows the other way, from cancelTurn.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.buf = &engine.StreamBuf{}
+	m.eng.Start(ctx, engine.Request{
+		Model:    m.model,
+		Messages: m.conv.Active(),
+		System:   m.system,
+	}, m.buf)
+
 	// The stream tick always runs — it is what delivers text. The animation
 	// tick is the spinner's clock, and ui.animations.mode = "off" (or its
 	// "auto" resolution: no TTY, no colour, or under 40 columns, see anim.go)
@@ -438,55 +514,114 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 // — the whole point of ctrl+l is discarding the transcript, not archiving it.
 func clearScreenCmd() tea.Msg { return tea.ClearScreen() }
 
-// echoChunkSize es cuántos caracteres del eco se liberan por cada drenado del
-// StreamBuf (§7.3): imita la cadencia de un streaming real sin necesitar red.
-const echoChunkSize = 3
-
-// driveEcho libera el siguiente trozo del eco pendiente y decide si el turno
-// sigue vivo o terminó. Sustituye, en forma, al Drain() de engine.StreamBuf
-// que llegará en el Paso 8: mismo punto de entrada, misma decisión de
-// re-emitir el tick o cerrar el turno.
-func (m Root) driveEcho() (tea.Model, tea.Cmd) {
-	if m.pendingEchoPos >= len(m.pendingEcho) {
-		return m.finishTurn()
+// drainStream moves whatever the engine's goroutine has produced since the
+// last tick into the live turn, and decides whether the turn is still running
+// (re-arm the tick) or over (close it). It is the only reader of m.buf.
+//
+// One Drain per tick, never one per token, is the entire point of StreamBuf:
+// a provider can hand over 150 deltas a second and this still repaints at
+// StreamIntervalMS.
+func (m Root) drainStream() (tea.Model, tea.Cmd) {
+	if m.buf == nil {
+		// A tick that outlived its turn — cancelTurn and finishTurn both
+		// clear buf, and there can be one tick already in flight when they
+		// run. Dropping it is correct and deliberately silent.
+		return m, nil
 	}
-	end := m.pendingEchoPos + echoChunkSize
-	if end > len(m.pendingEcho) {
-		end = len(m.pendingEcho)
+	chunk, reasoning, usage, done, aborted, err := m.buf.Drain()
+	if reasoning != "" {
+		m.live.appendReasoning(reasoning)
 	}
-	m.live.append(string(m.pendingEcho[m.pendingEchoPos:end]))
-	m.pendingEchoPos = end
-	return m, tickStream()
+	if chunk != "" {
+		m.live.append(chunk)
+	}
+	if usage != nil {
+		m.live.usage = usage
+	}
+	if !done {
+		return m, tickStream()
+	}
+	return m.finishTurn(err, aborted)
 }
 
-// finishTurn comete el turno vivo al scrollback (§7.5) y vuelve a ModeChat.
-// Si el usuario canceló a mitad de camino, el mensaje queda marcado
-// (liveTurn.aborted); en el Paso 3 esto solo se refleja en el texto, porque
-// convo.Message.Aborted se conecta recién en el Paso 8.
-func (m Root) finishTurn() (tea.Model, tea.Cmd) {
-	text := m.live.body()
-	if m.live.aborted {
+// finishTurn commits the live turn to the transcript and to the history, then
+// returns to ModeChat (§7.5). err is the provider's failure (nothing more is
+// coming and it was not the user's doing) and aborted the user's cancellation
+// — they are mutually exclusive by StreamBuf's own contract, and the engine
+// makes cancellation win when both were racing.
+func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
+	body := m.live.body()
+
+	text := body
+	switch {
+	case aborted:
 		text += " [cancelado]"
+	case err != nil:
+		// The error is shown in the transcript rather than in a transient
+		// banner because it belongs to that turn: scrolling back later has to
+		// still explain why the answer stops where it does.
+		if text != "" {
+			text += "\n"
+		}
+		text += "⚠ " + err.Error()
 	}
+
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
 	})
+
+	// The history keeps the model's actual words — not the "[cancelado]"
+	// suffix or the error line, which are presentation. A cancelled turn is
+	// still recorded (with Aborted set) because the user saw it and may well
+	// refer to it in the next message; a turn that failed before producing
+	// anything at all is not, since an empty assistant message would only
+	// confuse the next request.
+	if body != "" || aborted {
+		msg := convo.NewMessage(convo.RoleAssistant, convo.TextBlock(body))
+		if r := m.live.reasoning(); r != "" {
+			msg.Blocks = append(msg.Blocks, convo.ReasoningBlock(r))
+		}
+		msg.Model = m.live.model
+		msg.Usage = m.live.usage
+		msg.Aborted = aborted
+		m.conv.Add(msg)
+	}
+
+	m.releaseTurn()
 	m.live = liveTurn{}
-	m.pendingEcho = nil
-	m.pendingEchoPos = 0
 	m.mode = ModeChat
 	m.animOffset = 0
 	return m, nil
 }
 
-// cancelTurn implementa §7.4: esc (o el primer ctrl+c en ModeBusy) marca el
-// turno como abortado y corta lo que quedaba por "generar"; el próximo
-// streamTickMsg en vuelo drena lo restante (que ya es cero) y cierra con
-// finishTurn.
+// releaseTurn drops everything tied to the turn that just ended. Calling the
+// context's cancel even on a turn that finished by itself is required, not
+// merely tidy: a CancelFunc that is never called leaks the context and the
+// timer goroutine behind it, and go vet says so.
+func (m *Root) releaseTurn() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	m.buf = nil
+}
+
+// cancelTurn implements §7.4: esc (or the first ctrl+c in ModeBusy) closes
+// the turn's context. The engine's run loop sees ctx.Err() and calls
+// buf.finish(nil, true), so the next streamTickMsg drains whatever had
+// already arrived and closes through finishTurn — cancellation takes the
+// ordinary ending's path instead of a second one of its own.
+//
+// The turn is marked aborted here rather than waiting for the drain so the
+// frame reflects the keypress immediately: the engine's goroutine may take a
+// scheduling slice to notice, and a UI that looks unchanged for a tick after
+// esc reads as if the key was missed.
 func (m Root) cancelTurn() (tea.Model, tea.Cmd) {
 	m.live.aborted = true
-	m.pendingEcho = m.pendingEcho[:m.pendingEchoPos] // no sigue "generando"
-	return m, nil
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return m, tickStream()
 }
 
 // keepInline is how many of the transcript's most recent entries evictOverflow
