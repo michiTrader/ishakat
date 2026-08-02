@@ -1,0 +1,235 @@
+// confirm.go implements the §9.5 conflict dialog: the overlay ModeConfirm
+// draws when engine.CheckSwap (Step 11, §4.6) reports a Plan that is not OK.
+// Like Picker, it is a value type — every method takes a confirmDialog and
+// returns the next one — and it never talks to engine.CheckSwap itself: Root
+// calls that in applyModelChosen and hands this component the resulting
+// engine.Plan to render and to walk with the keyboard.
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/catalog"
+	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/engine"
+)
+
+// confirmOption is one selectable row of the dialog. action is only
+// meaningful for the two mechanical remedies (compact, drop the oldest
+// turns) — a row offering ActionCancel just closes the dialog.
+type confirmOption struct {
+	action engine.Action
+	label  string
+}
+
+// confirmDialog is ModeConfirm's own state.
+type confirmDialog struct {
+	from, to catalog.Model
+	plan     engine.Plan
+	options  []confirmOption
+	sel      int
+}
+
+// newConfirmDialog builds the dialog from the plan CheckSwap already
+// produced. It never calls CheckSwap itself — Root did that once, in
+// applyModelChosen, and handing the same Plan through keeps the dialog from
+// ever disagreeing with the check that opened it.
+func newConfirmDialog(from, to catalog.Model, plan engine.Plan) confirmDialog {
+	return confirmDialog{from: from, to: to, plan: plan, options: confirmOptionsFor(plan)}
+}
+
+// confirmOptionsFor decides which rows the dialog offers. A context conflict
+// is the only one this package can remedy mechanically (§4.6): compact now
+// — with a placeholder summary, since the real compact_model call is Step
+// 12's — or drop the oldest turns outright, exactly the two choices §9.5's
+// wireframe draws. Every other conflict (missing capabilities, no resolved
+// credential) has no mechanical fix here, so the only row is cancel: caps
+// loss is a warning to read, not a decision this dialog can act on, and a
+// missing credential cannot be worked around by discarding messages.
+func confirmOptionsFor(plan engine.Plan) []confirmOption {
+	if !plan.Has(engine.ContextTooSmall) {
+		return []confirmOption{{action: engine.ActionCancel, label: "cancelar"}}
+	}
+	return []confirmOption{
+		{action: engine.ActionCompact, label: fmt.Sprintf("compactar y cambiar  (~%s)", formatContextTokens(plan.EstAfter))},
+		{action: engine.ActionDropOldest, label: "cambiar y recortar los turnos más viejos"},
+		{action: engine.ActionCancel, label: "cancelar"},
+	}
+}
+
+// moveSel moves the selection by delta rows, wrapping like Picker.moveSel.
+func (d confirmDialog) moveSel(delta int) confirmDialog {
+	if len(d.options) == 0 {
+		return d
+	}
+	n := len(d.options)
+	d.sel = ((d.sel+delta)%n + n) % n
+	return d
+}
+
+// selected is the option under the cursor. Every dialog has at least one row
+// (confirmOptionsFor never returns an empty slice), so there is no empty
+// case to guard here the way Picker.selected asks its callers to.
+func (d confirmDialog) selected() confirmOption { return d.options[d.sel] }
+
+// updateConfirm handles every key while mode == ModeConfirm (§9.5). Like
+// updatePicker it owns the keyboard outright: there is nothing underneath it
+// to fall through to.
+func (m Root) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	switch keyPressString(key) {
+	case m.keys.Cancel:
+		m.mode = ModeChat
+		m.confirm = confirmDialog{}
+		return m, nil
+	case "up":
+		m.confirm = m.confirm.moveSel(-1)
+		return m, nil
+	case "down":
+		m.confirm = m.confirm.moveSel(1)
+		return m, nil
+	case m.keys.Submit:
+		return m.resolveConfirm()
+	}
+	return m, nil
+}
+
+// resolveConfirm applies whichever option was selected and, unless it was
+// cancel, finishes the switch the same way an unconflicted applyModelChosen
+// always has (§4.6's confirmation line included).
+func (m Root) resolveConfirm() (tea.Model, tea.Cmd) {
+	opt := m.confirm.selected()
+	to := m.confirm.to.Ref
+	m.mode = ModeChat
+
+	switch opt.action {
+	case engine.ActionCompact:
+		m.applyPlaceholderCompact()
+	case engine.ActionDropOldest:
+		m.applyDropOldest(m.confirm.to.EffectiveContext())
+	default: // engine.ActionCancel
+		m.confirm = confirmDialog{}
+		return m, nil
+	}
+
+	m.confirm = confirmDialog{}
+	m.model = to
+	m.footer.Model = to
+	return m.slashNotice(confirmLine(m.lay.glyphs(), to))
+}
+
+// applyPlaceholderCompact appends a summary message that replaces the
+// oldest turns, using defaultCompactKeepTurns' own window (see
+// engine.CheckSwap's EstAfter, which scored this same plan for the dialog's
+// label). The summary's text says plainly that it is a placeholder: Step 12
+// is what teaches /compact to actually call compact_model and write a real
+// one, and the JSONL on disk must never claim a model wrote prose it did
+// not.
+func (m *Root) applyPlaceholderCompact() {
+	p := convo.PlanCompact(m.conv.Messages, defaultConfirmKeepTurns)
+	if p.Empty() {
+		return
+	}
+	m.conv.ApplySummary(p, "(resumen provisional: /compact aún no genera resúmenes reales — Paso 12)", "")
+}
+
+// defaultConfirmKeepTurns mirrors engine.defaultCompactKeepTurns (unexported
+// there, so this package keeps its own copy) — the dialog's own compaction
+// has to keep the same turns EstAfter already estimated, or the label the
+// user just read would stop matching what actually happens.
+const defaultConfirmKeepTurns = 4
+
+// applyDropOldest discards the oldest messages until the conversation fits
+// under window, using the exact same "append a marker, never delete" shape
+// compaction uses (convo.ApplySummary) so both remedies are equally
+// auditable from the JSONL later — the only difference is the marker names
+// itself as a discard rather than a summary.
+func (m *Root) applyDropOldest(window int) {
+	idx := convo.DropOldest(m.conv.Messages, window)
+	if len(idx) == 0 {
+		return
+	}
+	m.conv.ApplySummary(convo.Plan{Replace: idx}, "(turnos más viejos descartados al cambiar de modelo)", "")
+}
+
+// renderConfirm draws the §9.5 overlay. Like renderPicker it replaces the
+// whole live region — there is nothing left to type into chat while this
+// dialog owns the keyboard — and, also like renderPicker, it draws no box
+// border: this package's glyph table (glyphs.go) has no corner/side
+// characters, and inventing one for a single screen is exactly the
+// temptation that file's own comment warns against.
+func (m Root) renderConfirm() string {
+	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
+	d := m.confirm
+
+	var b strings.Builder
+	b.WriteString(" cambiar modelo\n")
+	fmt.Fprintf(&b, " de  %s   %s\n", d.from.Display(), contextLabel(d.from))
+	fmt.Fprintf(&b, " a   %s   %s\n", d.to.Display(), contextLabel(d.to))
+	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+
+	for _, line := range confirmConflictLines(g, d.plan) {
+		b.WriteString(" " + line + "\n")
+	}
+
+	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	for i, opt := range d.options {
+		pointer := " "
+		if i == d.sel {
+			pointer = g.inputPrefix
+		}
+		line := pointer + " " + opt.label
+		if i == d.sel {
+			line = m.styles.Accent.Render(line)
+		}
+		b.WriteString(" " + line + "\n")
+	}
+
+	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	fmt.Fprintf(&b, " %s move  enter choose  esc cancel\n", g.scrollHint)
+	return b.String()
+}
+
+// confirmConflictLines renders every conflict in the plan as one honest,
+// human-readable line — never a bare "conflict", always what specifically
+// will not work and why, the same rule §4.5 already holds for "model not
+// found".
+func confirmConflictLines(g glyphs, plan engine.Plan) []string {
+	var lines []string
+	for _, c := range plan.Conflicts {
+		switch c.Kind {
+		case engine.ContextTooSmall:
+			lines = append(lines, fmt.Sprintf("%s la conversación usa %s tok y no cabe en %s.",
+				g.warnMark, formatContextTokens(c.Tokens), formatContextTokens(c.Window)))
+		case engine.MissingCaps:
+			lines = append(lines, fmt.Sprintf("%s %s se van a degradar a texto descriptivo.",
+				g.warnMark, missingCapsLabel(c.Missing)))
+		case engine.NoAuth:
+			lines = append(lines, fmt.Sprintf("%s falta credencial para este proveedor.", g.warnMark))
+		}
+	}
+	return lines
+}
+
+// missingCapsLabel names, in Spanish prose matching the rest of this
+// dialog's copy, which kinds of content the destination model cannot serve.
+func missingCapsLabel(c catalog.Caps) string {
+	var parts []string
+	if c.Vision {
+		parts = append(parts, "las imágenes")
+	}
+	if c.Tools {
+		parts = append(parts, "los resultados de herramientas")
+	}
+	if len(parts) == 0 {
+		return "algunos bloques"
+	}
+	return strings.Join(parts, " y ")
+}
