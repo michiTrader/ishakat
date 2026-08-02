@@ -106,11 +106,13 @@ func assertASCII(t *testing.T, where, view string) {
 // newRootWithGlyphs is newVisibleRoot restricted to a repertoire: it claims a
 // TTY so the banner is drawn, because the logo is where the report started.
 func newRootWithGlyphs(set theme.GlyphSet) Root {
-	return NewRoot(Options{
+	root := NewRoot(Options{
 		Version: "0.0.0-test",
 		CWD:     "~/projects/ishakat",
 		Theme:   theme.Load(""),
 		Cap:     theme.CapNone,
 		Glyphs:  set,
 	})
+	eng, _ := echoEngine(false)
+	return withEngine(root, eng)
 }
