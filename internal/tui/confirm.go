@@ -19,10 +19,15 @@ import (
 
 // confirmOption is one selectable row of the dialog. action is only
 // meaningful for the two mechanical remedies (compact, drop the oldest
-// turns) — a row offering ActionCancel just closes the dialog.
+// turns) — a row offering ActionCancel just closes the dialog. proceed is
+// the one row that has no engine.Action of its own: "switch anyway" past a
+// capability warning, a TUI-only extension over §4.6's literal three-action
+// sketch (there is nothing for engine.CheckSwap to compute here — the
+// switch just happens, unmodified).
 type confirmOption struct {
-	action engine.Action
-	label  string
+	action  engine.Action
+	proceed bool
+	label   string
 }
 
 // confirmDialog is ModeConfirm's own state.
@@ -41,22 +46,42 @@ func newConfirmDialog(from, to catalog.Model, plan engine.Plan) confirmDialog {
 	return confirmDialog{from: from, to: to, plan: plan, options: confirmOptionsFor(plan)}
 }
 
-// confirmOptionsFor decides which rows the dialog offers. A context conflict
-// is the only one this package can remedy mechanically (§4.6): compact now
-// — with a placeholder summary, since the real compact_model call is Step
-// 12's — or drop the oldest turns outright, exactly the two choices §9.5's
-// wireframe draws. Every other conflict (missing capabilities, no resolved
-// credential) has no mechanical fix here, so the only row is cancel: caps
-// loss is a warning to read, not a decision this dialog can act on, and a
-// missing credential cannot be worked around by discarding messages.
+// confirmOptionsFor decides which rows the dialog offers, by conflict
+// priority — a Plan can carry more than one Conflict at once, and only one
+// row set can be shown. A context conflict is the one this package can
+// remedy mechanically (§4.6): compact now — with a placeholder summary,
+// since the real compact_model call is Step 12's — or drop the oldest turns
+// outright, exactly the two choices §9.5's wireframe draws; it takes
+// priority because switching without fixing it would just fail on the very
+// next request. Failing that, a missing credential (NoAuth) also offers only
+// cancel: §4.6 says the credential has to exist "before you're allowed to
+// switch", so there is nothing to proceed with, and it takes priority over a
+// mere capability warning for the same reason — proceeding could not
+// possibly work without it. Only once neither of those applies does a
+// capabilities-only conflict get its own row: §4.6 says those blocks degrade
+// to descriptive text rather than breaking the request, which makes
+// proceeding a legitimate choice once the warning has been read.
 func confirmOptionsFor(plan engine.Plan) []confirmOption {
-	if !plan.Has(engine.ContextTooSmall) {
+	switch {
+	case plan.Has(engine.ContextTooSmall):
+		return []confirmOption{
+			{action: engine.ActionCompact, label: fmt.Sprintf("compactar y cambiar  (~%s)", formatContextTokens(plan.EstAfter))},
+			{action: engine.ActionDropOldest, label: "cambiar y recortar los turnos más viejos"},
+			{action: engine.ActionCancel, label: "cancelar"},
+		}
+	case plan.Has(engine.NoAuth):
 		return []confirmOption{{action: engine.ActionCancel, label: "cancelar"}}
-	}
-	return []confirmOption{
-		{action: engine.ActionCompact, label: fmt.Sprintf("compactar y cambiar  (~%s)", formatContextTokens(plan.EstAfter))},
-		{action: engine.ActionDropOldest, label: "cambiar y recortar los turnos más viejos"},
-		{action: engine.ActionCancel, label: "cancelar"},
+	case plan.Has(engine.MissingCaps):
+		return []confirmOption{
+			{proceed: true, label: "cambiar de todos modos"},
+			{action: engine.ActionCancel, label: "cancelar"},
+		}
+	default:
+		// Unreachable in practice — newConfirmDialog is only ever built from
+		// a non-OK Plan, and CheckSwap never returns one with zero
+		// Conflicts — but a bare cancel is the only safe default for a
+		// Plan.OK dialog that should not have opened in the first place.
+		return []confirmOption{{action: engine.ActionCancel, label: "cancelar"}}
 	}
 }
 
@@ -108,10 +133,13 @@ func (m Root) resolveConfirm() (tea.Model, tea.Cmd) {
 	to := m.confirm.to.Ref
 	m.mode = ModeChat
 
-	switch opt.action {
-	case engine.ActionCompact:
+	switch {
+	case opt.proceed:
+		// "Switch anyway" past a caps warning: nothing to mutate, the
+		// conversation's history is unchanged and only future turns degrade.
+	case opt.action == engine.ActionCompact:
 		m.applyPlaceholderCompact()
-	case engine.ActionDropOldest:
+	case opt.action == engine.ActionDropOldest:
 		m.applyDropOldest(m.confirm.to.EffectiveContext())
 	default: // engine.ActionCancel
 		m.confirm = confirmDialog{}
