@@ -75,6 +75,7 @@ var unicodeGlyphs = glyphs{
 	dot:           "·",
 	scrollHint:    "↑↓",
 	spinner:       []rune("░▒▓█▓▒░▒▓"),
+	warnMark:      "⚠",
 }
 
 var asciiGlyphs = glyphs{
@@ -91,6 +92,7 @@ var asciiGlyphs = glyphs{
 	dot:           "-",
 	scrollHint:    "up/down",
 	spinner:       []rune(".:-=+=-:."),
+	warnMark:      "!",
 }
 
 // glyphsFor returns the table for a set. Every field of both tables is filled
