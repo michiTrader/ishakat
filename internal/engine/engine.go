@@ -2,7 +2,10 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"time"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
 // Engine runs one turn at a time against a Streamer, feeding a StreamBuf
@@ -34,30 +37,14 @@ func (e *Engine) Start(ctx context.Context, req Request, buf *StreamBuf) {
 // and block on its return instead of polling Drain() from a second
 // goroutine.
 func (e *Engine) run(ctx context.Context, req Request, buf *StreamBuf) {
-	var ch <-chan Event
-	for attempt := 0; ; attempt++ {
-		var err error
-		ch, err = e.stream(ctx, req)
-		if err == nil {
-			break
-		}
+	ch, err := e.open(ctx, req)
+	if err != nil {
 		if ctx.Err() != nil {
 			buf.finish(nil, true)
-			return
-		}
-
-		wait, retry := retryAfter(err, attempt, e.maxRetries)
-		if !retry {
+		} else {
 			buf.finish(err, false)
-			return
 		}
-		select {
-		case <-time.After(wait):
-			continue
-		case <-ctx.Done():
-			buf.finish(nil, true)
-			return
-		}
+		return
 	}
 
 	var turnErr error
@@ -102,4 +89,87 @@ func (e *Engine) run(ctx context.Context, req Request, buf *StreamBuf) {
 		return
 	}
 	buf.finish(turnErr, false)
+}
+
+// open runs the handshake-retry loop shared by run and RunToCompletion:
+// call the Streamer, and if it fails with a hinted retryable error (per
+// retryAfter), wait and try again until either it succeeds, the error turns
+// out not to be retryable, maxRetries is exhausted, or ctx is cancelled.
+// Pulled out of run's body (Step 12) so RunToCompletion — a call to
+// compact_model that has no StreamBuf to write into — gets the exact same
+// backoff/jitter policy instead of a second copy of it.
+func (e *Engine) open(ctx context.Context, req Request) (<-chan Event, error) {
+	for attempt := 0; ; attempt++ {
+		ch, err := e.stream(ctx, req)
+		if err == nil {
+			return ch, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		wait, retry := retryAfter(err, attempt, e.maxRetries)
+		if !retry {
+			return nil, err
+		}
+		select {
+		case <-time.After(wait):
+			continue
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// Answer is the outcome of RunToCompletion: everything a caller that needs
+// one finished piece of text — rather than a live-typed one — cares about.
+type Answer struct {
+	Text  string
+	Usage *convo.Usage
+}
+
+// RunToCompletion runs req against the same Streamer and retry policy as
+// Start, but blocks until the turn finishes and returns the whole answer
+// instead of writing into a StreamBuf. It exists for callers that need a
+// model's answer as a value, not as something to type onto a screen —
+// Step 12's compaction summary (internal/engine/compact.go) and, later,
+// autoname's session-title call. Reasoning deltas are dropped: nothing
+// that calls this wants the model's scratch space, only its final text.
+func (e *Engine) RunToCompletion(ctx context.Context, req Request) (Answer, error) {
+	ch, err := e.open(ctx, req)
+	if err != nil {
+		return Answer{}, err
+	}
+
+	var b strings.Builder
+	var usage *convo.Usage
+	var turnErr error
+	for ev := range ch {
+		switch ev.Kind {
+		case EventDelta:
+			b.WriteString(ev.Text)
+		case EventUsage:
+			usage = ev.Usage
+		case EventError:
+			if turnErr == nil {
+				turnErr = ev.Err
+			}
+			if ev.Usage != nil {
+				usage = ev.Usage
+			}
+		case EventDone:
+			if ev.Usage != nil {
+				usage = ev.Usage
+			}
+		}
+	}
+
+	ans := Answer{Text: b.String(), Usage: usage}
+	if ctx.Err() != nil {
+		return ans, ctx.Err()
+	}
+	if turnErr != nil {
+		return ans, turnErr
+	}
+	return ans, nil
 }

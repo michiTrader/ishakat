@@ -223,3 +223,106 @@ func TestEngineCancelMidStream(t *testing.T) {
 		t.Errorf("a cancelled mid-stream turn must finish aborted with no error; got aborted=%v err=%v", aborted, err)
 	}
 }
+
+func TestRunToCompletionCollectsTextAndUsage(t *testing.T) {
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		return chanOf(
+			Event{Kind: EventReasoning, Text: "ignored scratch space"},
+			Event{Kind: EventDelta, Text: "hel"},
+			Event{Kind: EventDelta, Text: "lo"},
+			Event{Kind: EventUsage, Usage: &convo.Usage{In: 10, Out: 2}},
+			Event{Kind: EventDone},
+		), nil
+	}
+
+	e := New(stream, 3)
+	ans, err := e.RunToCompletion(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if ans.Text != "hello" {
+		t.Errorf("Text = %q, want %q (reasoning must not leak into it)", ans.Text, "hello")
+	}
+	if ans.Usage == nil || ans.Usage.In != 10 || ans.Usage.Out != 2 {
+		t.Errorf("Usage = %+v, want {In:10 Out:2}", ans.Usage)
+	}
+}
+
+func TestRunToCompletionRetriesAHandshakeFailureThenSucceeds(t *testing.T) {
+	var calls int
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		calls++
+		if calls == 1 {
+			return nil, fakeRetryable{wait: 5 * time.Millisecond, retryable: true}
+		}
+		return chanOf(Event{Kind: EventDelta, Text: "ok"}, Event{Kind: EventDone}), nil
+	}
+
+	e := New(stream, 3)
+	ans, err := e.RunToCompletion(context.Background(), Request{Model: "m"})
+	if calls != 2 {
+		t.Errorf("stream called %d times, want 2 (1 failure + 1 success)", calls)
+	}
+	if ans.Text != "ok" || err != nil {
+		t.Errorf("Text=%q err=%v, want %q/nil", ans.Text, err, "ok")
+	}
+}
+
+func TestRunToCompletionSurfacesAMidStreamError(t *testing.T) {
+	wantErr := errors.New("boom")
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		return chanOf(
+			Event{Kind: EventDelta, Text: "partial"},
+			Event{Kind: EventError, Err: wantErr},
+			Event{Kind: EventDone},
+		), nil
+	}
+
+	e := New(stream, 0)
+	ans, err := e.RunToCompletion(context.Background(), Request{Model: "m"})
+	if ans.Text != "partial" {
+		t.Errorf("Text = %q, want the partial text delivered before the error", ans.Text)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRunToCompletionReturnsTheHandshakeErrorWhenNotRetryable(t *testing.T) {
+	wantErr := errors.New("nope")
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		return nil, wantErr
+	}
+
+	e := New(stream, 3)
+	_, err := e.RunToCompletion(context.Background(), Request{Model: "m"})
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRunToCompletionRespectsCancellation(t *testing.T) {
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		return nil, fakeRetryable{wait: time.Hour, retryable: true}
+	}
+
+	e := New(stream, 5)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.RunToCompletion(ctx, Request{Model: "m"})
+		done <- err
+	}()
+
+	time.Sleep(10 * time.Millisecond) // let it enter the backoff wait
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RunToCompletion never returned after cancellation")
+	}
+}
