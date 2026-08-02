@@ -563,7 +563,7 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 		if text != "" {
 			text += "\n"
 		}
-		text += "⚠ " + err.Error()
+		text += m.lay.glyphs().warnMark + " " + err.Error()
 	}
 
 	m.transcript = append(m.transcript, transcriptEntry{
