@@ -94,14 +94,19 @@ func TestRootSurvivesManyTurnsInARow(t *testing.T) {
 }
 
 func TestCancelledTurnKeepsWhatWasAlreadyStreamed(t *testing.T) {
-	var m tea.Model = newHeadlessRoot()
+	root := newHeadlessRoot()
+	eng, advance := echoEngine(true)
+	root = withEngine(root, eng)
+	var m tea.Model = root
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	for _, r := range "abcdefghijklmnopqrstuvwxyz" {
 		m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
 	}
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
+	advance()
 	m, _ = m.Update(streamTickMsg{})
+	advance()
 	m, _ = m.Update(streamTickMsg{}) // six runes drained
 	m, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	for i := 0; i < 100 && m.(Root).live.active; i++ {
