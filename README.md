@@ -24,13 +24,12 @@ no runtime, designed to be usable at 40 columns on a phone.
 | `ishakat models [--json\|--refresh\|--all] [filter]` | ✅ works (discovery + cache + models.dev + embedded seed) |
 | Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested; not yet wired into `-m` or a picker (steps 8/10) |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
-| `ishakat` (interactive TUI) | ⚠️ **mannequin** — real layout, echoes your text, no network |
+| `ishakat` (interactive TUI) | ✅ streams real provider responses when a provider is configured and reachable |
 | `/model`, model picker, hot swap, `/compact`, `--resume` | ❌ steps 8–13, not written yet |
 
-The interactive mode being a mannequin is deliberate: step 3 built the TUI
-early "as a visual reward" (see §12 of the plan), and step 8 is what
-replaces the echo with the real engine. Until then, **use headless mode to
-actually talk to a model**.
+The interactive mode now uses the same engine/provider pipeline as headless
+mode. Without a configured or reachable provider, it fails the turn visibly
+instead of pretending that an echoed prompt is a model response.
 
 ## Requirements
 
@@ -258,9 +257,10 @@ that sets no `TERM` and none of `WT_SESSION`, `COLORTERM`, `ConEmuANSI`,
 `TERM_PROGRAM` or `ANSICON` makes no promises about colour, so none is sent.
 `color = "truecolor"` under `[ui]` forces it.
 
-**The interactive UI just repeats what I type.**
-Working as currently designed — that is the step-3 mannequin. Use
-`ishakat -p` until step 8 lands.
+**The interactive UI cannot reach a provider.**
+The TUI now uses the real engine, so check the provider configuration and
+endpoint. The failed turn remains visible with its error; use `ishakat -p`
+to distinguish a TUI issue from a provider or network issue.
 
 **On Termux, swiping up to scroll back snaps straight back to the input box.**
 Termux's own terminal view auto-follows the cursor whenever the program
