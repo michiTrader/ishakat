@@ -6,12 +6,14 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
 )
 
 // liveTurn es el turno en curso: vive en el modelo mientras genera y se
-// vuelca al scrollback en cuanto termina (§7.5). En el Paso 3 no hay
-// streaming real: el eco del maniquí llena el texto de a poco, pero la forma
-// es la misma que usará el engine en el Paso 8.
+// vuelca al scrollback en cuanto termina (§7.5). Desde el Paso 8 lo llena
+// engine.StreamBuf a través de Root.drainStream, un drenado por tick de
+// repintado y no uno por token.
 //
 // The text field is a plain string on purpose. Bubble Tea's Update takes and
 // returns the model by value, so every message copies the whole Root — and a
@@ -22,28 +24,65 @@ import (
 // safe to copy; concatenation is O(n²) in theory but a turn is a few kilobytes
 // and correctness beats a micro-optimisation that takes the process down.
 type liveTurn struct {
-	active    bool
-	model     string
-	text      string
+	active bool
+	model  string
+	text   string
+
+	// reason is the reasoning stream, kept apart from text because §4 gives
+	// it its own block kind: merging the two here would force finishTurn to
+	// split them again, and there is no reliable place to cut once they have
+	// been concatenated.
+	reason string
+
 	startedAt time.Time
 	tokens    int
-	aborted   bool
+
+	// usage is the provider's own accounting once it arrives (EventUsage, or
+	// EventDone). nil until then, which is why tokens still exists: the footer
+	// needs a number that moves from the first delta, long before any
+	// provider says anything about tokens.
+	usage *convo.Usage
+
+	aborted bool
 }
 
 func (t *liveTurn) start(model string) {
 	t.active = true
 	t.model = model
 	t.text = ""
+	t.reason = ""
 	t.startedAt = time.Now()
 	t.tokens = 0
+	t.usage = nil
 	t.aborted = false
 }
 
 func (t *liveTurn) append(delta string) {
 	t.text += delta
 	// Estimación gruesa nada más para que el footer tenga un número que
-	// avance durante la demo; el conteo real llega con provider.Usage.
+	// avance mientras genera; el conteo real llega con convo.Usage y lo
+	// corrige liveTurn.tokenCount.
 	t.tokens += len(strings.Fields(delta))
+}
+
+// appendReasoning is append's sibling for EventReasoning deltas. It does not
+// touch tokens: the reasoning stream is not what the user is reading, and
+// counting it into the same running total would make the footer's number
+// jump for text that is not on screen.
+func (t *liveTurn) appendReasoning(delta string) { t.reason += delta }
+
+// reasoning is the reasoning accumulated so far, mirroring body().
+func (t liveTurn) reasoning() string { return t.reason }
+
+// tokenCount is what the footer should show: the provider's own number once
+// it has sent one, and the rough word count until then. A provider that
+// reports usage mid-stream therefore replaces the estimate as soon as it can,
+// instead of the two disagreeing for the rest of the turn.
+func (t liveTurn) tokenCount() int {
+	if t.usage != nil {
+		return t.usage.Out
+	}
+	return t.tokens
 }
 
 // body is the text accumulated so far. It exists as a method so callers never
@@ -88,7 +127,7 @@ func renderLiveTurn(g glyphs, width int, t liveTurn, crush string, plainCancelHi
 	var b strings.Builder
 	b.WriteString(renderTranscriptLine(g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokens))
+	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokenCount()))
 	b.WriteString(plainCancelHint)
 	return b.String()
 }
