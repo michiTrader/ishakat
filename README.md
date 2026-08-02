@@ -3,15 +3,16 @@
 A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
 no runtime, designed to be usable at 40 columns on a phone.
 
-> **Status: Phase 2 (prototype), step 9 of 13 closed.**
+> **Status: Phase 2 (prototype), step 11 of 13 closed.**
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
-> fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, the
-> interactive UI streams real provider responses through the engine when
-> a provider is configured and reachable, and the chat input now understands
-> slash commands (`/help`, `/clear`, `/new`, `/exit`) with an autocomplete
-> dropdown. See [What works today](#what-works-today) before filing a bug —
-> model selection and conversation-management commands remain scheduled work.
+> fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, `/model`
+> and the `ctrl+p` picker both use that same resolver to switch models
+> mid-conversation, and a switch that would lose context, drop an
+> unsupported block or hit a provider with no credential stops for
+> confirmation (§4.6/§9.5) instead of failing silently on the next turn.
+> See [What works today](#what-works-today) before filing a bug — `/compact`
+> and `--resume` remain scheduled work.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
@@ -23,11 +24,13 @@ no runtime, designed to be usable at 40 columns on a phone.
 | `ishakat config init/path/check` | ✅ works |
 | `ishakat doctor` | ✅ works (DNS, paths, dialects, Termux detection, terminal capability + glyph sample) |
 | `ishakat models [--json\|--refresh\|--all] [filter]` | ✅ works (discovery + cache + models.dev + embedded seed) |
-| Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested; not yet wired into `-m` or a picker (steps 8/10) |
+| Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested, and wired into both `/model` and the `ctrl+p` picker |
 | `ishakat -p "question"` (headless, streaming, JSONL session) | ✅ works |
 | `ishakat` (interactive TUI) | ✅ streams real provider responses when a provider is configured and reachable |
-| Slash commands: `/help`, `/clear`, `/new`, `/exit`, plus autocomplete dropdown (§9.6) | ✅ implemented in `internal/slash` + `internal/tui`; the other §13 commands are listed and reply "not implemented yet" |
-| `/model`, model picker, hot swap, `/compact`, `--resume` | ❌ steps 10–13, not written yet |
+| Slash commands: `/help`, `/clear`, `/new`, `/exit`, `/model`, plus autocomplete dropdown (§9.6) | ✅ implemented in `internal/slash` + `internal/tui`; the other §13 commands are listed and reply "not implemented yet" |
+| Model picker (`ctrl+p`, §9.4) | ✅ implemented in `internal/tui.Picker`: fuzzy search, provider grouping, filters (all/free/tools/vision/favorites) |
+| Hot swap confirmation (§4.6/§9.5) | ✅ `engine.CheckSwap` plus the `internal/tui` conflict dialog: compact/drop-oldest for a context conflict, switch-anyway for a capability warning, cancel-only when the destination has no credential |
+| `/compact`, `--resume` | ❌ steps 12–13, not written yet |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly

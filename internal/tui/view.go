@@ -48,6 +48,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModePicker {
 		return m.renderPicker()
 	}
+	if m.mode == ModeConfirm {
+		return m.renderConfirm()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

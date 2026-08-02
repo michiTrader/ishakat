@@ -163,6 +163,10 @@ type Root struct {
 	// picker is the Step 10 overlay's own state (§9.4), live only while
 	// mode == ModePicker.
 	picker Picker
+
+	// confirm is the Step 11 conflict dialog's own state (§9.5), live only
+	// while mode == ModeConfirm.
+	confirm confirmDialog
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -393,6 +397,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateBusy(msg)
 	case ModePicker:
 		return m.updatePicker(msg)
+	case ModeConfirm:
+		return m.updateConfirm(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -457,18 +463,39 @@ func (m Root) resolveOptions() catalog.ResolveOptions {
 	return catalog.ResolveOptions{Alias: m.alias, PreferFree: m.preferFree}
 }
 
-// applyModelChosen is modelChosenMsg's only handler: switch the active
-// model, leave the §4.6 confirmation line behind, and return to ModeChat.
-// Step 10 closes with an unconditional switch — §4.6's CheckSwap (a
-// confirmation dialog when a turn is in flight) is Step 11's job, not this
-// one's; the picker cannot even be open during ModeBusy today (see
-// handleGlobalKey above), so there is nothing to conflict with yet.
+// applyModelChosen is modelChosenMsg's only handler, and the single funnel
+// every path that can change the active model goes through: the picker's
+// enter key and /model's direct-resolution branch both end here (§9.4/§9.6
+// and slashrun.go's runModelCommand). It runs the Step 11 checks of §4.6
+// before committing anything — if both the current and the destination
+// model are known to the catalog and engine.CheckSwap finds a real
+// conflict, the switch waits behind the §9.5 dialog instead of happening
+// here.
 func (m Root) applyModelChosen(ref string) (tea.Model, tea.Cmd) {
-	m.mode = ModeChat
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
+		m.mode = ModeChat
 		return m, nil
 	}
+
+	// A model absent from the catalog (either side) leaves CheckSwap with
+	// nothing trustworthy to compare — §4.2's own Model zero value would
+	// read as "no context, no caps, no cost", which is not the same claim
+	// as "this model genuinely has none of those". Falling back to the
+	// unconditional switch here is what Step 10 always did, and is still
+	// correct when there is no catalog at all (most of this package's own
+	// tests, and any session started before the first catalog load).
+	to, toOK := m.cat.Get(ref)
+	from, fromOK := m.cat.Get(m.model)
+	if toOK && fromOK {
+		if plan := engine.CheckSwap(&m.conv, from, to); !plan.OK {
+			m.mode = ModeConfirm
+			m.confirm = newConfirmDialog(from, to, plan)
+			return m, nil
+		}
+	}
+
+	m.mode = ModeChat
 	m.model = ref
 	m.footer.Model = ref
 	return m.slashNotice(confirmLine(m.lay.glyphs(), ref))
