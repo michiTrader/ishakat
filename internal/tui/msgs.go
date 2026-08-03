@@ -1,6 +1,10 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"github.com/MichiTrader/ishakat/internal/catalog"
+)
 
 // msgs.go concentra TODOS los tea.Msg propios de este paquete (§6.2): si hay
 // que tocar dos archivos para agregar un mensaje nuevo, el diseño está mal.
@@ -43,6 +47,25 @@ type compactDoneMsg struct {
 	summary string
 	err     error
 }
+
+// CatalogRefreshedMsg is the result of the §4.4/§11 background catalog
+// refresh started once, right after the program is created (see app.Run):
+// LoadCatalog only ever reads disk, so the interface is drawn immediately
+// with whatever was cached, and this message is how the network's answer —
+// discovery against every enabled provider, plus models.dev — reaches Root
+// once it is ready, without blocking startup on it.
+//
+// It is exported (unlike every other message in this file) because the
+// goroutine that produces it lives in internal/app, on the far side of the
+// import boundary §6.1 draws between app and tui: app knows about
+// *config.Config and the network, tui does not, so app.Run has to be the
+// one calling RefreshCatalog and handing the result back across that
+// boundary as a message on the *tea.Program it already holds.
+//
+// Catalog is nil when the refresh could not improve on what LoadCatalog
+// already produced (see app.BackgroundRefresh) — applyCatalogRefreshed
+// treats that as a no-op rather than replacing a good catalog with nothing.
+type CatalogRefreshedMsg struct{ Catalog *catalog.Catalog }
 
 // There is deliberately no blink message here.
 //

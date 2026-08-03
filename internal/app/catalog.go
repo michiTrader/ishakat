@@ -309,6 +309,27 @@ func RefreshCatalog(ctx context.Context, cfg *config.Config, version string, pre
 	}, firstErr
 }
 
+// BackgroundRefresh is §4.4/§11's background-refresh side, wired from
+// app.Run's own goroutine (never called on the startup path itself — see
+// LoadCatalog's own comment on the non-negotiable budget). It wraps
+// RefreshCatalog with the one policy call sites should not have to repeat:
+// a refresh that failed AND produced nothing usable must not overwrite a
+// catalog the user is already looking at with an empty one, so this
+// returns nil in exactly that case, and the caller (tui.CatalogRefreshedMsg's
+// handler) already treats nil as "nothing changed, leave the picker alone".
+//
+// A refresh that failed but still produced something — the common case,
+// since RefreshCatalog rebuilds from cache plus whatever discovery did
+// reach even on a partial failure — is returned normally: cat.Len() > 0 is
+// the bar, not err == nil.
+func BackgroundRefresh(ctx context.Context, cfg *config.Config, version string, prev CatalogSnapshot) *catalog.Catalog {
+	snap, err := RefreshCatalog(ctx, cfg, version, prev)
+	if err != nil && snap.Catalog.Len() == 0 {
+		return nil
+	}
+	return &snap.Catalog
+}
+
 // RecordModelUse bumps the local statistics after a turn. Best effort by
 // design: this feeds a ranking tiebreaker, and a cache that cannot be
 // written must never turn into a visible error for the user.
