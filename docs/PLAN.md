@@ -10,12 +10,30 @@
 
 Si eres una IA trabajando en este repositorio, lee este documento entero antes de escribir código y respeta estas reglas:
 
+**What ishakat is, in one sentence, before anything else:** a general-purpose
+agent runtime that lives in a terminal — one static binary that reads, writes
+and runs things on the user's machine, and that grows new capabilities by
+writing them itself. The chat interface is how a human talks to it. It is not
+the product.
+
+Read the rules below before writing code:
+
 - Las decisiones marcadas como **CERRADA** no se rediscuten, se implementan. Si crees que una está equivocada, dilo explícitamente antes de cambiar nada, no la cambies por iniciativa propia.
-- Cuando el documento dice "fuera de alcance en esta fase", eso es una restricción deliberada, no un olvido. El mayor riesgo del proyecto es la expansión de alcance. Un chat impecable vale más que un agente a medias.
+- **Scope discipline cuts both ways.** When this document says "out of scope in
+  this phase", that is a deliberate constraint, not an oversight — do not widen
+  it on your own initiative. But the converse is equally binding: **an agent
+  with a few well-built tools is worth more than a chat with many ornaments.**
+  Never postpone agent capability (§19) in favour of polish. If you have to
+  choose between a feature that makes ishakat *do* more and one that makes it
+  *look* better, the first one wins every time.
 - Implementa un paso a la vez, en el orden dado. Cada paso tiene un criterio de cierre verificable. No empieces el siguiente hasta que el actual pase su criterio. Al terminar un paso, actualiza la bitácora de la §17 de este mismo archivo y haz commit.
-- No agregues dependencias sin justificarlo contra el presupuesto de la §6.4. El presupuesto es parte del producto, no una sugerencia.
+- No agregues dependencias sin justificarlo contra el presupuesto de la §6.4. El presupuesto es parte del producto, no una sugerencia. **The tool layer of §19 is stdlib-only: it adds zero dependencies, ever.**
 - Escribe los tests indicados en cada paso antes o junto con el código, especialmente el del matcher difuso (Paso 7), que es el contrato con el requisito central del producto.
-- Todo el código, comentarios y mensajes de error van en español. Los identificadores de Go van en inglés cuando es idiomático (`Config`, `Provider`, `Stream`), en español cuando es dominio propio del producto.
+- **Language: everything new is written in English** — code, comments, godoc,
+  identifiers, user-facing strings, tests, commit messages and new sections of
+  this document. See `AGENTS.md` for the full policy. (An earlier version of
+  this section mandated Spanish; that rule is superseded. Pre-existing Spanish
+  content stays until a dedicated migration pass.)
 
 ---
 
