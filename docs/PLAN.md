@@ -1851,6 +1851,102 @@ Commit: `feat: cierre de fase 2 + tag v0.1.0`
 
 ---
 
+## 12bis. Detail of Phase 2.5's first step
+
+The remaining steps (15–25) get the same treatment as they are approached. Step
+14 is specified here because it is the next thing to implement and because it
+touches the two most load-bearing packages in the repository.
+
+### Step 14 · The tool-calling loop
+
+**Goal.** `internal/engine` can run a turn that includes tool calls, and
+`internal/provider/openai` can serialize tool definitions and tool results in
+the OpenAI dialect. No real tools yet — Step 15 brings those. This step is
+proven end to end with a fake tool and no network.
+
+**Why it is first.** Everything in Phase 2.5 rides on this loop. Getting the
+cancellation, cap and error semantics right here means Steps 15–25 are additive.
+
+**What already exists and must be reused, not reinvented:**
+
+- `convo.BlockToolCall` / `convo.BlockToolResult`, with `Name` and `Args`
+  (`internal/convo/message.go`) — the history format has been ready since Step 2.
+- `provider.EventToolCall`, with `Name` and `Args json.RawMessage`
+  (`internal/provider/provider.go`) — the wire event already exists.
+- `provider.Caps.Tools` and `provider.Degradation.ToolsFlattened` — capability
+  detection and the §4.6 degradation path already account for tools.
+- `engine.Engine.open` — the handshake/retry policy with backoff and jitter.
+  The agent loop calls it once per iteration; it does not get a second copy.
+- `engine.StreamBuf` — the coalescing drain. Tool events ride the same buffer so
+  the TUI keeps draining on its own clock.
+
+**What to write:**
+
+1. **`engine.EventToolCall`** added to `engine.EventKind`, mirroring
+   `provider.EventToolCall` the way the existing cases mirror theirs. `engine`
+   still must not import `provider` (`TestTUINoImportaHTTP`), so it carries its
+   own `Name`/`Args` fields on `engine.Event`.
+2. **`engine.Request.Tools []ToolDef`** — name, description, JSON-schema
+   parameters. `ToolDef` lives in `engine` as a plain struct; `internal/app`'s
+   Streamer closure copies it across to `provider.Request` field by field, the
+   same way it already copies `Model`/`Messages`/`System`.
+3. **`engine.ToolRunner`** — a function type
+   `func(ctx, name string, args json.RawMessage) (Result, error)`. `engine` never
+   knows what a tool *is*; `internal/tools` provides the implementation and
+   `internal/app` binds it. This keeps `internal/tools` out of `engine`'s import
+   graph entirely.
+4. **`engine/agentloop.go`** — `RunAgentTurn`. One iteration is: call `open`,
+   drain the channel, and if the assistant message ended with tool calls, run
+   them, append `BlockToolResult` messages to the history, and iterate. Terminate
+   when a turn produces no tool calls.
+5. **`provider/openai/serialize.go`** — serialize `ToolDef` into the dialect's
+   `tools` array, `BlockToolCall` into an assistant message's `tool_calls`, and
+   `BlockToolResult` into a `role: "tool"` message with its `tool_call_id`.
+   Deserialize streamed `tool_calls` deltas, which arrive fragmented across SSE
+   chunks and must be reassembled by index before emitting `EventToolCall`.
+
+**Semantics that are part of the contract, not implementation details:**
+
+- **Hard cap.** `max_tool_calls_per_turn` (default 25) and a total token/cost
+  budget. Hitting either ends the turn with an explanatory message, never
+  silently.
+- **Loop detection.** The same tool name with byte-identical arguments twice in a
+  row stops the loop and asks the user. This is the cheap guard that catches the
+  overwhelming majority of stuck loops.
+- **Cancellation.** `esc` cancels mid-loop. A tool already running gets its
+  `ctx` cancelled; the partial assistant message is persisted as
+  `Aborted: true`, exactly as Step 8 does for a cancelled text turn. **Never a
+  half-written file:** `write_file`/`edit_file` write to a temp file and rename,
+  so cancellation cannot leave a truncated target.
+- **A tool error is data, not a failure.** A non-zero exit or an exception
+  becomes a `BlockToolResult` carrying the error text and enters the context. The
+  model sees it and reacts — this is the entire mechanism by which the reactive
+  loop handles the unforeseen (§3), and the reason no `Planner` is needed.
+- **Output truncation.** A tool result over `max_tool_output_bytes` (default
+  32 KiB) is truncated in the middle with an explicit marker naming how much was
+  dropped, so a `bash` invocation that prints 40 MB cannot destroy the context.
+- **Degradation.** A model whose `Caps.Tools` is false gets no `tools` array and
+  existing tool blocks flattened to descriptive text, counted in
+  `Degradation.ToolsFlattened` — the §4.6 machinery already in place.
+
+**Tests (all offline):** a fake `Streamer` that emits a tool call then a text
+answer; a fake `ToolRunner`; a fake that always returns a tool call, to prove the
+cap fires; identical repeated calls, to prove loop detection fires; cancellation
+mid-tool with the partial persisted and marked aborted; a tool returning an error
+and the model recovering on the next iteration; fragmented `tool_calls` SSE
+deltas reassembling correctly (with a recorded fixture in `testdata/`); a
+tools-incapable model producing a flattened request. `go test -race ./...` is
+mandatory: the loop adds a second concurrency axis on top of streaming.
+
+**Closing criterion.** `ishakat -p "what files are in this directory"` with a
+single fake `list` tool bound produces a correct answer through a real tool call,
+in headless mode, with no TUI involved. When that passes, `engine` is an agent
+runtime and Steps 15–25 only add tools and surfaces.
+
+Commit: `feat(engine): tool-calling loop (Step 14, §19)`
+
+---
+
 ## 13. Comandos y atajos definitivos
 
 **Comandos:** `/help`, `/model`, `/models`, `/theme`, `/clear`, `/compact`, `/new`, `/resume`, `/copy`, `/retry`, `/stats`, `/config`, `/debug`, `/exit`.
