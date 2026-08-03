@@ -1871,7 +1871,43 @@ Cada uno de estos números es un test o una verificación manual documentada, no
 
 ## 15. Riesgos y mitigaciones
 
-El alcance es el enemigo número uno. La tentación de meter herramientas y agentes en la Fase 2 va a ser fuerte, y un chat impecable vale más que un agente a medias. Mitigación: la lista explícita de "fuera de alcance" de cada fase se trata como contrato.
+**Scope, in both directions.** The original text of this section warned only
+about scope *growth* ("la tentación de meter herramientas y agentes va a ser
+fuerte"), and that framing is what kept the agent deferred while the chat got
+polished. The risk is symmetric and both halves are real: adding modules nobody
+asked for (a `Planner`, an MCP client, a bundled browser) *and* postponing
+capability in favour of polish. Mitigation: each phase's explicit out-of-scope
+list is a contract, and §0's rule now names both failure modes.
+
+**Runaway cost.** A stuck tool loop on an expensive model burns real money in
+minutes, and the user finds out from the provider's invoice. Mitigation, shipped
+in Step 16 alongside permissions and not later: per-session token/cost budget, a
+hard cap on tool calls per turn, and same-tool-same-arguments repeat detection
+that stops and asks.
+
+**Destructive `bash`.** There is no sandbox, and there will not be one on
+Android (§18). `bash` can delete `$HOME`. Mitigation: confirmation before every
+invocation, a deny-list of unmistakable shapes (`rm -rf /`, piping a fetched
+script into a shell, `git push --force`), and the fact that `--yolo` is opt-in
+per invocation rather than a persisted setting.
+
+**Self-extension turning prompt injection permanent.** The most serious new
+risk in the document: a malicious page can cause a *persistent* capability to be
+installed, not just a one-off bad command. Fully specified with seven
+mitigations in §19.8; the ones that matter most are that `tool_create` is always
+`danger: high` with no session-wide approval, that provenance and tainted-context
+marking are mandatory, and that some shapes (reading `~/.ssh`, POSTing file
+contents to an arbitrary host) are hard-blocked rather than merely confirmed.
+
+**Tool catalogue obesity.** A system that only creates degrades itself: prompt
+cost grows without bound and selection accuracy collapses among near-identical
+tools. Mitigation: §19.6's gate 1 (repetition threshold, dedup at 0.8 similarity,
+a hard cap of 40) plus §19.5's archive-on-disuse.
+
+**Money-touching tools.** A model can hallucinate a quantity. Mitigation:
+`danger: high` with no bypass in any mode, confirmation that shows USD value and
+account balance, testnet by default, and the standing rule never to grant
+withdrawal scope to an API key.
 
 Atarse demasiado a OmniRoute. Se usa como proveedor por defecto, pero desde el primer día se prueba también contra al menos un endpoint OpenAI directo, para que el acoplamiento no se cuele sin que nadie lo note.
 
@@ -1884,6 +1920,41 @@ El DNS de Android, ya descrito, que tiene la propiedad venenosa de esconderse du
 ## 16. Decisiones abiertas a revisión
 
 `mouse = false` por defecto y el selector con dos líneas por modelo están optimizados para pantalla de celular en vertical. Si el uso principal termina siendo escritorio con terminal ancha, el selector de dos líneas se sentirá desperdiciado y conviene invertir el default. Es fácil de cambiar ahora y molesto después.
+
+**Embedded Starlark for script tools. Explicitly undecided — do not implement
+without a decision.** Rung 2 (§19.3) uses Python, which means self-extension
+needs Python present. Termux ships without it. An embedded interpreter in pure Go
+— Starlark (`go.starlark.net`, a Python dialect, sandboxed by design: no
+`import`, no filesystem, no network beyond what is injected) — would give
+self-extension with **zero external runtime**, which neither Pi nor Claude Code
+can offer, and would come with a real sandbox for generated code as a side
+effect. Costs: one dependency (breaking the §6.4 rule, hence a decision and not
+a commit), and models write Starlark noticeably worse than Python. **Trigger for
+revisiting: if the absence of Python turns out to be a real obstacle in practice
+on Termux.** Until then, rung 1 (declarative, no interpreter at all) covers ~70%
+of cases and `sh` is the fallback.
+
+**Live-region reflow on width change.** §3 keeps inline rendering, which means
+already-committed lines do not re-wrap when the terminal is zoomed. A middle
+option is open for Phase 3: reflow only the live region (the last N turns, which
+are repainted anyway) while committed scrollback stays as printed. Half the
+benefit, little risk, no loss of native scroll or text selection. Full
+alt-screen repaint is rejected, not open.
+
+**Default evolve mode.** §19.7 sets `mode = "suggest"` as the default, so a
+fresh install proposes crystallization when gate 1 passes. The conservative
+alternative is shipping `on_request` and letting users opt in once they trust it.
+One-line change either way; revisit after the first real users, since the failure
+mode of `suggest` (mild annoyance, self-limiting via the decay rule) is much
+cheaper than the failure mode of `on_request` (the feature is never discovered
+and the whole §19 investment is decorative).
+
+**Where example skills and tools live.** Recommendation on record: ship
+`examples/skills/` with broadly useful ones (image generation, deep research)
+inside the repo, and keep money-touching integrations such as Bybit **outside**
+it — as private user tools, which doubles as the living proof that
+self-extension works without putting one author's trading workflow into a
+general-purpose product's core.
 
 ---
 
