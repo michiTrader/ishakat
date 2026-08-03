@@ -94,6 +94,16 @@ func Run(version string) int {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", compactWarn)
 	}
 
+	// §10, Step 13: the TUI persists its own conversation the same way
+	// headless already did — a failure here is a warning, not a reason to
+	// refuse to start, for the same reason engine/compactEng above are not:
+	// an interface the user can read and copy from is strictly better than
+	// no interface, even with nothing saved to disk.
+	recorder, sessionWarn := NewSessionRecorder(cfg, model)
+	if sessionWarn != "" {
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", sessionWarn)
+	}
+
 	root := tui.NewRoot(tui.Options{
 		Version: version,
 		CWD:     cwd,
@@ -122,6 +132,8 @@ func Run(version string) int {
 		CompactKeepLastTurns: cfg.Compact.KeepLastTurns,
 		CompactStrategy:      cfg.Compact.Strategy,
 		CompactOnError:       cfg.Compact.OnError,
+
+		Recorder: recorder,
 	})
 
 	p := tea.NewProgram(root)

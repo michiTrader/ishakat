@@ -2093,13 +2093,22 @@ escribió.**
 
 Orden obligado, entonces, y no es el del enunciado original:
 
-1. **Persistir desde el TUI.** `convo.Store` cableado en `app.Run`, respetando
-   `[session] save`, `dir` y `keep_last`. Un append por mensaje **completo**,
-   nunca durante el streaming (§10) — el archivo no debe crecer token a token,
-   porque entonces un `kill -9` a mitad de respuesta deja una línea partida.
-2. **`--resume` y `resume_last`.** Reabrir la última sesión, con el historial en
+1. ✅ **Persistir desde el TUI.** `convo.Store` cableado en `app.Run` vía
+   `tui.Recorder` (`internal/tui/session.go` + `internal/app/session.go`),
+   respetando `[session] save`, `dir` y `keep_last`. Un append por mensaje
+   **completo** — en `submit` para el turno del usuario, en `finishTurn` para
+   la respuesta —, nunca durante el streaming (§10): el archivo no crece token
+   a token, así que un `kill -9` a mitad de respuesta deja como máximo una
+   línea de menos, nunca una línea partida. El archivo de sesión se crea
+   perezosamente en el primer `Append` (no en `NewRoot`), porque ahí es donde
+   existe por fin un texto con el que titular la sesión — la misma regla de
+   `titleFrom` que headless ya seguía, aplicada a un llamador que no tiene el
+   prompt completo de antemano. Cubierto por tests en ambos paquetes
+   (`internal/tui/session_internal_test.go`,
+   `internal/app/session_test.go`).
+2. ⬜ **`--resume` y `resume_last`.** Reabrir la última sesión, con el historial en
    contexto y visible en el transcript.
-3. **`/resume`.** El menú, que lee solo la cabecera de cada archivo y carga el
+3. ⬜ **`/resume`.** El menú, que lee solo la cabecera de cada archivo y carga el
    completo únicamente al elegir (§10).
 
 Commit: `feat: cierre de fase 2 + tag v0.1.0`
