@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tui"
 	"github.com/MichiTrader/ishakat/internal/xdg"
@@ -18,8 +19,11 @@ import (
 
 // Run carga la configuración, resuelve el tema y arranca el programa de
 // Bubble Tea en modo inline. version es la versión compilada de ishakat
-// (variable de main, inyectada por -ldflags en builds de release).
-func Run(version string) int {
+// (variable de main, inyectada por -ldflags en builds de release). resume
+// is cmd/ishakat's --resume flag; [session] resume_last (config.go) is
+// honoured either way, inside ResumeSession, so a caller that never passes
+// true here still resumes when the configuration asks for it.
+func Run(version string, resume bool) int {
 	cfg, err := config.Load(config.Options{UserPath: xdg.ConfigFile()})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Error de configuración: %v\n", err)
@@ -94,12 +98,38 @@ func Run(version string) int {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", compactWarn)
 	}
 
+	// --resume / [session] resume_last (§13): load the previous conversation
+	// before the recorder is built, so a resumed run appends to that same
+	// file instead of starting a new one — see sessionRecorder's own comment
+	// on why passing resumedConv in is what makes that true. A failure or
+	// "nothing to resume" here is a warning at most, same rule as the
+	// recorder below: there is always a fresh session to fall back to.
+	resumedConv, resumeStore, resumeWarn := ResumeSession(cfg, resume)
+	if resumeWarn != "" {
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", resumeWarn)
+	}
+	var history []convo.Message
+	if resumedConv != nil {
+		history = resumedConv.Messages
+	}
+
 	// §10, Step 13: the TUI persists its own conversation the same way
 	// headless already did — a failure here is a warning, not a reason to
 	// refuse to start, for the same reason engine/compactEng above are not:
 	// an interface the user can read and copy from is strictly better than
 	// no interface, even with nothing saved to disk.
-	recorder, sessionWarn := NewSessionRecorder(cfg, model)
+	//
+	// resumeStore is reused instead of letting NewSessionRecorder open a
+	// second *convo.Store on the same directory: convo.Store carries no
+	// per-conversation state (§10), so this is purely to avoid two
+	// redundant os.MkdirAll calls, not a correctness requirement.
+	var recorder tui.Recorder
+	var sessionWarn string
+	if resumedConv != nil && resumeStore != nil {
+		recorder = &sessionRecorder{store: resumeStore, conv: resumedConv, model: model, keepLast: cfg.Session.KeepLast}
+	} else {
+		recorder, sessionWarn = NewSessionRecorder(cfg, model, nil)
+	}
 	if sessionWarn != "" {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", sessionWarn)
 	}
@@ -134,6 +164,7 @@ func Run(version string) int {
 		CompactOnError:       cfg.Compact.OnError,
 
 		Recorder: recorder,
+		History:  history,
 	})
 
 	p := tea.NewProgram(root)

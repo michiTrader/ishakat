@@ -25,9 +25,10 @@ var version = "dev"
 const usage = `ishakat — talk to AI models from the terminal
 
 USAGE
-  ishakat                        opens the interactive interface
-  ishakat -p "question"          answers and exits (headless mode)
-  cat log | ishakat -p "explain" reads stdin and appends it to the prompt
+  ishakat                         opens the interactive interface
+  ishakat --resume                reopens the last saved conversation
+  ishakat -p "question"           answers and exits (headless mode)
+  cat log | ishakat -p "explain"  reads stdin and appends it to the prompt
   ishakat <subcommand>
 
 SUBCOMMANDS
@@ -44,6 +45,7 @@ FLAGS
       --stream           force streaming
       --no-stream        request the full response at once
       --no-save          do not write the session file
+      --resume           reopen the last saved conversation (interactive mode only)
   -q, --quiet            no warnings on stderr
       --config <path>    use a different config.toml
   -h, --help             this help text
@@ -87,6 +89,7 @@ func main() {
 		stream     = fs.Bool("stream", false, "force streaming")
 		noStream   = fs.Bool("no-stream", false, "request the full response at once")
 		noSave     = fs.Bool("no-save", false, "do not write the session file")
+		resume     = fs.Bool("resume", false, "reopen the last saved conversation (interactive mode only)")
 		quiet      = fs.Bool("q", false, "no warnings on stderr")
 		quietLong  = fs.Bool("quiet", false, "same as -q")
 		cfgPath    = fs.String("config", "", "alternate config.toml path")
@@ -150,7 +153,7 @@ func main() {
 		}))
 	}
 
-	os.Exit(app.Run(version))
+	os.Exit(app.Run(version, *resume))
 }
 
 func firstNonEmpty(vals ...string) string {
