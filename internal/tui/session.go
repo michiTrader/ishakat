@@ -16,7 +16,11 @@
 // here, and none of it needs to be.
 package tui
 
-import "github.com/MichiTrader/ishakat/internal/convo"
+import (
+	"time"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
+)
 
 // Recorder is where completed messages go to be remembered. internal/app
 // implements it over convo.Store; tests implement it in a few lines to
@@ -58,4 +62,42 @@ func (m Root) recordMessage(msg convo.Message) Root {
 		m.sessionErr = err
 	}
 	return m
+}
+
+// SessionSummary is one entry of the §13 /resume menu: everything the row
+// needs to draw itself, deliberately shaped like convo.Header rather than
+// aliasing it. This package does not import the on-disk record type any
+// more than it needs to (Recorder above follows the same rule for the
+// opposite direction, persisting), and a caller that only has a Header can
+// build one of these with a single struct literal, no adapter code.
+type SessionSummary struct {
+	// ID is the opaque handle Load(ID) resolves — never shown to the user,
+	// only round-tripped through Selected.
+	ID string
+	// Title is the display name (autoname's first line, or a user-set one).
+	Title string
+	// UpdatedAt is when the session's last message was appended — what
+	// resumeRow sorts and ages by, same field convo.Store.List already
+	// derives from the file's mtime rather than re-reading it.
+	UpdatedAt time.Time
+}
+
+// SessionLister is where the §13 /resume menu gets its rows and its full
+// conversations from. internal/app implements it over *convo.Store; tests
+// implement it in a few lines, the same shape fakeRecorder already follows
+// for the write side.
+//
+// The two-method split mirrors convo.Store's own List/Load: List reads only
+// headers — cheap even with two hundred sessions on disk, per store.go's own
+// comment — and Load is deferred until a row is actually chosen, so opening
+// the picker never pays for more than the menu it draws.
+type SessionLister interface {
+	// List returns every saved session, most recently updated first. An
+	// empty result (nil error) is the ordinary "nothing saved yet" case —
+	// see runResumeCommand's own handling of it — never itself a failure.
+	List() ([]SessionSummary, error)
+	// Load returns the full conversation for id — every convo.Message the
+	// picker's caller (applySessionChosen) needs to replace the running
+	// conversation and its transcript with.
+	Load(id string) (*convo.Conversation, error)
 }

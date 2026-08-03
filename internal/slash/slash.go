@@ -55,6 +55,11 @@ const (
 	// 13): the running totals convo.Conversation.Usage already sums, priced
 	// against the active model's catalog.Cost.
 	KindStats
+	// KindResume opens the session picker (§13): a menu of previously saved
+	// conversations, headers only, read from disk without loading a single
+	// full session until one is actually chosen — the same "list is cheap,
+	// load is deferred" split convo.Store.List/Load already draws.
+	KindResume
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -99,7 +104,7 @@ var Commands = []Command{
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
-	{Name: "resume", Describe: "reabrir una sesion", Kind: KindUnimplemented},
+	{Name: "resume", Describe: "reabrir una sesion", Kind: KindResume},
 	{Name: "clear", Describe: "limpiar pantalla", Kind: KindClear},
 	{Name: "copy", ArgHint: "[n]", Describe: "copiar respuesta", Kind: KindCopy},
 	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
