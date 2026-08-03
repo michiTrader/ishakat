@@ -184,6 +184,40 @@ api_key = "${MISSING_KEY_VAR}"
 	}
 }
 
+// TestExampleTOMLInSync catches a bug this test was written in response to:
+// `ishakat config init` writes the *embedded* internal/config/example.toml,
+// while the file everyone reads and edits is config.example.toml at the repo
+// root. Nothing tied the two together, and they had already drifted — the
+// embedded copy had lost the `color` and `glyphs` documentation, so the option
+// a Windows user most needs was missing from the very file ishakat hands them.
+// Two copies with no check between them will always drift; this is the check.
+func TestExampleTOMLInSync(t *testing.T) {
+	root, err := os.ReadFile("../../config.example.toml")
+	if err != nil {
+		t.Fatalf("no se pudo leer config.example.toml: %v", err)
+	}
+	if config.ExampleTOML != string(root) {
+		t.Error("internal/config/example.toml y config.example.toml han divergido.\n" +
+			"  `ishakat config init` entrega el embebido, así que el usuario recibiría\n" +
+			"  algo distinto de lo que documenta el repo. Copia uno sobre el otro:\n" +
+			"    cp config.example.toml internal/config/example.toml")
+	}
+}
+
+// TestExampleTOMLLoads is the other half: being in sync is worthless if what
+// they agree on is invalid. `config init` must never leave a user with a file
+// that ishakat itself refuses to start with.
+func TestExampleTOMLLoads(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(p, []byte(config.ExampleTOML), 0o600); err != nil {
+		t.Fatalf("no se pudo escribir el config temporal: %v", err)
+	}
+	if _, err := config.Load(config.Options{UserPath: p, SkipProject: true}); err != nil {
+		t.Fatalf("el archivo que escribe `config init` no carga: %v", err)
+	}
+}
+
 // TestToolsDefaultsLoad guards against the failure mode where validateTools
 // exists but never actually sees the embedded defaults: if [tools] in
 // defaults.toml drifted out of sync with the schema, Load would emit

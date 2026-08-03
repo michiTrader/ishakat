@@ -24,6 +24,12 @@ markdown = true
 syntax = true
 reasoning = "collapsed"
 max_width = 100
+# color: auto | truecolor | 256 | 16 | off
+color = "auto"
+# glyphs: auto | unicode | ascii — "ascii" draws the logo, borders, footer and
+# spinner with plain ASCII, for consoles whose font shows boxes instead of
+# block-drawing characters (a stock Windows PowerShell, for one).
+glyphs = "auto"
 
 [ui.animations]
 mode = "auto"
@@ -41,6 +47,84 @@ offline_ok = true
 [compact]
 auto = true
 trigger_pct = 80
+
+# ── Herramientas y autoextensión (§19) ──────────────────────────────────────
+# Esta sección gobierna lo que ishakat puede hacer en tu máquina, y lo que
+# puede aprender a hacer solo. Los valores de abajo son los predeterminados:
+# están escritos aquí para que puedas verlos, no porque haga falta repetirlos.
+[tools]
+enabled = true
+# Dónde viven las capacidades que ishakat escribe. Son archivos de texto que
+# puedes leer, editar en tu editor y borrar. No hay binarios opacos.
+dir = "$XDG_DATA_HOME/ishakat/tools"
+skills_dir = "$XDG_DATA_HOME/ishakat/skills"
+# Tope de catálogo. No es una restricción de disco: cada herramienta gasta
+# contexto y, sobre todo, cuantas más haya, peor elige el modelo entre ellas.
+# Cuarenta cabe en el prompt y sigue siendo distinguible.
+max_tools = 40
+# Sin usarse en 90 días, una herramienta sale del prompt pero no del disco.
+archive_days = 90
+# Freno del bucle agéntico: si el modelo entra en un ciclo, se corta aquí.
+max_calls_per_turn = 25
+# La salida de una herramienta se recorta a este tamaño. Un `cat` de un archivo
+# de 2 MB no debe poder tirar la ventana de contexto entera.
+max_output_bytes = 32768
+# 0 = sin límite de gasto.
+budget_usd = 0.0
+timeout_s = 120
+
+[tools.permissions]
+# Leer no rompe nada, así que no interrumpe. Escribir y ejecutar sí pueden,
+# así que preguntan. Si esto te resulta pesado, prefiere `allow_session`
+# antes que poner "allow" de forma permanente.
+read = "allow"
+write = "ask"
+shell = "ask"
+# "Permitir en esta sesión" para un comando ya aprobado. Nunca se extiende a
+# la creación de herramientas: eso siempre se pregunta de nuevo.
+allow_session = true
+# Estas formas se rechazan con una explicación, no se ofrecen para confirmar.
+# Un diálogo que se aprueba en automático no es una defensa.
+shell_deny = ["rm -rf /", "rm -rf ~", "mkfs*", "curl * | sh", "git push --force*"]
+# Bloqueo duro: ni se leen como entrada ni se escriben, con o sin aprobación.
+# Es la defensa estructural contra la exfiltración; no se puede negociar desde
+# el contexto, que es justo el punto.
+write_deny = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "**/.env", "**/id_rsa"]
+
+[tools.evolve]
+# Cuando ishakat nota que un mismo trabajo se repite, puede convertirlo en una
+# herramienta. Quién decide eso:
+#   off         — no se autoextiende.
+#   on_request  — solo si tú lo pides ("crea una herramienta para esto").
+#   suggest     — lo propone cuando detecta repetición; tú apruebas. (defecto)
+#   auto        — la crea sin preguntar. Úsalo solo si sabes por qué.
+# "suggest" es proactivo al *notar*, nunca al *instalar*.
+mode = "suggest"
+# Tres veces es un patrón; dos es una coincidencia. Si ya sabes que vas a
+# repetir algo cien veces, no hace falta enseñárselo: pídelo directamente y tu
+# intención cuenta como la evidencia.
+min_repeats = 3
+# Por encima de este parecido con una herramienta existente, no se crea otra.
+# Es lo que evita un catálogo de nueve variantes de la misma cosa.
+dedup_threshold = 0.8
+# Presupuesto de interrupciones. Una sugerencia rechazada no vuelve a
+# proponerse nunca para el mismo patrón.
+suggest_per_session = 1
+suggest_per_week = 3
+# Tras tres rechazos, el modo baja a "on_request" solo. Deja de insistir.
+decay_after_rejects = 3
+# Una herramienta recién escrita se prueba antes de poder usarse.
+require_selftest = true
+# Sin terminal no hay nadie que autorice: en `-p`, `serve`, cron o CI, crear
+# herramientas se deniega. Ni `--yolo` lo concede; existe --allow-tool-create
+# para el script concreto que de verdad lo necesite.
+allow_without_tty = false
+
+[tools.egress]
+# A qué hosts puede llegar una herramienta. Empieza corto a propósito: cada
+# host nuevo es una decisión tuya, no un efecto secundario.
+allow = ["models.dev", "api.github.com", "raw.githubusercontent.com", "pkg.go.dev"]
+allow_all = false
 
 [favorites]
 list = ["omniroute/auto/coding", "omniroute/auto/fast"]
