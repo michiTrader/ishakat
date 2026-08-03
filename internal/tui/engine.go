@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/engine"
 )
 
@@ -50,4 +51,34 @@ func engineOr(e *engine.Engine) *engine.Engine {
 		return e
 	}
 	return engine.New(noProviderStreamer, 0)
+}
+
+// wireModel resolves ref — a §4.2 Ref ("provider/model", the form every
+// Root field that holds a model — m.model, m.compactModel — is documented
+// to carry, never the wire id) — to the WireID that actually belongs in the
+// request body's "model" field.
+//
+// OmniRoute is the reason this exists: its own served model identifiers can
+// contain slashes ("auto/coding"), so the Ref ends up as
+// "omniroute/auto/coding" and a naive strings.Split on "/" — or, as it
+// happened here, forwarding the Ref itself unchanged — sends OmniRoute a
+// model name it has never heard of, which it reports back as a misleading
+// "no active credentials for provider" 404 instead of "unknown model".
+//
+// The catalog is the trustworthy source (cat.Get already knows each row's
+// real WireID), so it is tried first. When the catalog does not have an
+// entry for ref — no catalog at all, or a model the fetch missed — this
+// falls back to catalog.SplitRef's first-slash cut, the same fallback
+// picker.go's renderPickerRow already relies on for its own display of the
+// wire id. If even that fails (ref has no slash to cut), ref is returned
+// unchanged rather than empty: sending what the user actually typed is
+// always a better failure than sending nothing.
+func wireModel(cat *catalog.Catalog, ref string) string {
+	if model, ok := cat.Get(ref); ok {
+		return model.WireID
+	}
+	if _, wireID, ok := catalog.SplitRef(ref); ok {
+		return wireID
+	}
+	return ref
 }

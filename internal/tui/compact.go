@@ -76,7 +76,12 @@ func (m Root) startCompact(switchTo string) (tea.Model, tea.Cmd) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.compactCancel = cancel
-	cmds := []tea.Cmd{summarizeCmd(ctx, m.compactEng, m.compactModel, m.conv.Messages, plan)}
+	// wireModel: same §4.2 Ref-vs-WireID fix as startEngineTurn's — an
+	// OmniRoute-served compact_model would otherwise get its Ref
+	// ("omniroute/auto/coding") sent verbatim instead of its WireID
+	// ("auto/coding"), the exact bug that made the main chat turn fail
+	// with a misleading "no active credentials" 404.
+	cmds := []tea.Cmd{summarizeCmd(ctx, m.compactEng, wireModel(m.cat, m.compactModel), m.conv.Messages, plan)}
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
