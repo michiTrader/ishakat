@@ -1087,11 +1087,75 @@ Orden concreto de implementación. Cada paso deja algo funcionando y probable, y
 | 10 | Picker de modelos | ✅ hecho |
 | 11 | Cambio en caliente (CheckSwap) | ✅ hecho |
 | 12 | `/compact` del lado del cliente | ✅ hecho |
-| 13 | Cierre: historial, `/copy`, `/retry`, `/stats`, `doctor` | ⬜ siguiente |
+| 13 | Cierre: historial, `/copy`, `/retry`, `/stats`, `doctor`, `--resume` | ⬜ siguiente |
+| 13bis | **Distribución: `curl \| sh` + GitHub Actions** (pulled forward from Phase 5) | ⬜ |
 
 **Aceptación de la Fase 2.** En un teléfono limpio: un `curl \| sh` instala el binario en menos de dos minutos; se conversa con OmniRoute con streaming visible; se cambia de modelo tres veces en la misma conversación, al menos una hacia un modelo con ventana más chica, sin perder el hilo; `esc` cancela sin romper nada; se cierra y `ishakat --resume` recupera la sesión completa; todo a 40 columnas en vertical sin una línea rota. Números: arranque bajo 150 ms con catálogo cacheado, RSS bajo 60 MB con 50 turnos, y cero repintados en reposo (verificable con `top` mostrando 0% de CPU).
 
-**Fuera de alcance en Fase 2**, por más que dé comidilla: tool calling, MCP, temas en archivo (basta uno embebido), Markdown con Glamour, resaltado de sintaxis, mouse, imágenes, y los adaptadores de Anthropic y Gemini. Los últimos son trampa pura: `kind = "openai"` contra OmniRoute ya te da Claude y Gemini, así que escribirlos ahora es trabajo sin funcionalidad nueva visible.
+**Fuera de alcance en Fase 2**, por más que dé comidilla: MCP, temas en archivo (basta uno embebido), Markdown con Glamour, resaltado de sintaxis, mouse, imágenes, y los adaptadores de Anthropic y Gemini. Los últimos son trampa pura: `kind = "openai"` contra OmniRoute ya te da Claude y Gemini, así que escribirlos ahora es trabajo sin funcionalidad nueva visible.
+
+**Tool calling used to be on that list and no longer is.** It moved into its own
+phase below, because it is the product rather than a temptation to resist. MCP
+stays out, correctly — §19's ladder covers the same ground without a daemon per
+integration.
+
+### Step 13bis — Distribution, pulled forward from Phase 5
+
+**Why it jumps the queue:** `make build` is not an installation method.
+Single-binary install is differentiator #2, it costs about one afternoon, and
+until it exists nobody — including its author on his own phone — can actually
+use ishakat day to day. An installable ishakat that only chats is a product
+people try; an agentic ishakat that requires `make build` is a product nobody
+tries. It also unblocks dogfooding, which every later step depends on.
+
+Scope: a `release.yml` GitHub Actions matrix over linux/amd64, linux/arm64,
+darwin/arm64, android/arm64 (NDK + CGO, per §3) and windows/amd64; an
+`install.sh` that detects Termux (`$PREFIX` set) and installs into
+`$PREFIX/bin`; and optionally an npm shim that only downloads the right binary.
+Closing criterion: on a clean phone, `curl -fsSL … | sh` yields a working
+`ishakat doctor` in under two minutes, with no toolchain installed.
+
+### Fase 2.5 — El agente · the phase this document was restructured for
+
+Ishakat stops being a chat that could become an agent and becomes one. Ordered
+so that each step leaves something usable, and so the tool *engine* is proven
+before any model is allowed to write into it.
+
+| # | Paso | Deja funcionando |
+|---|---|---|
+| 14 | **Tool-calling loop** in `engine` + OpenAI/Anthropic dialect serialization | The engine iterates `tool_call → result → repeat`, with a hard cap, loop detection and cancellation. Tested with a fake tool, no network |
+| 15 | **The six core tools** in `internal/tools` (pure Go, stdlib) | `read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`. It genuinely programs |
+| 16 | **Permissions and guards** (overlay in the `confirm.go` pattern) | Danger tiers, session allowlist, per-turn call cap, cost budget, repeat detection |
+| 17 | **Tool-call rendering** in TUI and headless | You can see what it is doing: coloured collapsible diffs, streamed results |
+| 18 | **Project `AGENTS.md`** (global → project → local precedence) | Rules without repeating them every message |
+| 19 | **`fetch` + skills** (rung 0) | The prose capability layer, `/skills`, progressive disclosure |
+| 20 | **`internal/tools.Registry` + declarative tools** (rung 1) | The tool engine, hand-writable and testable **without any model generating anything** |
+| 21 | **Script tools (rung 2) + `tool_create`/`probe`/`edit` + quarantine + audit + governance (§19.6/§19.7)** | **Self-extension.** It writes, tests and installs its own tools, under three gates |
+| 22 | **`dispatch`** (sub-agents) | Parallelism and context isolation via goroutines |
+| 23 | **`ishakat serve`** (NDJSON/WebSocket) + stable `--json` | The third door: realtime voice, n8n, cron, editor plugins |
+| 24 | **`/login`** (OAuth device flow + API-key wizard) | Provider menu, browser or key, switchable mid-session |
+| 25 | **Crystallization by observation** (`usage.jsonl` + the suggestion) | The agent improves because it watched you, not because you asked |
+
+**Note the ordering of 20 before 21, which is deliberate.** The declarative
+registry can be written by hand and tested with fixtures, so the tool engine is
+solid *before* a model is allowed to write into it. Building `tool_create` first
+would be building the factory before the factory.
+
+**Aceptación de la Fase 2.5, and it is meant to be this ambitious:**
+
+> **Ishakat implements Step 23 of itself**, with a human only approving diffs. If
+> it can read its own 26.000+ lines, work out where `serve.go` belongs, write it,
+> run `go test -race ./...` and fix what breaks — it is ready. It is also the best
+> possible demo.
+
+Secondary criteria: on a phone, a tool-using turn renders correctly at 40
+columns; `esc` cancels mid-tool-loop leaving no half-written file; a
+`danger: high` tool cannot be approved for a whole session; a created tool that
+fails its self-test never becomes usable; and `tool_create` is denied over
+headless and `serve` without `--allow-tool-create`.
+
+**Fuera de alcance en Fase 2.5:** MCP, LSP, OS sandboxing, session trees,
+Starlark (§16), and browser automation — `fetch` only (§19.8).
 
 ### Fase 3 — Mejoras internas y estéticas
 
@@ -1106,6 +1170,12 @@ La fase menos divertida y la que decide si la gente lo usa. Reintentos con backo
 Aquí entran también los adaptadores de Anthropic y Gemini, las pruebas de los tres dialectos contra servidores simulados, el perfilado con presupuestos explícitos, y la revisión de seguridad: claves nunca en logs, permisos 600, `/debug` que redacta secretos.
 
 ### Fase 5 — Creación (distribución)
+
+**Nota:** el núcleo de esta fase —la matriz de GitHub Actions y el `install.sh`—
+se adelantó al Paso 13bis por las razones dadas allí. Lo que queda aquí es el
+resto: README con GIF grabado en un celular, documentación de la config, guía de
+"cómo agregar un proveedor", un tema de ejemplo, y el paquete npm si se decide
+que vale la pena.
 
 Binarios cross-compilados para android/arm64 (con NDK y CGO, obligatorio), linux/amd64, linux/arm64 y darwin/arm64, publicados en GitHub Releases vía GitHub Actions, más un `install.sh` que detecte Termux y ponga el binario en `$PREFIX/bin`. Opcionalmente un paquete npm que solo descargue el binario correcto, para quien prefiera `npm i -g`.
 
