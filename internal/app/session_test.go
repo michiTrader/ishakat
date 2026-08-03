@@ -18,7 +18,7 @@ func TestNewSessionRecorderHonoursSaveFalse(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Session.Save = false
 
-	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o")
+	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 	if rec != nil {
 		t.Error("save = false should return a nil Recorder")
 	}
@@ -32,7 +32,7 @@ func TestNewSessionRecorderHonoursSaveFalse(t *testing.T) {
 // comment on why a bad config is not fatal), and the recorder must degrade
 // the same way Engine already does rather than panic.
 func TestNewSessionRecorderNilConfigDoesNotSave(t *testing.T) {
-	rec, warn := NewSessionRecorder(nil, "openai/gpt-4o")
+	rec, warn := NewSessionRecorder(nil, "openai/gpt-4o", nil)
 	if rec != nil || warn != "" {
 		t.Errorf("nil cfg: rec = %v, warn = %q, want (nil, \"\")", rec, warn)
 	}
@@ -48,7 +48,7 @@ func TestSessionRecorderCreatesFileOnlyOnFirstAppend(t *testing.T) {
 	cfg.Session.Save = true
 	cfg.Session.Dir = dir
 
-	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o")
+	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 	if warn != "" {
 		t.Fatalf("unexpected warning: %q", warn)
 	}
@@ -111,7 +111,7 @@ func TestSessionRecorderNeverCreatesAFileIfNothingWasSent(t *testing.T) {
 	cfg.Session.Save = true
 	cfg.Session.Dir = dir
 
-	rec, _ := NewSessionRecorder(cfg, "openai/gpt-4o")
+	rec, _ := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 	if rec == nil {
 		t.Fatal("expected a non-nil recorder")
 	}
@@ -135,7 +135,7 @@ func TestSessionRecorderRotatesOnKeepLast(t *testing.T) {
 	// Two independent sessions, each with one Append, so Rotate(1) has
 	// something to prune down to.
 	for i := 0; i < 2; i++ {
-		rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o")
+		rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 		if warn != "" {
 			t.Fatalf("unexpected warning: %q", warn)
 		}
@@ -165,11 +165,166 @@ func TestNewSessionRecorderWarnsWhenTheDirCannotBeOpened(t *testing.T) {
 	// A file in the way of the directory convo.NewStore needs to create.
 	cfg.Session.Dir = filepath.Join(blocked, "sessions")
 
-	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o")
+	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 	if rec != nil {
 		t.Error("a store that failed to open should not return a usable Recorder")
 	}
 	if warn == "" {
 		t.Error("expected a non-empty warning when the session dir cannot be created")
+	}
+}
+
+// TestResumeSessionNothingToResume covers the ordinary case: neither the
+// --resume flag nor resume_last is set, or the flag is set but there is no
+// prior session on disk. Neither is a warning — ErrNotFound is the state of
+// a brand-new install, not a failure — and both must return a nil
+// conversation so app.Run falls through to a fresh session unmodified.
+func TestResumeSessionNothingToResume(t *testing.T) {
+	t.Run("resume not requested at all", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := &config.Config{}
+		cfg.Session.Save = true
+		cfg.Session.Dir = dir
+
+		conv, store, warn := ResumeSession(cfg, false)
+		if conv != nil || store != nil || warn != "" {
+			t.Fatalf("got (%v, %v, %q), want (nil, nil, \"\")", conv, store, warn)
+		}
+	})
+
+	t.Run("--resume with an empty sessions dir", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := &config.Config{}
+		cfg.Session.Save = true
+		cfg.Session.Dir = dir
+
+		conv, store, warn := ResumeSession(cfg, true)
+		if conv != nil || store != nil || warn != "" {
+			t.Fatalf("got (%v, %v, %q), want (nil, nil, \"\") — ErrNotFound must not warn", conv, store, warn)
+		}
+	})
+
+	t.Run("session save = false disables resume too", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Session.Save = false
+		cfg.Session.ResumeLast = true
+
+		conv, store, warn := ResumeSession(cfg, true)
+		if conv != nil || store != nil || warn != "" {
+			t.Fatalf("got (%v, %v, %q), want (nil, nil, \"\")", conv, store, warn)
+		}
+	})
+}
+
+// TestResumeSessionLoadsTheLatestConversation is --resume's main contract:
+// given a sessions directory with a prior conversation in it, ResumeSession
+// must return that conversation with its messages intact.
+func TestResumeSessionLoadsTheLatestConversation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = dir
+
+	seed, err := convo.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := seed.New("charla previa", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Append(conv.ID, convo.User("hola")); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Append(conv.ID, convo.Assistant("hola de vuelta", "openai/gpt-4o")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, store, warn := ResumeSession(cfg, true)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if store == nil {
+		t.Fatal("expected a non-nil store to reuse for the recorder")
+	}
+	if got == nil {
+		t.Fatal("expected a resumed conversation, got nil")
+	}
+	if got.ID != conv.ID {
+		t.Errorf("resumed ID = %q, want %q", got.ID, conv.ID)
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("resumed messages = %d, want 2", len(got.Messages))
+	}
+}
+
+// TestResumeSessionHonoursResumeLastWithoutTheFlag mirrors the flag-driven
+// test above but through [session] resume_last, since ResumeSession's
+// contract is "either one triggers resume", not "the flag always wins".
+func TestResumeSessionHonoursResumeLastWithoutTheFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = dir
+	cfg.Session.ResumeLast = true
+
+	seed, err := convo.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := seed.New("charla previa", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Append(conv.ID, convo.User("hola")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _, warn := ResumeSession(cfg, false)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if got == nil || got.ID != conv.ID {
+		t.Fatalf("resume_last did not resume the seeded conversation: got %v", got)
+	}
+}
+
+// TestSessionRecorderAppendsToAResumedConversation is sessionRecorder's half
+// of --resume: when conv is already set (the caller passed a resumed
+// conversation), Append must write to that same file from its very first
+// call instead of creating a new one — no second header, no second file.
+func TestSessionRecorderAppendsToAResumedConversation(t *testing.T) {
+	dir := t.TempDir()
+	store, err := convo.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := store.New("charla previa", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(seeded.ID, convo.User("hola")); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &sessionRecorder{store: store, conv: seeded, model: "openai/gpt-4o"}
+	if err := rec.Append(convo.Assistant("respuesta", "openai/gpt-4o")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if len(files) != 1 {
+		t.Fatalf("session files = %d, want still 1 (no new conversation created)", len(files))
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3 (header, seeded user, new assistant):\n%s", len(lines), raw)
+	}
+	if strings.Count(string(raw), `"type":"header"`) != 1 {
+		t.Errorf("expected exactly one header line, got:\n%s", raw)
 	}
 }

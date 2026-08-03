@@ -2106,10 +2106,22 @@ Orden obligado, entonces, y no es el del enunciado original:
    prompt completo de antemano. Cubierto por tests en ambos paquetes
    (`internal/tui/session_internal_test.go`,
    `internal/app/session_test.go`).
-2. ⬜ **`--resume` y `resume_last`.** Reabrir la última sesión, con el historial en
-   contexto y visible en el transcript.
+2. ✅ **`--resume` y `resume_last`.** `app.ResumeSession` (`internal/app/session.go`)
+   carga la sesión más reciente vía `convo.Store.Latest()` cuando se pasa
+   `--resume` (flag nuevo en `cmd/ishakat/main.go`) o cuando `[session]
+   resume_last = true`; `ErrNotFound` (nada que reabrir) no es una advertencia,
+   es el estado normal de una instalación nueva. `app.Run` pasa el historial
+   cargado a `tui.Options.History` — que ya sabía volcarlo al transcript y a
+   `m.conv` desde la sesión anterior, ver `internal/tui/resume.go` — y
+   reutiliza el mismo `*convo.Store` y la misma `*convo.Conversation` para
+   construir el `Recorder`: `sessionRecorder.Append` solo crea una
+   conversación nueva cuando `conv == nil`, así que una sesión reanudada
+   anexa al archivo existente desde su primer `Append`, nunca crea un
+   segundo. Cubierto por tests nuevos en `internal/app/session_test.go`
+   (`TestResumeSession*`, `TestSessionRecorderAppendsToAResumedConversation`).
 3. ⬜ **`/resume`.** El menú, que lee solo la cabecera de cada archivo y carga el
-   completo únicamente al elegir (§10).
+   completo únicamente al elegir (§10). Requiere una interfaz `SessionLister`
+   nueva; es el único ítem que queda de este orden.
 
 Commit: `feat: cierre de fase 2 + tag v0.1.0`
 
