@@ -412,6 +412,15 @@ func NewRoot(o Options) Root {
 		compactKeepLastTurns: compactKeepLastTurns,
 		compactStrategy:      compactStrategy,
 		compactOnError:       compactOnError,
+
+		// Recorder was documented on Options as the persistence seam (§10,
+		// Step 13) but never actually assigned here — every real session
+		// silently went unsaved from internal/app.Run while the field's own
+		// test double (withRecorder, session_internal_test.go) bypassed
+		// NewRoot entirely and kept the tests green. See
+		// TestOptionsRecorderIsWiredIntoRoot for the regression test that
+		// would have caught it.
+		recorder: o.Recorder,
 	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)

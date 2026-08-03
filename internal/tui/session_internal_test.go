@@ -31,6 +31,30 @@ func withRecorder(root Root, rec Recorder) Root {
 	return root
 }
 
+// TestOptionsRecorderIsWiredIntoRoot is the regression test for the bug
+// every other test in this file missed: they all build their Root through
+// withRecorder, which assigns the private field directly and never exercises
+// NewRoot's own wiring. internal/app.Run only ever has Options — it cannot
+// reach the private field — so if NewRoot drops Options.Recorder on the
+// floor, every real session silently goes unsaved while every test here
+// keeps passing. This is the one test in the file that goes through
+// NewRoot(Options{...}) instead of withRecorder, which is the whole point.
+func TestOptionsRecorderIsWiredIntoRoot(t *testing.T) {
+	rec := &fakeRecorder{}
+	root := NewRoot(Options{Recorder: rec})
+	if root.recorder == nil {
+		t.Fatal("NewRoot did not wire Options.Recorder into Root.recorder — real sessions go unsaved")
+	}
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "hola mundo")
+
+	if len(rec.appended) != 1 {
+		t.Fatalf("appended = %d messages via a Root built from NewRoot(Options{Recorder: rec}), want 1", len(rec.appended))
+	}
+}
+
 // TestRecorderGetsUserMessageBeforeTheTurnStarts is §10's ordering
 // requirement: what the user typed is persisted before the request is sent,
 // not after the answer comes back, so killing the process mid-turn never
