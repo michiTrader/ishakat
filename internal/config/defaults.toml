@@ -75,6 +75,80 @@ summary_tokens = 800
 strategy = "summarize"
 on_error = "drop-oldest"
 
+# The agent layer (PLAN §19). These defaults decide what a language model is
+# allowed to do to this machine, so they are written out in full rather than
+# left implicit in Go zero values.
+[tools]
+enabled = true
+dir = "$XDG_DATA_HOME/ishakat/tools"
+skills_dir = "$XDG_DATA_HOME/ishakat/skills"
+max_tools = 40
+archive_days = 90
+max_calls_per_turn = 25
+max_output_bytes = 32768
+budget_usd = 0.0
+timeout_s = 120
+
+[tools.permissions]
+# Reading cannot damage anything, so it does not interrupt. Writing and running
+# commands can, so they do.
+read = "allow"
+write = "ask"
+shell = "ask"
+allow_session = true
+# Refused outright with an explanation, never offered for confirmation: these
+# shapes are not worth a prompt that a tired user approves on autopilot.
+shell_deny = [
+  "rm -rf /",
+  "rm -rf /*",
+  "rm -rf ~",
+  "rm -rf $HOME",
+  "mkfs*",
+  "dd if=* of=/dev/*",
+  ":(){ :|:& };:",
+  "chmod -R 777 /",
+  "git push --force*",
+  "curl * | sh",
+  "curl * | bash",
+  "wget * | sh",
+  "wget * | bash",
+]
+# Never read as tool input nor written, regardless of any approval. §19.8's
+# structural exfiltration defence: a hard block cannot be argued into a yes by
+# anything in the context.
+write_deny = [
+  "~/.ssh/**",
+  "~/.aws/**",
+  "~/.gnupg/**",
+  "~/.config/ishakat/config.toml",
+  "**/.env",
+  "**/id_rsa",
+  "**/id_ed25519",
+]
+
+[tools.evolve]
+# "suggest" is proactive about noticing that work repeated, never about
+# installing. See §19.7 for why both extremes are worse.
+mode = "suggest"
+min_repeats = 3
+dedup_threshold = 0.8
+suggest_per_session = 1
+suggest_per_week = 3
+decay_after_rejects = 3
+require_selftest = true
+# With no terminal there is no human to authorize gate 2. --yolo does not grant
+# this either; --allow-tool-create is the deliberate per-script opt-in.
+allow_without_tty = false
+
+[tools.egress]
+allow = [
+  "models.dev",
+  "api.github.com",
+  "raw.githubusercontent.com",
+  "pkg.go.dev",
+]
+allow_all = false
+
 [favorites]
 list = ["omniroute/auto/coding", "omniroute/auto/fast", "omniroute/auto/cheap"]
 
