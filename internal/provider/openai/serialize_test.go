@@ -54,6 +54,43 @@ func TestFromConvoDegradaImagenesYHerramientas(t *testing.T) {
 	}
 }
 
+// TestFromConvoDistingueErrorDeSalida cubre el caso en que aplanar borraría
+// información que el modelo necesita. Una salida que dice "permission denied" y
+// un fallo cuyo texto es "permission denied" son cosas distintas: en el primer
+// caso el comando funcionó y eso fue lo que imprimió, en el segundo el comando
+// no llegó a correr. Si el aplanado los escribe igual el modelo tiene que
+// adivinar, y de esa distinción depende que reaccione (§3: el error es dato).
+func TestFromConvoDistingueErrorDeSalida(t *testing.T) {
+	ok := convo.NewMessage(convo.RoleTool,
+		convo.ToolResultBlock("c1", "bash", "permission denied"),
+	)
+	bad := convo.NewMessage(convo.RoleTool,
+		convo.ToolErrorBlock("c2", "bash", "permission denied"),
+	)
+
+	outOK, _ := openai.FromConvo([]convo.Message{ok}, provider.Caps{})
+	outBad, _ := openai.FromConvo([]convo.Message{bad}, provider.Caps{})
+
+	// El texto es idéntico a propósito: si el serializador solo copiara el
+	// texto, este test pasaría sin probar nada.
+	if outOK[0].Content == outBad[0].Content {
+		t.Fatalf("un fallo y una salida con el mismo texto se serializan igual: %q", outOK[0].Content)
+	}
+	if !strings.Contains(outBad[0].Content, "error") {
+		t.Errorf("el fallo debería anunciarse como error: %q", outBad[0].Content)
+	}
+	if strings.Contains(outOK[0].Content, "error") {
+		t.Errorf("una salida normal no debería anunciarse como error: %q", outOK[0].Content)
+	}
+	// El texto tiene que llegar en ambos casos: sin él el modelo no puede
+	// corregir nada, y el aplanado dejaría de ser información para ser ruido.
+	for _, c := range []string{outOK[0].Content, outBad[0].Content} {
+		if !strings.Contains(c, "permission denied") {
+			t.Errorf("el texto de la herramienta no llegó: %q", c)
+		}
+	}
+}
+
 func TestFromConvoOmiteRazonamientoYMarcaAbortado(t *testing.T) {
 	m := convo.NewMessage(convo.RoleAssistant,
 		convo.ReasoningBlock("primero pienso"),

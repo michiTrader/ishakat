@@ -63,7 +63,15 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 
 			case convo.BlockToolResult:
 				deg.ToolsFlattened++
-				appendPara(&b, "[resultado de "+blk.Name+"]\n"+blk.Text)
+				// Un fallo se marca como fallo. Aplanarlo igual que una salida
+				// normal deja al modelo adivinando si "permission denied" es lo
+				// que el comando imprimió o lo que le pasó al comando, y de esa
+				// distinción depende que reaccione (§3: el error es dato).
+				if blk.IsError {
+					appendPara(&b, "[error de "+blk.Name+"]\n"+blk.Text)
+				} else {
+					appendPara(&b, "[resultado de "+blk.Name+"]\n"+blk.Text)
+				}
 			}
 		}
 
