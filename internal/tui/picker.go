@@ -330,6 +330,9 @@ func (m Root) renderPicker() string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, " models %s %d\n", g.dot, countModelRows(p.rows))
+	if notice := catalogNotice(p.cat); notice != "" {
+		b.WriteString(" " + m.styles.Warn.Render(notice) + "\n")
+	}
 	fmt.Fprintf(&b, " %s %s%s\n", searchGlyph(g), p.query, g.streamCursor)
 	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
 
@@ -353,6 +356,37 @@ func emptyPickerMessage(p Picker) string {
 		return "no catalog loaded yet"
 	}
 	return "no models match \"" + p.query + "\""
+}
+
+// catalogNotice is the one-line honesty check §4.4 promises ("Stale means
+// the data comes from an expired cache, and Seeded means it comes from the
+// embedded seed. Both are shown, never hidden" — catalog.Catalog's own
+// comment) but that, before this, only ever reached `ishakat models` on the
+// command line: the interactive picker drew the exact same 13 rows whether
+// they came from a live OmniRoute or from the seed nobody had verified,
+// with nothing to tell the two apart short of noticing the count matched
+// seed.json's by memory.
+//
+// Seeded outranks Stale (an unverified placeholder is a stronger claim than
+// an old-but-real one), and both outrank a plain "no notes" nil. It reuses
+// resumeAge rather than internal/app.humanAge for the same reason
+// resumemenu.go's own copy does: internal/app depends on internal/tui, not
+// the other way (§6.1), so a three-line helper is duplicated, not shared.
+func catalogNotice(cat *catalog.Catalog) string {
+	if cat == nil {
+		return ""
+	}
+	switch {
+	case cat.Seeded:
+		return "showing the embedded seed — not verified against any provider; run with a reachable OmniRoute (or `ishakat models --refresh`) to replace it"
+	case cat.Stale:
+		if !cat.FetchedAt.IsZero() {
+			return "stale cache from " + resumeAge(cat.FetchedAt) + " ago — refreshing in the background"
+		}
+		return "stale cache — refreshing in the background"
+	default:
+		return ""
+	}
 }
 
 func countModelRows(rows []pickerRow) int {
