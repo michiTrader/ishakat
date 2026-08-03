@@ -585,6 +585,73 @@ func TestCacheIsValidJSONAfterRefresh(t *testing.T) {
 	}
 }
 
+// TestBackgroundRefreshReturnsTheNewCatalogOnSuccess: the common case —
+// discovery reaches the provider, BackgroundRefresh hands back the catalog
+// RefreshCatalog itself would have produced, non-nil, ready for
+// tui.CatalogRefreshedMsg to swap in.
+func TestBackgroundRefreshReturnsTheNewCatalogOnSuccess(t *testing.T) {
+	gw := newOmniRouteServer(t)
+	cfg := catalogCfg(t, gw.URL, "")
+
+	got := BackgroundRefresh(context.Background(), cfg, "test", LoadCatalog(cfg))
+	if got == nil {
+		t.Fatal("BackgroundRefresh = nil on a reachable provider")
+	}
+	if got.Len() == 0 {
+		t.Fatal("BackgroundRefresh returned an empty catalog on a reachable provider")
+	}
+	mustGet(t, *got, "omniroute/openai/gpt-5")
+}
+
+// TestBackgroundRefreshReturnsNilWhenNothingWasReached: the provider is
+// down AND there is nothing cached to fall back on — RefreshCatalog's own
+// worst case, catalog.SeedCatalog's virtual models aside. BackgroundRefresh
+// must say "nothing changed" (nil), not hand the caller an empty catalog
+// that would blank a picker the user might have open.
+func TestBackgroundRefreshReturnsNilWhenNothingWasReached(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"upstream is on fire"}}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(down.Close)
+
+	cfg := catalogCfg(t, down.URL, "")
+	// No prior cache, no declared models, discovery only: RefreshCatalog's
+	// own build has genuinely nothing to show.
+	cfg.Catalog.Sources = []string{"provider"}
+
+	got := BackgroundRefresh(context.Background(), cfg, "test", LoadCatalog(cfg))
+	if got != nil {
+		t.Fatalf("BackgroundRefresh = %v (Len=%d), want nil when nothing was reached", got, got.Len())
+	}
+}
+
+// TestBackgroundRefreshKeepsCachedModelsDespiteTheError mirrors
+// TestRefreshKeepsCachedModelsWhenTheProviderIsDown one layer up: the
+// provider answers 500, but a prior cache exists, so RefreshCatalog itself
+// returns a non-empty catalog alongside its error. BackgroundRefresh's
+// nil-on-total-failure rule must not swallow that partial success — an
+// error plus a usable catalog is still progress the picker should see.
+func TestBackgroundRefreshKeepsCachedModelsDespiteTheError(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"upstream is on fire"}}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(down.Close)
+
+	cfg := catalogCfg(t, down.URL, "")
+	pre := catalog.NewCache(CatalogCachePath(cfg))
+	pre.SetProvider("omniroute", []catalog.DiscoveredModel{{WireID: "openai/gpt-5", Name: "GPT-5"}}, time.Now())
+	pre.FetchedAt = time.Now().Add(-48 * time.Hour)
+	if err := pre.Save(""); err != nil {
+		t.Fatalf("preparing the cache: %v", err)
+	}
+
+	got := BackgroundRefresh(context.Background(), cfg, "test", LoadCatalog(cfg))
+	if got == nil {
+		t.Fatal("BackgroundRefresh = nil even though a cached model survived the failed refresh")
+	}
+	mustGet(t, *got, "omniroute/openai/gpt-5")
+}
+
 // TestHumanAge is what the staleness strip actually prints.
 func TestHumanAge(t *testing.T) {
 	cases := []struct {

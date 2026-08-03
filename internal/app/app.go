@@ -4,8 +4,10 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
@@ -16,6 +18,15 @@ import (
 	"github.com/MichiTrader/ishakat/internal/tui"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
+
+// backgroundRefreshTimeout bounds the one network trip §4.4/§11 allows
+// after startup. It is generous compared to fetch.DefaultDiscoverTimeout
+// (each provider already races that internally): this is the ceiling on
+// the whole background refresh — discovery against every enabled provider
+// plus models.dev — not on any single one of them, and a user on a slow
+// or flaky connection should still get an answer instead of a goroutine
+// that runs until the process exits.
+const backgroundRefreshTimeout = 60 * time.Second
 
 // Run carga la configuración, resuelve el tema y arranca el programa de
 // Bubble Tea en modo inline. version es la versión compilada de ishakat
@@ -178,6 +189,25 @@ func Run(version string, resume bool) int {
 	})
 
 	p := tea.NewProgram(root)
+
+	// §4.4/§11's background refresh: only worth doing when the cache
+	// LoadCatalog already read was expired (or missing) — a fresh cache
+	// answers exactly what a refresh would, so firing one anyway would
+	// just be a network trip that changes nothing the picker can show.
+	// The goroutine talks back to Root the only way anything outside the
+	// tea.Program's own Update loop can: p.Send, with the *catalog.Catalog
+	// BackgroundRefresh produced (nil is a legitimate answer — see its own
+	// comment — and CatalogRefreshedMsg's handler already treats nil as a
+	// no-op instead of blanking a catalog the user is looking at).
+	if snap.Expired {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), backgroundRefreshTimeout)
+			defer cancel()
+			next := BackgroundRefresh(ctx, cfg, version, snap)
+			p.Send(tui.CatalogRefreshedMsg{Catalog: next})
+		}()
+	}
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Error ejecutando la interfaz: %v\n", err)
 		return 1

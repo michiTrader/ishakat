@@ -574,6 +574,9 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionChosenMsg:
 		return m.applySessionChosen(msg.ID)
 
+	case CatalogRefreshedMsg:
+		return m.applyCatalogRefreshed(msg.Catalog)
+
 	case compactDoneMsg:
 		// A stale result from a compaction cancelCompact already closed —
 		// its context is cancelled, but the goroutine already past the
@@ -685,6 +688,31 @@ func (m Root) openPicker(query string) (tea.Model, tea.Cmd) {
 // results in an order the command line disagreed with.
 func (m Root) resolveOptions() catalog.ResolveOptions {
 	return catalog.ResolveOptions{Alias: m.alias, PreferFree: m.preferFree}
+}
+
+// applyCatalogRefreshed is CatalogRefreshedMsg's only handler. next is nil
+// when app.BackgroundRefresh could not improve on the catalog LoadCatalog
+// already handed Root at startup (network unreachable, every provider
+// timed out) — swapping m.cat for nothing would turn a working picker into
+// an empty one over something that was never the user's fault, so that case
+// is a no-op.
+//
+// When the picker is open (ModePicker) at the moment the refresh lands, it
+// is rebuilt against the new catalog rather than left stale or closed: the
+// user is very possibly looking at exactly the "13" in "models · 13" this
+// refresh is about to change, and closing the overlay out from under an
+// still-open selection would be a worse surprise than the row list moving
+// under their cursor.
+func (m Root) applyCatalogRefreshed(next *catalog.Catalog) (tea.Model, tea.Cmd) {
+	if next == nil {
+		return m, nil
+	}
+	m.cat = next
+	if m.mode == ModePicker {
+		m.picker.cat = m.cat
+		m.picker = m.picker.rebuild()
+	}
+	return m, nil
 }
 
 // applyModelChosen is modelChosenMsg's only handler, and the single funnel
