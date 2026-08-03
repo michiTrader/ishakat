@@ -483,6 +483,44 @@ strategy        = "summarize"   # summarize | drop-oldest
 on_error        = "drop-oldest"
 
 # ─────────────────────────────────────────────────────────────
+# Contrato 5 (§19). Esta sección gobierna dos cosas distintas que conviene no
+# confundir: qué puede hacer ishakat en la máquina (permissions) y qué puede
+# aprender a hacer solo (evolve). La primera existe desde el paso 14; la segunda
+# desde el 18.
+[tools]
+enabled            = true
+dir                = "$XDG_DATA_HOME/ishakat/tools"
+skills_dir         = "$XDG_DATA_HOME/ishakat/skills"
+max_tools          = 40      # tope de catálogo, no de disco: ver más abajo
+archive_days       = 90      # sin usar 90 días → fuera del prompt, no del disco
+max_calls_per_turn = 25      # freno del bucle agéntico
+max_output_bytes   = 32_768  # recorte de salida de una herramienta
+budget_usd         = 0.0     # 0 = sin límite
+timeout_s          = 120
+
+[tools.permissions]
+read          = "allow"      # leer no rompe nada; no interrumpe
+write         = "ask"
+shell         = "ask"
+allow_session = true         # "permitir en esta sesión" para un comando ya aprobado
+shell_deny    = ["rm -rf /", "rm -rf ~", "mkfs*", "curl * | sh", "git push --force*"]
+write_deny    = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "**/.env", "**/id_rsa"]
+
+[tools.evolve]
+mode                = "suggest"  # off | on_request | suggest | auto
+min_repeats         = 3
+dedup_threshold     = 0.8
+suggest_per_session = 1
+suggest_per_week    = 3
+decay_after_rejects = 3
+require_selftest    = true
+allow_without_tty   = false
+
+[tools.egress]
+allow     = ["models.dev", "api.github.com", "raw.githubusercontent.com", "pkg.go.dev"]
+allow_all = false
+
+# ─────────────────────────────────────────────────────────────
 [favorites]
 list = ["omniroute/auto/coding", "omniroute/auto/fast", "omniroute/auto/cheap"]
 
@@ -554,9 +592,27 @@ enabled  = false
 
 `internal/config/defaults.toml` es esta misma estructura sin comentarios, con un solo `[[provider]]` (omniroute). Los demás son sugerencias que viven únicamente en el ejemplo.
 
+Dos archivos y una trampa: `config.example.toml` en la raíz es el que la gente lee, e `internal/config/example.toml` es el que `ishakat config init` escribe de verdad, porque va embebido en el binario. Son copias, y las copias sin verificación divergen siempre — de hecho ya divergieron una vez, y el embebido perdió la documentación de `glyphs`, justo la opción que un usuario de Windows necesita. `TestExampleTOMLInSync` es lo que impide que vuelva a pasar. Al editar uno, se copia sobre el otro.
+
+**Los valores de `[tools]` que no son obvios.** Cada uno responde a una pregunta concreta, y vale la pena dejar escrita la pregunta y no solo el número:
+
+- `max_tools = 40` no es un límite de disco; los archivos son de kilobytes. Es un límite de *discriminación*: cada herramienta gasta unos 15 tokens de nombre y descripción en el prompt, pero el costo real es que cuantas más opciones parecidas haya, peor elige el modelo entre ellas. Cuarenta entra en el prompt y sigue siendo distinguible. Un catálogo de doscientas herramientas es un catálogo inservible, y el fallo no se ve como un error sino como un agente que "se ha vuelto tonto".
+- `max_calls_per_turn = 25` existe porque el bucle del paso 14 no tiene planificador que lo detenga (§3): el modelo llama, ve el resultado y reacciona. Un ciclo — leer un archivo, editarlo, volver a leerlo — no se autocorta. Veinticinco es holgado para trabajo real y estrecho para un bucle infinito.
+- `max_output_bytes = 32_768` protege contra el fallo más aburrido y más frecuente: un `cat` de un archivo de 2 MB que se lleva la ventana de contexto entera. Se recorta con marca visible, para que el modelo sepa que hay más y pueda pedir el resto acotado.
+- `min_repeats = 3` en `[tools.evolve]`: tres veces es un patrón, dos es una coincidencia. Pero es un piso para el *agente*, no para el usuario. Si tú ya sabes que vas a repetir algo cien veces, no tienes que enseñárselo repitiéndolo tres: lo pides y tu intención cuenta como evidencia (§19.6, los tres orígenes).
+- `dedup_threshold = 0.8` es lo único que separa un catálogo de un vertedero. Sin este umbral se acaba con nueve variantes de "consultar precio", todas casi iguales, y el problema de discriminación de `max_tools` llega mucho antes de las cuarenta.
+- `require_selftest = true` es la puerta 3 de §19.6. Una herramienta escrita por un modelo no está verificada por haberse escrito; nace en estado `unverified` y solo pasa a `verified` si su propia prueba pasa.
+- `allow_without_tty = false` es la puerta 2. Sin terminal no hay humano que autorice, así que crear herramientas se deniega en `-p`, en `serve`, en cron y en CI. `--yolo` **no** lo concede: existe `--allow-tool-create` para el script concreto que lo necesite, porque conceder autoextensión no debe ser un efecto secundario de pedir "no me preguntes tanto".
+
+La asimetría entre `shell_deny` y `write_deny` también es deliberada. `shell_deny` rechaza formas de comando con una explicación en vez de ofrecerlas para confirmar, porque un diálogo que se aprueba en automático no es una defensa. `write_deny` va más lejos: son rutas que no se leen ni se escriben *con o sin aprobación*. Es la defensa estructural de §19.8 contra la exfiltración, y su valor está justamente en que nada del contexto puede convencerla de decir sí.
+
 ### 5.3 Validación
 
-El cargador falla en arranque solo por tres cosas: schema desconocido, TOML sintácticamente inválido, o un `[[provider]]` sin `id`/`kind`/`base_url`. Todo lo demás degrada con advertencia visible en `/config`: un `kind` no soportado desactiva el proveedor; un `default_model` que no resuelve cae al primer proveedor habilitado; un tema inexistente cae a `ascua`; y las claves desconocidas se reportan como "clave ignorada" en vez de reventar, lo cual es esencial para no romper configs viejas al agregar funciones.
+El cargador falla en arranque por cuatro cosas: schema desconocido, TOML sintácticamente inválido, un `[[provider]]` sin `id`/`kind`/`base_url`, y un valor inválido en `[tools]`. Todo lo demás degrada con advertencia visible en `/config`: un `kind` no soportado desactiva el proveedor; un `default_model` que no resuelve cae al primer proveedor habilitado; un tema inexistente cae a `ascua`; y las claves desconocidas se reportan como "clave ignorada" en vez de reventar, lo cual es esencial para no romper configs viejas al agregar funciones.
+
+La cuarta es la excepción a esa política de degradar, y tiene una razón: **un permiso mal escrito no tiene interpretación segura.** Si `write = "alow"` degradara a "deny" el usuario se quedaría sin escritura sin entender por qué; si degradara a "allow", ishakat escribiría sin preguntar en la máquina de alguien que creía haber pedido lo contrario. No hay opción prudente, solo una moneda al aire que se resuelve en el peor momento. Lo mismo vale para `mode` en `[tools.evolve]` y para un `dedup_threshold` fuera de `(0, 1]`, que apagaría el filtro anti-duplicados en silencio. En estos casos negarse a arrancar es la única respuesta honesta, y el mensaje dice qué valores son válidos.
+
+Cuatro ajustes son legales pero peligrosos, y esos sí advierten y arrancan, porque son decisiones que el usuario tiene derecho a tomar — pero no a tomar sin darse cuenta: `max_calls_per_turn = 0` con las herramientas activas (ningún turno agéntico podría avanzar), `allow_without_tty`, `require_selftest = false` y `egress.allow_all`. Con `mode = "off"` la advertencia de `require_selftest` se calla, porque una advertencia solo se gana su sitio cuando el riesgo que nombra es alcanzable.
 
 Los mensajes de error nombran el proveedor por su `id`, no por su índice, y traen el ejemplo de la línea que falta.
 
