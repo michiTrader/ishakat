@@ -274,9 +274,13 @@ type Options struct {
 	Engine *engine.Engine
 
 	// Model is the model reference to show and to send, in §4.2's Ref form
-	// ("provider/model" or a bare alias as the user typed it), never the wire
-	// ID: the wire ID is the Streamer's business. Empty falls back to the
-	// placeholder the banner and footer have shown since Step 3.
+	// ("provider/model" or a bare alias as the user typed it), never the
+	// wire ID directly: Root resolves the Ref to its WireID (wireModel, in
+	// engine.go) against the catalog right before building each
+	// engine.Request, since that resolution has to react to live model
+	// switches (/model, /resume) and not just this startup value. Empty
+	// falls back to the placeholder the banner and footer have shown since
+	// Step 3.
 	Model string
 
 	// System is the effective system prompt (§5.2), already resolved by
@@ -921,7 +925,7 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	m.buf = &engine.StreamBuf{}
 	m.eng.Start(ctx, engine.Request{
-		Model:    m.model,
+		Model:    wireModel(m.cat, m.model),
 		Messages: m.conv.Active(),
 		System:   m.system,
 	}, m.buf)
