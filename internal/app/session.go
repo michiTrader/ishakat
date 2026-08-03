@@ -89,6 +89,68 @@ func NewSessionRecorder(cfg *config.Config, model string, resumed *convo.Convers
 	return &sessionRecorder{store: store, conv: resumed, model: model, keepLast: cfg.Session.KeepLast}, ""
 }
 
+// sessionLister adapts *convo.Store to tui.SessionLister — the read-side
+// mirror of sessionRecorder above. It carries nothing but the store: List
+// and Load both delegate straight through, translating convo.Header rows
+// into tui.SessionSummary so internal/tui never has to know what a
+// convo.Header is (§6.1's boundary, the same rule Recorder already draws
+// for the write side).
+type sessionLister struct {
+	store *convo.Store
+}
+
+// List implements tui.SessionLister. convo.Store.List already returns
+// headers most-recently-updated first (its own comment), so there is
+// nothing left to sort here — only to reshape each Header into the smaller
+// struct the TUI's menu actually draws.
+func (l *sessionLister) List() ([]tui.SessionSummary, error) {
+	headers, err := l.store.List()
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tui.SessionSummary, 0, len(headers))
+	for _, h := range headers {
+		rows = append(rows, tui.SessionSummary{ID: h.ID, Title: h.Title, UpdatedAt: h.UpdatedAt})
+	}
+	return rows, nil
+}
+
+// Load implements tui.SessionLister. Store.Load already does the real
+// work (full read, truncation tolerance); this is a bare delegation.
+func (l *sessionLister) Load(id string) (*convo.Conversation, error) {
+	return l.store.Load(id)
+}
+
+// NewSessionLister opens (or refuses to open) the session store for
+// /resume, honouring [session] save exactly like NewSessionRecorder does
+// for the write side. A nil SessionLister is the supported "cannot list or
+// reopen sessions" value — same rule NewSessionRecorder's own comment
+// documents — and warn carries the reason to the caller the same way.
+//
+// existing is a *convo.Store the caller already opened on the same
+// directory — ResumeSession's own return value, when --resume or
+// resume_last already ran — reused instead of opening a second one:
+// convo.Store carries no per-conversation state (§10), so this is purely
+// to avoid a redundant os.MkdirAll, the same reasoning app.go's own comment
+// gives for reusing resumeStore when it builds the recorder.
+func NewSessionLister(cfg *config.Config, existing *convo.Store) (lister tui.SessionLister, warn string) {
+	if existing != nil {
+		return &sessionLister{store: existing}, ""
+	}
+	if cfg == nil || !cfg.Session.Save {
+		return nil, ""
+	}
+	dir := cfg.Session.Dir
+	if dir == "" {
+		dir = xdg.SessionsDir()
+	}
+	store, err := convo.NewStore(dir)
+	if err != nil {
+		return nil, fmt.Sprintf("/resume will not be available: %v", err)
+	}
+	return &sessionLister{store: store}, ""
+}
+
 // ResumeSession loads the conversation --resume or [session] resume_last
 // asks for. It returns (nil, nil, "") when neither applies — the ordinary
 // fresh-session case — so callers can treat the three-value return as

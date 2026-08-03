@@ -54,6 +54,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeCompact {
 		return m.renderCompact()
 	}
+	if m.mode == ModeResume {
+		return m.renderResumeMenu()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

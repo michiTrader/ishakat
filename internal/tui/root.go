@@ -35,6 +35,12 @@ const (
 	ModeHelp
 	// ModeCompact: /compact resumiendo con compact_model (§9.8, Paso 12).
 	ModeCompact
+	// ModeResume: the §13 /resume overlay, a flat list of previously saved
+	// sessions to reopen. Like ModeConfirm it needs no filtering or
+	// grouping — sessions have no provider/tier split the model picker
+	// does — so it follows confirmDialog's simpler shape rather than
+	// Picker's.
+	ModeResume
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -229,6 +235,17 @@ type Root struct {
 	// exactly once.
 	sessionWarned bool
 	sessionErr    error
+
+	// sessionLister is where /resume gets its menu rows and its full
+	// conversations from (§13). nil is the supported "cannot resume"
+	// value — [session] save = false, or a store that failed to open —
+	// same rule recorder above already follows: runResumeCommand reports
+	// that instead of opening a menu with nothing behind it.
+	sessionLister SessionLister
+
+	// resume is the §13 /resume overlay's own state, live only while
+	// mode == ModeResume.
+	resume resumeMenu
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -331,6 +348,14 @@ type Options struct {
 	// read it off disk; the TUI only puts it in the transcript and in the
 	// next request's context.
 	History []convo.Message
+
+	// SessionLister is /resume's own read side (§13): the menu's rows and
+	// the full conversation behind whichever one is chosen. nil means
+	// this session cannot list or reopen others — same supported-nil rule
+	// Recorder above already follows for the write side, and for the same
+	// reason: a store that never opened, or [session] save = false, must
+	// not be a reason to refuse to start.
+	SessionLister SessionLister
 }
 
 // NewRoot construye el modelo inicial.
@@ -421,6 +446,12 @@ func NewRoot(o Options) Root {
 		// TestOptionsRecorderIsWiredIntoRoot for the regression test that
 		// would have caught it.
 		recorder: o.Recorder,
+
+		// sessionLister is /resume's read side (§13), the exact mirror of
+		// recorder just above for the write side — see
+		// TestOptionsSessionListerIsWiredIntoRoot for the regression test
+		// this line exists to satisfy.
+		sessionLister: o.SessionLister,
 
 		// History (--resume, resume_last, /resume — §13) has to land in two
 		// places, not one: m.conv, because it is what the *next* request's
@@ -536,6 +567,9 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelChosenMsg:
 		return m.applyModelChosen(msg.Ref)
 
+	case sessionChosenMsg:
+		return m.applySessionChosen(msg.ID)
+
 	case compactDoneMsg:
 		// A stale result from a compaction cancelCompact already closed —
 		// its context is cancelled, but the goroutine already past the
@@ -565,6 +599,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	case ModeCompact:
 		return m.updateCompact(msg)
+	case ModeResume:
+		return m.updateResumeMenu(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -683,6 +719,38 @@ func (m Root) applyModelChosen(ref string) (tea.Model, tea.Cmd) {
 	m.model = ref
 	m.footer.Model = ref
 	return m.slashNotice(confirmLine(m.lay.glyphs(), ref))
+}
+
+// applySessionChosen is sessionChosenMsg's only handler (§13): the §13
+// /resume menu's enter key ends here. Load is only ever called with an ID
+// the menu itself produced from a List() row, so a failure here means the
+// file disappeared or was corrupted between listing and choosing — rare
+// enough (a concurrent process, a manual edit) that a slashNotice is the
+// right weight, the same "surface it, keep going" rule finishTurn's own
+// provider-error branch already follows.
+func (m Root) applySessionChosen(id string) (tea.Model, tea.Cmd) {
+	m.mode = ModeChat
+	m.resume = resumeMenu{}
+	if m.sessionLister == nil {
+		return m, nil
+	}
+	conv, err := m.sessionLister.Load(id)
+	if err != nil {
+		return m.slashNotice(m.lay.glyphs().warnMark + " " + err.Error())
+	}
+
+	// Replacing both m.conv and m.transcript is the same two-place write
+	// NewRoot already does for Options.History (see its own comment on
+	// why writing only one of them is wrong): m.conv is what the next
+	// request sends, m.transcript is what the screen shows, and a resume
+	// has to update both or the two would disagree from the very next
+	// turn.
+	m.conv = *conv
+	m.transcript = historyToTranscript(conv.Messages)
+	m.printedUpTo = 0
+	m.model = conv.Model
+	m.footer.Model = conv.Model
+	return m, clearScreenCmd
 }
 
 // updateChat maneja ModeChat: el input tiene el foco, enter envía (en el

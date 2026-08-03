@@ -134,6 +134,15 @@ func Run(version string, resume bool) int {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", sessionWarn)
 	}
 
+	// §13's third item: /resume's own read side. resumeStore is reused when
+	// this run itself already opened one (--resume, resume_last) — same
+	// reasoning as recorder above — otherwise NewSessionLister opens its
+	// own, honouring [session] save exactly like NewSessionRecorder does.
+	lister, listerWarn := NewSessionLister(cfg, resumeStore)
+	if listerWarn != "" {
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", listerWarn)
+	}
+
 	root := tui.NewRoot(tui.Options{
 		Version: version,
 		CWD:     cwd,
@@ -163,8 +172,9 @@ func Run(version string, resume bool) int {
 		CompactStrategy:      cfg.Compact.Strategy,
 		CompactOnError:       cfg.Compact.OnError,
 
-		Recorder: recorder,
-		History:  history,
+		Recorder:      recorder,
+		History:       history,
+		SessionLister: lister,
 	})
 
 	p := tea.NewProgram(root)
