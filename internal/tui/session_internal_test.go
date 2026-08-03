@@ -55,6 +55,42 @@ func TestOptionsRecorderIsWiredIntoRoot(t *testing.T) {
 	}
 }
 
+// fakeSessionLister is SessionLister's own three-line test double, the same
+// shape fakeRecorder above already follows for the write side.
+type fakeSessionLister struct {
+	rows    []SessionSummary
+	convs   map[string]*convo.Conversation
+	listErr error
+}
+
+func (f *fakeSessionLister) List() ([]SessionSummary, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.rows, nil
+}
+
+func (f *fakeSessionLister) Load(id string) (*convo.Conversation, error) {
+	if c, ok := f.convs[id]; ok {
+		return c, nil
+	}
+	return nil, errors.New("sesión no encontrada")
+}
+
+// TestOptionsSessionListerIsWiredIntoRoot is SessionLister's own regression
+// test, the exact mirror of TestOptionsRecorderIsWiredIntoRoot above:
+// internal/app.Run only ever has Options, so if NewRoot drops
+// Options.SessionLister on the floor, /resume silently has nothing to list
+// while every test that builds a Root by assigning the private field
+// directly keeps passing regardless.
+func TestOptionsSessionListerIsWiredIntoRoot(t *testing.T) {
+	sl := &fakeSessionLister{}
+	root := NewRoot(Options{SessionLister: sl})
+	if root.sessionLister == nil {
+		t.Fatal("NewRoot did not wire Options.SessionLister into Root.sessionLister — /resume would have nothing to list")
+	}
+}
+
 // TestRecorderGetsUserMessageBeforeTheTurnStarts is §10's ordering
 // requirement: what the user typed is persisted before the request is sent,
 // not after the answer comes back, so killing the process mid-turn never

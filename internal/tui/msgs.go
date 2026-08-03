@@ -26,6 +26,13 @@ type quitConfirmMsg struct{}
 // already buys internal/slash from internal/tui.
 type modelChosenMsg struct{ Ref string }
 
+// sessionChosenMsg is the §13 /resume menu's only output: the ID of the
+// session the user picked. Routing the choice through a message instead of
+// having the menu mutate Root directly follows the same rule modelChosenMsg
+// already applies for the picker — resumemenu.go stays ignorant of anything
+// but the SessionSummary rows it was handed.
+type sessionChosenMsg struct{ ID string }
+
 // compactDoneMsg is startCompact's async result (§9.8/Step 12): the summary
 // engine.Summarize produced, or the error that made compact_model's call
 // fail — never both, engine.Summarize's own contract. Like modelChosenMsg it
