@@ -214,6 +214,21 @@ type Root struct {
 	inputHistory []string
 	historyIdx   int
 	historyDraft string
+
+	// recorder persists completed messages (§10, session.go). nil is the
+	// supported "do not save" value — [session] save = false, or a store
+	// that failed to open — which is also what keeps this package's tests
+	// buildable from a bare Options, the same rule Engine and Catalog
+	// already follow.
+	recorder Recorder
+
+	// sessionWarned and sessionErr carry the first (and only) persistence
+	// failure to the next render. A full disk fails on every message, so
+	// warning per message would bury the transcript under identical
+	// errors; see session.go's recordMessage for why it is reported
+	// exactly once.
+	sessionWarned bool
+	sessionErr    error
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -298,6 +313,24 @@ type Options struct {
 	CompactKeepLastTurns int
 	CompactStrategy      string
 	CompactOnError       string
+
+	// Recorder persists completed messages (§10). nil means this session is
+	// not saved — [session] save = false, or a store internal/app could not
+	// open — and is a supported value, not a bug: the interface must work
+	// on a read-only filesystem the same way it works with no provider
+	// configured (see Engine's own comment above).
+	//
+	// It is an interface rather than a *convo.Store because this package
+	// does not decide where sessions live or open them (see session.go's
+	// own comment on why the shortcut would not have been caught by a
+	// build error).
+	Recorder Recorder
+
+	// History is a previously saved conversation to reopen (--resume,
+	// /resume, Step 13). Empty is a fresh session. The caller has already
+	// read it off disk; the TUI only puts it in the transcript and in the
+	// next request's context.
+	History []convo.Message
 }
 
 // NewRoot construye el modelo inicial.
@@ -767,7 +800,15 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// the request is the history: Active() has to already contain what we are
 	// asking about. The assistant's side is added by finishTurn, once there
 	// is something to add.
-	m.conv.Add(convo.User(text))
+	user := convo.User(text)
+	m.conv.Add(user)
+
+	// Persisted here rather than at the end of the turn, and that ordering
+	// is the point: if the provider hangs and the user kills the process,
+	// what they typed still survives. Waiting for the answer would mean the
+	// one message guaranteed to be lost is the one the user wrote
+	// themselves.
+	m = m.recordMessage(user)
 
 	return m.startEngineTurn(bannerText)
 }
@@ -891,6 +932,12 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 		msg.Usage = m.live.usage
 		msg.Aborted = aborted
 		m.conv.Add(msg)
+
+		// §10: persisted only once the message is complete (including the
+		// aborted case, which is complete in the sense that nothing more is
+		// coming), never while streaming — one line per finished message,
+		// so a kill -9 mid-turn never leaves a JSONL line half-written.
+		m = m.recordMessage(msg)
 	}
 
 	m.releaseTurn()
