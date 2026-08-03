@@ -39,13 +39,43 @@ Read the rules below before writing code:
 
 ## 1. Qué es ishakat
 
-Una interfaz de línea de comandos para conversar con modelos de inteligencia artificial desde el terminal. En vez de abrir un navegador, escribes en la terminal donde ya estás trabajando y el modelo responde ahí mismo, con el texto apareciendo palabra por palabra.
+**A general-purpose agent runtime for the terminal.** One static binary that
+reads files, writes files, runs commands, fetches documentation, delegates
+work to sub-agents — and, when the same job comes up often enough, **writes
+itself a new tool so it never has to figure that job out again** (§19).
 
-Ese tipo de herramienta ya existe —gemini-cli de Google, opencode, y una docena más— pero todas comparten dos defectos que ishakat existe para resolver.
+It has three interchangeable front doors over one brain, and the brain does
+not know which door a request came through:
+
+| Door | Who uses it | State |
+|------|-------------|-------|
+| **TUI** (`ishakat`) | a human typing, at 40 columns on a phone or 200 on a desktop | ✅ built |
+| **Headless** (`ishakat -p "…"`) | scripts, pipes, cron, CI | ✅ built |
+| **Serve** (`ishakat serve`) | another agent — a voice model, n8n, an editor plugin | ⬜ Step 23 |
+
+That last door is the one that matters strategically: a realtime voice model
+(or any orchestrator) can drive ishakat as its single "do the technical work"
+tool, and ishakat neither knows nor cares that the caller is speech. There is
+no audio code anywhere in this repository and there never will be — the voice
+layer is somebody else's process, talking to a door.
+
+Conversar con un modelo desde el terminal ya lo hacen gemini-cli de Google,
+opencode, Claude Code, Pi y una docena más. Todas comparten dos defectos que
+ishakat existe para resolver, y a los que ahora se suma un tercero.
 
 El primero es que cambiar de modelo es doloroso. La mayoría eligen el modelo al arrancar y lo amarran al proceso: para pasar de un modelo caro y potente a uno barato y rápido a mitad de conversación hay que cerrar el programa, cambiar una variable de entorno, reabrirlo y perder el hilo. Y para elegir hay que escribir el identificador exacto, cosa de teclear `anthropic/claude-sonnet-4-5` sin fallar un carácter, entre quinientas opciones.
 
 El segundo es que casi ninguna funciona bien en el teléfono. Termux es un emulador de terminal para Android que mucha gente usa como computador de bolsillo. La mayoría de estos CLIs se instalan con dificultad o no se instalan, porque arrastran dependencias que hay que compilar en el dispositivo o binarios que asumen un Linux de escritorio.
+
+**The third defect is the one nobody has fixed.** Every agent in this category
+ships a fixed set of abilities. When you need one it does not have — talk to
+your exchange, send that mail, hit that internal API — you either wait for the
+vendor, install a plugin someone else wrote, or re-explain the whole procedure
+to the model every single time, burning thousands of tokens on rediscovering
+the same HMAC signature you already explained yesterday. Ishakat closes that
+loop: it researches the API, writes a tool, tests the tool, and from then on
+calls it in ~120 tokens instead of reasoning it out in ~4.000 (§19.4). It does
+not get a new version to gain a capability. It gains one on the spot.
 
 Ishakat es un solo archivo ejecutable, sin nada que instalar alrededor, que arranca en menos de 150 milisegundos, se ve bonito, y en el que cambiar de modelo es escribir `/model son45` y presionar Enter — con la conversación intacta.
 
@@ -57,15 +87,70 @@ Al mismo tiempo existe una capa nueva de infraestructura que resuelve el problem
 
 El hueco de mercado es el cliente de terminal que aprovecha esa capa, cabe en un teléfono, y hace del cambio de modelo su función principal en vez de una configuración escondida.
 
-### 1.2 Los cinco diferenciadores
+### 1.2 Los seis diferenciadores
 
-En orden de importancia:
+En orden de importancia. The first one is new and is the reason this document
+was restructured; the rest keep their original ranking below it.
 
-1. Instalación de un solo binario sin runtime, que en Termux es la diferencia entre "funciona" y "no lo instalo".
-2. Cambio de modelo en caliente conservando el contexto, con verificación automática de que la conversación cabe en la ventana del modelo nuevo.
-3. Selector de modelos con búsqueda difusa y etiquetas de gratis, costo y latencia leídas del catálogo, para elegir viendo información en vez de adivinar entre cientos de identificadores.
-4. Layout responsivo real diseñado para 40 columnas, que es un teléfono en vertical, algo que ninguno de los dos referentes hace bien.
-5. Animaciones conscientes de batería, que se apagan solas cuando no aportan.
+1. **Self-extension with governance (§19).** Ishakat crystallizes repeated work
+   into permanent, deterministic tools that it writes itself — and it does so
+   under a three-gate governance model (deterministic need check → human
+   authorization → machine self-test) so the capability never becomes a way for
+   a model, or a poisoned web page, to install something on your machine
+   unnoticed. **Nobody else in this category does this.** Plugin ecosystems make
+   you install what somebody else wrote; ishakat writes what *you* actually
+   needed, from the evidence of your own usage.
+2. **Instalación de un solo binario sin runtime**, que en Termux es la diferencia
+   entre "funciona" y "no lo instalo". This constrains #1 hard: the tool layer is
+   stdlib-only (§6.4) and generated tools may not `pip install` (§19.3).
+3. **Cambio de modelo en caliente conservando el contexto**, con verificación
+   automática de que la conversación cabe en la ventana del modelo nuevo — and
+   now also mid-task: swap models in the middle of a tool loop without losing
+   the thread. No competitor documents this as carefully (§4.6).
+4. **Selector de modelos con búsqueda difusa** y etiquetas de gratis, costo y
+   latencia leídas del catálogo, para elegir viendo información en vez de
+   adivinar entre cientos de identificadores.
+5. **Layout responsivo real diseñado para 40 columnas**, que es un teléfono en
+   vertical, algo que ninguno de los referentes hace bien.
+6. **Personalidad y animaciones conscientes de batería**, que se apagan solas
+   cuando no aportan. Every competitor is deliberately flat; being pleasant to
+   look at is a feature, not a distraction — as long as it costs nothing when it
+   is off.
+
+### 1.3 The competitive frame
+
+Written down so it does not have to be re-derived in every future session, and
+so that "be like X" requests can be answered against the record.
+
+| | **Pi Agent** | **Claude Code** | **Gemini CLI** | **ishakat (target)** |
+|---|---|---|---|---|
+| Runtime | Node/Bun | Node (closed) | Node | **static Go binary** |
+| Cold start | ~300–800 ms | ~1 s | ~1 s | **< 150 ms** (§14) |
+| Termux install | needs Node | unsupported in practice | needs Node | **`curl \| sh`, one file** |
+| Core tools | 4 | ~35 | ~8 | **8** |
+| `grep`/`glob` | shells out to `rg`/`find` | native | native | **pure Go, no external binaries** |
+| Skills / prose knowledge | ✅ | ✅ (`CLAUDE.md`) | ✅ (`GEMINI.md`) | ✅ (`AGENTS.md` + skills) |
+| **Writes its own tools** | ❌ | ❌ | ❌ | **✅ §19** |
+| Providers | 25+ | Anthropic only | Google only | dialects + hundreds via OmniRoute |
+| Mid-conversation model swap | ✅ | ❌ | ❌ | ✅ **+ context/caps/auth check** |
+| Danger-tiered permissions | basic | glob rules | basic | **read/write/bash/`danger:high` with no bypass** |
+| 40-column phone layout | not a goal | not a goal | not a goal | **primary target** |
+| Server door for other agents | RPC | Agent SDK | — | ⬜ Step 23 |
+| MCP | ✅ | ✅ | ✅ | ❌ deliberately deferred (§18) |
+| LSP / type diagnostics | ❌ | ✅ | ❌ | ❌ deferred (§18) |
+| Third-party ecosystem | growing | large | large | **none — and that is fine** |
+
+**Where ishakat wins:** install and start-up, Termux with zero extra packages,
+the verified hot swap, danger-tiered permissions around money, 40 columns,
+personality — and self-extension, which is a category of its own.
+
+**Where it will not win, and must not try:** MCP's ecosystem, LSP, third-party
+extensions, community size. Those are person-years of platform teams. Eight
+core tools plus self-extension cover ~90% of the real value.
+
+**Where it ties, and that is acceptable:** the code-editing loop itself. What
+decides quality there is the model, not the CLI. Our edge is that you can swap
+the model mid-fix without losing the thread.
 
 ---
 
