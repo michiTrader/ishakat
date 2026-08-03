@@ -1217,7 +1217,7 @@ before any model is allowed to write into it.
 | # | Paso | Deja funcionando |
 |---|---|---|
 | 14 | **Tool-calling loop** in `engine` + OpenAI/Anthropic dialect serialization | The engine iterates `tool_call → result → repeat`, with a hard cap, loop detection and cancellation. Tested with a fake tool, no network |
-| 15 | **The six core tools** in `internal/tools` (pure Go, stdlib) | `read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`. It genuinely programs |
+| 15 | **The first six of the eight core tools** in `internal/tools` (pure Go, stdlib) | `read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`. It genuinely programs. The remaining two of §19.1's eight arrive later because they are not local: `fetch` in step 19, `dispatch` in step 22 |
 | 16 | **Permissions and guards** (overlay in the `confirm.go` pattern) | Danger tiers, session allowlist, per-turn call cap, cost budget, repeat detection |
 | 17 | **Tool-call rendering** in TUI and headless | You can see what it is doing: coloured collapsible diffs, streamed results |
 | 18 | **Project `AGENTS.md`** (global → project → local precedence) | Rules without repeating them every message |

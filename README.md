@@ -1,9 +1,25 @@
 # ishakat
 
-A terminal CLI to talk to AI models. Go + Bubble Tea v2. One static binary,
-no runtime, designed to be usable at 40 columns on a phone.
+An agent that lives in a terminal: one static binary that reads, writes and
+runs things on your machine — and that grows new capabilities by writing them
+itself. Go + Bubble Tea v2, no runtime, designed to be usable at 40 columns on
+a phone.
 
-> **Status: Phase 2 (prototype), step 12 of 13 closed.**
+The chat interface is how a human talks to it, not what it is. The same brain
+answers through three front doors: the interactive TUI, `ishakat -p` for pipes
+and scripts, and (from step 23) a local `serve` socket that lets any other
+program — a voice agent, an editor, a cron job — drive the same loop.
+
+**The design in two sentences.** Tools are few and live in the binary; there
+are eight of them and that list will not grow. Capabilities are infinite and
+live on disk as text files you can read, edit and delete — which is how
+ishakat extends itself without ever loading model-written code into its own
+process.
+
+> **Status: Phase 2 (prototype), step 12 of 13 closed. The agent layer
+> (Phase 2.5, steps 14–25) is designed and configured but not yet
+> implemented** — `[tools]` parses and validates today, and nothing executes
+> it yet. See [Roadmap](#roadmap).
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
 > fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, `/model`
@@ -35,10 +51,71 @@ no runtime, designed to be usable at 40 columns on a phone.
 | Hot swap confirmation (§4.6/§9.5) | ✅ `engine.CheckSwap` plus the `internal/tui` conflict dialog: compact/drop-oldest for a context conflict, switch-anyway for a capability warning, cancel-only when the destination has no credential |
 | `/compact` client-side summarization (§9.8/§10) | ✅ `engine.Summarize` calls `compact_model` to replace older turns with a summary, kept auditable via `convo.ApplySummary`; falls back to `drop-oldest` per `[compact].on_error` if the call fails, and auto-triggers once `[compact].trigger_pct` is crossed |
 | `--resume` | ❌ step 13, not written yet |
+| `[tools]` configuration (§19) | ⚠️ parsed and validated, but nothing runs it yet — step 14 |
+| Tool calling, skills, self-extension | ❌ Phase 2.5 (steps 14–25), designed in §19, not written |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly
 instead of pretending that an echoed prompt is a model response.
+
+Be precise about that first warning row: `ishakat config check` will accept
+and validate a `[tools]` section today, but no tool exists to execute. The
+schema landed before the implementation on purpose — permissions and limits
+are much harder to add credibly once the code that should have been obeying
+them already works without them.
+
+## Roadmap
+
+The full plan is [`docs/PLAN.md`](docs/PLAN.md); it is the single source of
+truth and this table is only a map of it.
+
+| Phase | What | State |
+|-------|------|-------|
+| 1 | Research and architecture | ✅ closed |
+| 2 | Prototype: streaming chat, catalog, picker, hot swap, compaction | 🔨 12 of 13 |
+| 2 bis | Distribution: `curl \| sh` + release workflow (pulled forward) | ⬜ |
+| 2.5 | **The agent**: tool calling, permissions, skills, self-extension | ⬜ steps 14–25 |
+| 3 | Internal and aesthetic improvements | ⬜ |
+| 4 | Robustness | ⬜ |
+| 5 | Distribution and packaging | ⬜ |
+
+Step 13bis jumps the queue for a blunt reason: `make build` is not an
+installation method, and until a one-line install exists nobody — including
+its author, on his own phone — can actually use ishakat day to day.
+
+### What "grows its own capabilities" means, concretely
+
+Nothing here runs yet. It is described so the configuration you can already
+write makes sense.
+
+When the same piece of work has been done by hand three times — say, placing
+an order on an exchange — ishakat can turn it into a capability: a small file
+on disk with a name, a description, and either an HTTP template or a short
+script. From then on it calls that instead of re-deriving the work, which is
+roughly thirty times cheaper in tokens and, more importantly, keeps the
+context clean.
+
+Three things about it are deliberate:
+
+- **It cannot decide this alone.** Whether a pattern *qualifies* is decided by
+  ordinary Go code, not by the model — asked "does this deserve a tool?", a
+  language model always says yes. Whether it may be *created* is decided by
+  you, every time, and that authorization is never bundled into an
+  "allow session" or into `--yolo`. Whether it *works* is decided by its own
+  self-test.
+- **You can shortcut the counting.** If you already know you will do something
+  a hundred times, you do not have to teach it by repeating yourself three
+  times: ask, and your intent counts as the evidence.
+- **It is quiet by default.** `mode = "suggest"` is proactive about *noticing*
+  a repeated pattern and never about installing one. It never interrupts
+  mid-task, never raises the same pattern twice, is capped at one suggestion
+  per session, and stops offering entirely after three refusals. With no
+  terminal attached it says nothing, because there is nobody there to ask.
+
+The reason capabilities are files rather than compiled plugins is partly that
+Go plugins do not work on Android at all, and partly that this is better:
+every capability ishakat writes is a text file you can read in your editor
+before it ever runs.
 
 ## Requirements
 
@@ -295,12 +372,31 @@ internal/catalog   normalized model registry, cache, three-source merge
   └── fetch/       the only place in catalog/ allowed to touch the network
 internal/theme     theme as data, Oklab gradients
 internal/tui       Bubble Tea v2 view layer (no net/http, ever)
-internal/app       the wiring: config → catalog → provider → tui/headless
+internal/engine    the turn loop: retries, cancellation, compaction
+internal/app       the wiring: config → catalog → provider → tui/headless/serve
 ```
 
-The one boundary rule that orders everything: `internal/tui` must never end
-up importing `net/http`, not even transitively. There is a test that fails
-the build if it does.
+Planned for Phase 2.5: `internal/tools` (the eight built-ins plus the
+declarative and script runners) and `internal/skills`.
+
+Four boundary rules order everything, and they are tests rather than promises,
+in `internal/arch_test.go`:
+
+- `internal/tui` must never import `net/http`, not even transitively.
+- `internal/provider` must know nothing about colour, themes or configuration.
+- `internal/convo` must be pure — it is the only type that crosses every
+  boundary, and it can only do that if it carries nothing with it.
+- `internal/engine` must not import `internal/provider` or `internal/tools`.
+  This one is the least obvious and the easiest to break: the agent loop needs
+  a tool-call type, one already exists in `provider`, and importing it is a
+  single line. But `provider` pulls in `net/http`, so the moment `engine`
+  imports it the TUI inherits HTTP and the first rule breaks somewhere nobody
+  will connect to the cause. Hence a deliberately duplicated struct.
+
+A fifth rule (`internal/tools` must not import `internal/tui`) is written and
+skips until that package exists. It protects the property that makes the third
+front door possible: a tool has to behave identically with and without a
+terminal.
 
 ## Contributing
 
