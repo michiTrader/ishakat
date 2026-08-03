@@ -412,7 +412,29 @@ func NewRoot(o Options) Root {
 		compactKeepLastTurns: compactKeepLastTurns,
 		compactStrategy:      compactStrategy,
 		compactOnError:       compactOnError,
+
+		// Recorder was documented on Options as the persistence seam (§10,
+		// Step 13) but never actually assigned here — every real session
+		// silently went unsaved from internal/app.Run while the field's own
+		// test double (withRecorder, session_internal_test.go) bypassed
+		// NewRoot entirely and kept the tests green. See
+		// TestOptionsRecorderIsWiredIntoRoot for the regression test that
+		// would have caught it.
+		recorder: o.Recorder,
+
+		// History (--resume, resume_last, /resume — §13) has to land in two
+		// places, not one: m.conv, because it is what the *next* request's
+		// Active() call sends to the provider, and m.transcript, because
+		// it is what the user actually sees on reopening. Writing only the
+		// first would resume the model's memory while showing a blank
+		// screen; writing only the second would show old messages that a
+		// reply built on top of would then contradict. historyToTranscript
+		// (resume.go) is the same conversion finishTurn/submit apply live,
+		// applied here in one pass at construction instead of one entry at
+		// a time as the conversation unfolds.
+		transcript: historyToTranscript(o.History),
 	}
+	r.conv.Messages = o.History
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
 		r.footerItems = o.Cfg.UI.Footer.Items
