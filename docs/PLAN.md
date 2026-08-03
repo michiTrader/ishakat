@@ -607,9 +607,10 @@ Esa frontera se prueba, no se promete: un test de CI que corra `go list -deps ./
 ishakat/
 ├── cmd/ishakat/main.go        # flags, subcomandos, elige TUI o headless
 ├── internal/
-│   ├── app/
-│   │   ├── app.go             # cableado: config → catálogo → engine → programa
-│   │   └── headless.go        # ishakat -p "..."  (pipeline completo sin TUI)
+│   ├── app/                   # the three front doors (§1), all thin
+│   │   ├── app.go             # door 1: cableado config → catálogo → engine → TUI
+│   │   ├── headless.go        # door 2: ishakat -p "..."  (pipeline sin TUI)
+│   │   └── serve.go           # door 3: NDJSON/WS for another agent (Step 23)
 │   ├── config/
 │   │   ├── config.go  schema.go  merge.go  load.go
 │   │   ├── expand.go  validate.go  redact.go
@@ -633,6 +634,22 @@ ishakat/
 │   │   └── compact.go         # summarize / drop-oldest
 │   ├── engine/
 │   │   ├── engine.go  turn.go  retry.go  hotswap.go  streambuf.go
+│   │   └── agentloop.go       # tool_call → result → repeat, cap + loop guard (Paso 14)
+│   ├── tools/                 # §19 layer 1: the eight core tools. stdlib ONLY.
+│   │   ├── tool.go            # Tool interface, Schema, Result, Danger tier
+│   │   ├── registry.go        # native ∪ declarative ∪ script; progressive disclosure
+│   │   ├── fs.go              # read_file, write_file, edit_file, glob, grep
+│   │   ├── shell.go           # bash (os/exec) + deny-list of obvious shapes
+│   │   ├── fetch.go           # URL → text/markdown, egress allowlist
+│   │   ├── dispatch.go        # sub-agent as a goroutine, isolated context (Paso 22)
+│   │   ├── permission.go      # danger tiers, session allowlist, budget (Paso 16)
+│   │   ├── declarative.go     # §19.2 rung 1: tool.toml interpreter + auth schemes
+│   │   ├── script.go          # §19.2 rung 2: run.py / run.sh executor
+│   │   ├── meta.go            # tool_list/create/probe/edit/delete (Paso 21)
+│   │   ├── lifecycle.go       # unverified→verified→archived/broken, hash pinning
+│   │   └── govern.go          # §19.6 gate 1: repetition, dedup, budget, origin
+│   ├── skills/                # §19.2 rung 0: SKILL.md discovery + frontmatter
+│   │   └── skills.go
 │   ├── tui/
 │   │   ├── root.go            # modelo raíz de Bubble Tea
 │   │   ├── msgs.go            # TODOS los tea.Msg propios, en un solo archivo
@@ -680,6 +697,26 @@ Las dependencias de Charm entran en el Paso 3, no antes.
 ### 6.4 Presupuesto de dependencias (Fase 2: seis, máximo)
 
 Bubble Tea v2, Lip Gloss v2, Bubbles v2, un parser TOML (`BurntSushi/toml`), `sahilm/fuzzy` solo como referencia de scoring —lo más probable es terminar con matcher propio porque se necesitan las bonificaciones por dígitos y por uso reciente— y `charmbracelet/x/exp/teatest` solo en tests. Glamour (Markdown) y Chroma (resaltado) se quedan afuera hasta la Fase 3: pesan varios MB y no aportan a "que funcione". Nada de cobra: flag de la stdlib y despacho manual.
+
+**Phase 2.5 adds zero dependencies. This is a rule, not an aspiration.** The
+entire agent and self-extension layer (§19) is standard library:
+
+| Capability | stdlib used |
+|---|---|
+| Core tools | `os`, `os/exec`, `strings`, `path/filepath`, `regexp` |
+| `fetch` | `net/http` (already present via `provider`) |
+| Declarative tools (rung 1) | `encoding/json`, `crypto/hmac`, `crypto/sha256`, `text/template` |
+| Script tools (rung 2) | `os/exec` |
+| Sub-agents | goroutines, `context`, `sync` |
+| Manifests | the TOML parser already in the budget |
+
+The seven modules in `go.mod` stay seven. A binary that grows because it learned
+to talk to Bybit would have broken differentiator #2, so the architecture is
+arranged so it cannot: capabilities are files on disk, not linked code (§3, §19.1).
+
+**Anything proposing to break this** — an embedded interpreter, a JSONPath
+library, a headless browser, an MCP client — is a §16 open question that needs an
+explicit decision, not a commit.
 
 ### 6.5 El shim de DNS
 
