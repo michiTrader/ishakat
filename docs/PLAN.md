@@ -2065,6 +2065,43 @@ Se hace del lado del cliente a propósito, sin delegar en la compresión del gat
 
 Historial de input navegable con flechas, `/copy` y `ctrl+y` vía `tea.SetClipboard` (OSC52), `/retry`, `/stats`, `ishakat doctor` completo, `ishakat --resume`. Y la pasada de aceptación en Termux desde cero contra la lista de la §11.
 
+**Estado real al empezar el paso, verificado contra el código:** el historial de
+input, `/copy`, `ctrl+y`, `/retry` y `/stats` ya aterrizaron en el PR #29;
+`ishakat doctor` existe y reporta red, rutas y dialectos. **Lo que falta es
+`--resume`, y falta más de lo que su nombre sugiere.**
+
+#### El hueco que este paso descubre: el TUI nunca guardó nada
+
+`cfg.Session.Save`, `session.dir`, `keep_last` y `resume_last` se leen **solo en
+`internal/app/headless.go`**. `convo.Store` —con su `List`, `Load`, `Latest`,
+`Append` y `Rotate`, escrito y probado en el paso 2— no tiene un solo llamador en
+`internal/tui` ni en `internal/app/app.go`. `tui.Root` guarda la conversación en
+un campo `conv convo.Conversation` en memoria y la pierde al salir.
+
+O sea que **la persistencia funciona en la puerta que nadie mira y falta en la
+que todo el mundo usa.** Es el mismo patrón que el bug de los tests de frontera
+(§6.1): la pieza existía, estaba probada, y nada la conectaba — y como headless
+sí guarda, cualquier test de `convo.Store` pasaba y cualquier revisión del
+almacén se veía sana.
+
+Por qué no se notó antes: `[session] save = true` es el default, así que la
+configuración *promete* que se guarda; `ishakat -p` efectivamente guardaba; y el
+único síntoma —cerrar el TUI y no encontrar la sesión— se confunde con «todavía
+no está el `--resume`». La conclusión incómoda es que **`--resume` no era una
+función pendiente sino la primera que iba a intentar leer algo que nunca se
+escribió.**
+
+Orden obligado, entonces, y no es el del enunciado original:
+
+1. **Persistir desde el TUI.** `convo.Store` cableado en `app.Run`, respetando
+   `[session] save`, `dir` y `keep_last`. Un append por mensaje **completo**,
+   nunca durante el streaming (§10) — el archivo no debe crecer token a token,
+   porque entonces un `kill -9` a mitad de respuesta deja una línea partida.
+2. **`--resume` y `resume_last`.** Reabrir la última sesión, con el historial en
+   contexto y visible en el transcript.
+3. **`/resume`.** El menú, que lee solo la cabecera de cada archivo y carga el
+   completo únicamente al elegir (§10).
+
 Commit: `feat: cierre de fase 2 + tag v0.1.0`
 
 ---
@@ -2177,13 +2214,14 @@ confundir ambas cosas es cómo se documenta una función que no existe.
 | Comando | Qué hace | Estado |
 |---|---|---|
 | `/help` | ayuda | ✅ |
-| `/model`, `/models` | cambiar de modelo, listar el catálogo | ✅ |
-| `/theme` | cambiar de tema | ✅ |
+| `/model` | cambiar de modelo (selector difuso) | ✅ |
+| `/models` | explorar el catálogo dentro de la sesión | ⬜ paso 13 · el subcomando `ishakat models` sí existe |
+| `/theme` | cambiar de tema | ⬜ fase 3 · `[ui] theme` ya se respeta al arrancar |
 | `/clear`, `/new` | limpiar pantalla, empezar conversación | ✅ |
 | `/compact` | resumir el historial (§9.8) | ✅ |
-| `/copy`, `/retry`, `/stats` | copiar, reintentar, uso y costo | ⬜ paso 13 |
+| `/copy`, `/retry`, `/stats` | copiar, reintentar, uso y costo | ✅ |
 | `/resume` | recuperar una sesión anterior | ⬜ paso 13 |
-| `/config`, `/debug` | ver la config con secretos redactados, diagnóstico | ✅ |
+| `/config`, `/debug` | ver la config con secretos redactados, diagnóstico | ⬜ paso 13 |
 | `/exit` | salir | ✅ |
 | `/tools` | listar herramientas: estado, origen, veces usada, última vez | ⬜ paso 20 |
 | `/tools code <nombre>` | ver el manifiesto y el script completos | ⬜ paso 20 |
@@ -2196,6 +2234,17 @@ confundir ambas cosas es cómo se documenta una función que no existe.
 `/tools` es la contrapartida de la autoextensión, no un adorno: la garantía de
 §19.8 es que todo lo que ishakat escribe se puede inspeccionar, y sin estos
 comandos esa garantía no tiene dónde ejercerse.
+
+> **La columna de estado se verifica contra el código, no contra la memoria.**
+> Cuando se corrigió, cuatro filas estaban mal en las dos direcciones: `/copy`,
+> `/retry` y `/stats` figuraban como pendientes y ya estaban implementados
+> (paso 13, PR #29), mientras `/theme`, `/config`, `/debug` y `/models`
+> figuraban como ✅ y son `KindUnimplemented` en `internal/slash/slash.go`.
+> **La segunda dirección es la peligrosa:** un pendiente marcado como hecho es
+> una función que nadie va a construir porque el documento dice que ya existe.
+> La fuente de verdad es la tabla `Commands` más el `switch` de
+> `internal/tui/slashrun.go`; un `Kind` que no tiene `case` allí no está
+> implementado, diga lo que diga esta sección.
 
 **Atajos:** `Tab` autocompletar, `Ctrl+P` selector de modelos, `Ctrl+O` rotar favoritos, `Ctrl+T` selector de temas, `Ctrl+J` salto de línea, `Esc` cancelar generación, `Ctrl+C` dos veces para salir, `Ctrl+L` limpiar pantalla, `Ctrl+Y` copiar última respuesta.
 
