@@ -25,10 +25,19 @@ func expandVars(c *Config) []Warning {
 			p.AuthOK = true
 		case missing != "":
 			p.AuthOK, p.MissingEnv = false, missing
-			warns = append(warns, Warning{
-				Where: "provider[" + p.ID + "]",
-				Msg:   "falta $" + missing + "; el proveedor queda sin autenticar",
-			})
+			// El warning visible solo tiene sentido para un proveedor que el
+			// usuario efectivamente quiere usar. Con `enabled = false` (el
+			// valor por defecto de openai/anthropic en config.example.toml,
+			// pensado para quien solo usa OmniRoute) AuthOK/MissingEnv se
+			// siguen registrando igual —por si algo más adelante consulta
+			// ese estado— pero no se imprime ruido de arranque por una
+			// variable que el usuario nunca pidió configurar.
+			if p.Enabled {
+				warns = append(warns, Warning{
+					Where: "provider[" + p.ID + "]",
+					Msg:   "falta $" + missing + "; el proveedor queda sin autenticar",
+				})
+			}
 		default:
 			p.AuthOK = true
 		}

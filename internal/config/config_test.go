@@ -184,6 +184,72 @@ api_key = "${MISSING_KEY_VAR}"
 	}
 }
 
+// TestDisabledProviderMissingEnvIsSilent cubre el caso que motivó el fix: un
+// usuario que solo usa OmniRoute ve, en cada arranque, dos advertencias por
+// $OPENAI_API_KEY y $ANTHROPIC_API_KEY faltantes — variables de proveedores
+// que ni siquiera tiene activados (config.example.toml los trae con
+// `enabled = false`). El estado interno (AuthOK/MissingEnv) debe seguir
+// siendo correcto para quien lo consulte más adelante; lo único que cambia
+// es que un proveedor deshabilitado no genera ruido visible de arranque.
+func TestDisabledProviderMissingEnvIsSilent(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "disabled.toml")
+	_ = os.WriteFile(p, []byte(`
+schema = 1
+[[provider]]
+id = "activo"
+kind = "openai"
+base_url = "http://x"
+api_key = "${MISSING_ACTIVO}"
+enabled = true
+
+[[provider]]
+id = "inactivo"
+kind = "openai"
+base_url = "http://x"
+api_key = "${MISSING_INACTIVO}"
+enabled = false
+`), 0o600)
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+
+	var activo, inactivo *config.Provider
+	for i := range cfg.Providers {
+		switch cfg.Providers[i].ID {
+		case "activo":
+			activo = &cfg.Providers[i]
+		case "inactivo":
+			inactivo = &cfg.Providers[i]
+		}
+	}
+
+	if activo == nil || activo.AuthOK || activo.MissingEnv != "MISSING_ACTIVO" {
+		t.Fatalf("activo debió quedar desautenticado con MissingEnv='MISSING_ACTIVO': %+v", activo)
+	}
+	if inactivo == nil || inactivo.AuthOK || inactivo.MissingEnv != "MISSING_INACTIVO" {
+		t.Fatalf("inactivo también debe registrar el estado internamente: %+v", inactivo)
+	}
+
+	var sawActivo, sawInactivo bool
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Msg, "MISSING_ACTIVO") {
+			sawActivo = true
+		}
+		if strings.Contains(w.Msg, "MISSING_INACTIVO") {
+			sawInactivo = true
+		}
+	}
+	if !sawActivo {
+		t.Error("se esperaba la advertencia de MISSING_ACTIVO (proveedor enabled=true)")
+	}
+	if sawInactivo {
+		t.Error("no se esperaba advertencia de MISSING_INACTIVO (proveedor enabled=false): el ruido de arranque debe callarse para proveedores deshabilitados")
+	}
+}
+
 // TestExampleTOMLInSync catches a bug this test was written in response to:
 // `ishakat config init` writes the *embedded* internal/config/example.toml,
 // while the file everyone reads and edits is config.example.toml at the repo
