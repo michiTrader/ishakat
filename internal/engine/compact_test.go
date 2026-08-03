@@ -65,6 +65,45 @@ func TestSummarizeSendsTheRightTranscriptAndModel(t *testing.T) {
 	}
 }
 
+// TestSummarizePlaceholderNamesToolFailure covers a place where losing the
+// distinction is durable rather than momentary. The summary replaces the older
+// turns and outlives them, so if a tool failed back there and the placeholder
+// calls it a "result", the summary can end up asserting that something worked
+// when it did not — and the turn that would have corrected the record is the
+// very one being discarded.
+func TestSummarizePlaceholderNamesToolFailure(t *testing.T) {
+	msgs := []convo.Message{
+		convo.NewMessage(convo.RoleTool, convo.ToolResultBlock("c1", "read_file", "ok")),
+		convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock("c2", "write_file", "read-only fs")),
+	}
+	plan := convo.Plan{Replace: []int{0, 1}}
+
+	var got []convo.Message
+	stream := func(_ context.Context, req Request) (<-chan Event, error) {
+		got = req.Messages
+		return chanOf(Event{Kind: EventDelta, Text: "recap"}, Event{Kind: EventDone}), nil
+	}
+	if _, err := Summarize(context.Background(), New(stream, 0), "b/cheap", msgs, plan); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Request.Messages = %v, want exactly one transcript message", got)
+	}
+
+	transcript := got[0].Text()
+	if !strings.Contains(transcript, "[tool failed: write_file]") {
+		t.Errorf("the failed tool is not named as a failure, got:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "[result from tool: read_file]") {
+		t.Errorf("the successful tool lost its placeholder, got:\n%s", transcript)
+	}
+	// Both tools must appear: a placeholder that swallowed one of them would
+	// leave the summary unaware that the call happened at all.
+	if strings.Count(transcript, "tool") < 2 {
+		t.Errorf("both tool blocks should reach the transcript, got:\n%s", transcript)
+	}
+}
+
 func TestSummarizeSkipsReasoningBlocksAndEmptyMessages(t *testing.T) {
 	msgs := []convo.Message{
 		convo.NewMessage(convo.RoleAssistant, convo.ReasoningBlock("scratch thoughts"), convo.TextBlock("the answer")),

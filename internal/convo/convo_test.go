@@ -276,6 +276,97 @@ func TestBlockKindJSONLegible(t *testing.T) {
 	}
 }
 
+// TestToolCallIDCorrelaciona prueba la propiedad por la que ToolCallID existe:
+// un turno puede traer dos llamadas a la vez, y el dialecto OpenAI exige un
+// tool_call_id en cada mensaje `role: "tool"` para saber qué resultado va con
+// qué llamada. Sin el id, dos llamadas en paralelo son indistinguibles al
+// serializar y el paso 14 no se puede implementar.
+func TestToolCallIDCorrelaciona(t *testing.T) {
+	asst := convo.NewMessage(convo.RoleAssistant,
+		convo.ToolCallBlock("call_a", "read_file", json.RawMessage(`{"path":"a.go"}`)),
+		convo.ToolCallBlock("call_b", "read_file", json.RawMessage(`{"path":"b.go"}`)),
+	)
+	// Los resultados llegan en orden inverso a propósito: si el emparejamiento
+	// dependiera de la posición en vez del id, esto pasaría igual y el test no
+	// probaría nada.
+	tool := convo.NewMessage(convo.RoleTool,
+		convo.ToolResultBlock("call_b", "read_file", "contenido de b"),
+		convo.ToolResultBlock("call_a", "read_file", "contenido de a"),
+	)
+
+	want := map[string]string{"call_a": "contenido de a", "call_b": "contenido de b"}
+	for _, res := range tool.Blocks {
+		if res.ToolCallID == "" {
+			t.Fatal("un BlockToolResult sin ToolCallID no se puede serializar al dialecto OpenAI")
+		}
+		found := false
+		for _, call := range asst.Blocks {
+			if call.ToolCallID == res.ToolCallID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("el resultado %q no corresponde a ninguna llamada", res.ToolCallID)
+		}
+		if got := want[res.ToolCallID]; got != res.Text {
+			t.Errorf("%s: emparejado con %q, esperado %q", res.ToolCallID, res.Text, got)
+		}
+	}
+}
+
+// TestToolBlocksRoundTrip comprueba que los campos nuevos sobreviven al JSONL.
+// El historial se relee al reanudar una sesión, así que un campo que no
+// persista se pierde justo cuando hace falta: al retomar un turno agéntico a
+// medias.
+func TestToolBlocksRoundTrip(t *testing.T) {
+	for _, blk := range []convo.Block{
+		convo.ToolCallBlock("call_1", "bash", json.RawMessage(`{"cmd":"ls"}`)),
+		convo.ToolResultBlock("call_1", "bash", "a.go\nb.go"),
+		convo.ToolErrorBlock("call_2", "bash", "permission denied"),
+	} {
+		raw, err := json.Marshal(blk)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back convo.Block
+		if err := json.Unmarshal(raw, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if back.ToolCallID != blk.ToolCallID {
+			t.Errorf("ToolCallID se perdió: %q → %q (%s)", blk.ToolCallID, back.ToolCallID, raw)
+		}
+		if back.IsError != blk.IsError {
+			t.Errorf("IsError se perdió: %v → %v (%s)", blk.IsError, back.IsError, raw)
+		}
+		if back.Name != blk.Name || back.Text != blk.Text {
+			t.Errorf("Name o Text se perdieron: %s", raw)
+		}
+	}
+}
+
+// TestToolErrorEsDato fija la decisión de §3: el fallo de una herramienta entra
+// al contexto como resultado, no como excepción que corta el turno. Es el
+// mecanismo entero por el que el bucle reactivo maneja lo imprevisto, así que
+// un error tiene que ser un BlockToolResult normal, distinguible solo por
+// IsError.
+func TestToolErrorEsDato(t *testing.T) {
+	e := convo.ToolErrorBlock("call_x", "bash", "exit status 1: no such file")
+	if e.Kind != convo.BlockToolResult {
+		t.Errorf("un error debería seguir siendo BlockToolResult, es %v", e.Kind)
+	}
+	if !e.IsError {
+		t.Error("IsError debería estar puesto")
+	}
+	if e.Text == "" {
+		t.Error("el texto del error tiene que llegar al modelo; si no, no puede reaccionar")
+	}
+	ok := convo.ToolResultBlock("call_x", "bash", "salida")
+	if ok.IsError {
+		t.Error("un resultado normal no debería venir marcado como error")
+	}
+}
+
 func TestAppendTextCoalesce(t *testing.T) {
 	m := convo.NewMessage(convo.RoleAssistant)
 	m.AppendText("Hola")

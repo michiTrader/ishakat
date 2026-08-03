@@ -67,6 +67,14 @@ func blockPlaceholder(b convo.Block) (text string, ok bool) {
 		if name == "" {
 			name = "unnamed tool"
 		}
+		// A failure is named as one. The summary is what the model keeps of the
+		// older turns, so if a tool failed there and the placeholder calls it a
+		// result, the summary can end up asserting that something worked when it
+		// did not — and that summary outlives the turn that would have corrected
+		// it.
+		if b.IsError {
+			return fmt.Sprintf("[tool failed: %s]", name), true
+		}
 		return fmt.Sprintf("[result from tool: %s]", name), true
 	default:
 		return "", false

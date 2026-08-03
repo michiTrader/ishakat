@@ -110,6 +110,23 @@ type Block struct {
 	// define la herramienta, no convo.
 	Args json.RawMessage `json:"args,omitempty"`
 
+	// ToolCallID correlaciona un BlockToolResult con el BlockToolCall que lo
+	// originó. No es opcional en la práctica: el dialecto OpenAI exige un
+	// tool_call_id en cada mensaje `role: "tool"`, y sin él un turno con dos
+	// llamadas en paralelo no se puede serializar — el proveedor no sabría qué
+	// resultado corresponde a qué llamada. Lo genera quien recibe la llamada
+	// (el proveedor lo trae en el stream); convo solo lo transporta, igual que
+	// con Args.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+
+	// IsError marca un BlockToolResult que trae un fallo en vez de una salida.
+	// El fallo es dato, no excepción: entra al contexto para que el modelo lo
+	// vea y reaccione, que es el mecanismo entero por el que el bucle reactivo
+	// maneja lo imprevisto (§3). Se guarda aparte del texto porque el TUI lo
+	// pinta distinto y porque el modelo no debería tener que adivinar si
+	// "permission denied" es una salida o un error.
+	IsError bool `json:"is_error,omitempty"`
+
 	// Replaces son los índices de convo.Conversation.Messages que un
 	// BlockSummary reemplaza. Solo tiene sentido en bloques de ese tipo.
 	Replaces []int `json:"replaces,omitempty"`
@@ -124,6 +141,26 @@ func ReasoningBlock(s string) Block { return Block{Kind: BlockReasoning, Text: s
 // ImageBlock construye un bloque de imagen adjunta.
 func ImageBlock(mime string, data []byte, name string) Block {
 	return Block{Kind: BlockImage, Mime: mime, Data: data, Name: name}
+}
+
+// ToolCallBlock construye la llamada a una herramienta. El id lo asigna el
+// proveedor, no convo, porque su forma la define el dialecto.
+func ToolCallBlock(id, name string, args json.RawMessage) Block {
+	return Block{Kind: BlockToolCall, ToolCallID: id, Name: name, Args: args}
+}
+
+// ToolResultBlock construye el resultado de una herramienta. El id tiene que
+// ser el mismo del BlockToolCall correspondiente.
+func ToolResultBlock(id, name, output string) Block {
+	return Block{Kind: BlockToolResult, ToolCallID: id, Name: name, Text: output}
+}
+
+// ToolErrorBlock construye el resultado de una herramienta que falló. Existe
+// como constructor aparte, y no como un booleano más en ToolResultBlock, para
+// que el sitio de la llamada tenga que decir cuál de los dos casos es en vez de
+// pasar un `false` que nadie lee.
+func ToolErrorBlock(id, name, errText string) Block {
+	return Block{Kind: BlockToolResult, ToolCallID: id, Name: name, Text: errText, IsError: true}
 }
 
 // SummaryBlock construye el resultado de /compact: el texto del resumen y qué
