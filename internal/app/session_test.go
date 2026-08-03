@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -168,6 +169,161 @@ func TestNewSessionRecorderWarnsWhenTheDirCannotBeOpened(t *testing.T) {
 	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
 	if rec != nil {
 		t.Error("a store that failed to open should not return a usable Recorder")
+	}
+	if warn == "" {
+		t.Error("expected a non-empty warning when the session dir cannot be created")
+	}
+}
+
+// TestNewSessionListerHonoursSaveFalse mirrors
+// TestNewSessionRecorderHonoursSaveFalse for the read side: [session] save
+// = false must mean no lister at all, and a nil existing store must not
+// override that.
+func TestNewSessionListerHonoursSaveFalse(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Session.Save = false
+
+	lister, warn := NewSessionLister(cfg, nil)
+	if lister != nil {
+		t.Error("save = false should return a nil SessionLister")
+	}
+	if warn != "" {
+		t.Errorf("save = false is not a failure, should not warn: %q", warn)
+	}
+}
+
+// TestNewSessionListerNilConfigDoesNotList mirrors
+// TestNewSessionRecorderNilConfigDoesNotSave.
+func TestNewSessionListerNilConfigDoesNotList(t *testing.T) {
+	lister, warn := NewSessionLister(nil, nil)
+	if lister != nil || warn != "" {
+		t.Errorf("nil cfg: lister = %v, warn = %q, want (nil, \"\")", lister, warn)
+	}
+}
+
+// TestNewSessionListerListsAndLoads is the adapter's own end-to-end
+// contract: List must report the seeded sessions most-recently-updated
+// first (convo.Store.List's own order) with the fields the TUI's menu
+// actually draws, and Load must return the full conversation behind
+// whichever ID List handed back.
+func TestNewSessionListerListsAndLoads(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = dir
+
+	seed, err := convo.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, err := seed.New("primera charla", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Append(older.ID, convo.User("hola")); err != nil {
+		t.Fatal(err)
+	}
+	// List orders by mtime (convo.Store.List's own comment); a filesystem's
+	// timestamp resolution is not always finer than the two New calls take
+	// to run back-to-back, so the older file's mtime is nudged into the
+	// past explicitly rather than trusting wall-clock ordering here.
+	if err := os.Chtimes(filepath.Join(dir, older.ID+".jsonl"), time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := seed.New("segunda charla", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Append(newer.ID, convo.User("hola de nuevo")); err != nil {
+		t.Fatal(err)
+	}
+
+	lister, warn := NewSessionLister(cfg, nil)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if lister == nil {
+		t.Fatal("save = true with a writable dir should return a SessionLister")
+	}
+
+	rows, err := lister.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	// convo.Store.List orders most-recently-updated first.
+	if rows[0].ID != newer.ID {
+		t.Errorf("rows[0].ID = %q, want %q (most recent first)", rows[0].ID, newer.ID)
+	}
+	if rows[0].Title != "segunda charla" {
+		t.Errorf("rows[0].Title = %q, want %q", rows[0].Title, "segunda charla")
+	}
+
+	conv, err := lister.Load(older.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(conv.Messages) != 1 {
+		t.Fatalf("loaded messages = %d, want 1", len(conv.Messages))
+	}
+}
+
+// TestNewSessionListerReusesAnExistingStore is the reuse contract app.go's
+// own comment documents: when a store is already open (--resume,
+// resume_last already ran), NewSessionLister must not open a second one —
+// existing is used unconditionally, even with save = false, mirroring the
+// same-run reuse app.go's recorder wiring already does.
+func TestNewSessionListerReusesAnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := convo.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := store.New("charla", "openai/gpt-4o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(conv.ID, convo.User("hola")); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Session.Save = false // deliberately off — existing must still win
+
+	lister, warn := NewSessionLister(cfg, store)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if lister == nil {
+		t.Fatal("an existing store must be reused regardless of [session] save")
+	}
+	rows, err := lister.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+}
+
+// TestNewSessionListerWarnsWhenTheDirCannotBeOpened mirrors
+// TestNewSessionRecorderWarnsWhenTheDirCannotBeOpened for the read side.
+func TestNewSessionListerWarnsWhenTheDirCannotBeOpened(t *testing.T) {
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = filepath.Join(blocked, "sessions")
+
+	lister, warn := NewSessionLister(cfg, nil)
+	if lister != nil {
+		t.Error("a store that failed to open should not return a usable SessionLister")
 	}
 	if warn == "" {
 		t.Error("expected a non-empty warning when the session dir cannot be created")
