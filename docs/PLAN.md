@@ -2119,9 +2119,22 @@ Orden obligado, entonces, y no es el del enunciado original:
    anexa al archivo existente desde su primer `Append`, nunca crea un
    segundo. Cubierto por tests nuevos en `internal/app/session_test.go`
    (`TestResumeSession*`, `TestSessionRecorderAppendsToAResumedConversation`).
-3. ⬜ **`/resume`.** El menú, que lee solo la cabecera de cada archivo y carga el
-   completo únicamente al elegir (§10). Requiere una interfaz `SessionLister`
-   nueva; es el único ítem que queda de este orden.
+3. ✅ **`/resume`.** El menú lee solo la cabecera de cada archivo y carga el
+   completo únicamente al elegir (§10), vía la interfaz nueva
+   `tui.SessionLister` (`List`/`Load` — la misma división "listar es
+   barato, cargar es diferido" que `convo.Store` ya traza en sus propios
+   métodos), implementada sobre `*convo.Store` en `internal/app/session.go`
+   y cableada en `internal/tui/root.go`/`resumemenu.go`: `ModeResume` es un
+   overlay plano, sin agrupar ni filtrar (a diferencia de `Picker`, una
+   sesión no tiene el desglose por proveedor/tier que un modelo sí), con
+   `runResumeCommand` como punto de entrada de `/resume` (`slash.KindResume`)
+   y `applySessionChosen` como el único destino de `sessionChosenMsg` —
+   reescribe `m.conv` y `m.transcript` a la vez, el mismo escritura-en-dos-
+   sitios que `NewRoot` ya hace con `Options.History`. Cubierto por tests en
+   ambos paquetes (`internal/tui/resumemenu_internal_test.go`,
+   `internal/tui/session_internal_test.go`'s
+   `TestOptionsSessionListerIsWiredIntoRoot`, `internal/app/session_test.go`'s
+   `TestNewSessionLister*`). Cierra el orden obligado de esta sección.
 
 Commit: `feat: cierre de fase 2 + tag v0.1.0`
 
@@ -2241,7 +2254,7 @@ confundir ambas cosas es cómo se documenta una función que no existe.
 | `/clear`, `/new` | limpiar pantalla, empezar conversación | ✅ |
 | `/compact` | resumir el historial (§9.8) | ✅ |
 | `/copy`, `/retry`, `/stats` | copiar, reintentar, uso y costo | ✅ |
-| `/resume` | recuperar una sesión anterior | ⬜ paso 13 |
+| `/resume` | recuperar una sesión anterior | ✅ |
 | `/config`, `/debug` | ver la config con secretos redactados, diagnóstico | ⬜ paso 13 |
 | `/exit` | salir | ✅ |
 | `/tools` | listar herramientas: estado, origen, veces usada, última vez | ⬜ paso 20 |
