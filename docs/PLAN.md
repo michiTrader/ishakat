@@ -1,7 +1,8 @@
 # ISHAKAT — Documento maestro del proyecto
 
-**Versión:** 1.1 · **Última actualización:** 2026-08-02
-**Estado:** Fase 1 cerrada · Fase 2 en curso · Pasos 0–12 cerrados, Paso 13 siguiente
+**Versión:** 1.2 · **Última actualización:** 2026-08-03
+**Estado:** Fase 1 cerrada · Fase 2 en curso · Pasos 0–12 cerrados · **Paso 13 siguiente, luego 13bis (que bloquea el 14)**
+**Naturaleza del proyecto:** ishakat es un **runtime de agente de propósito general** para el terminal; el chat es su interfaz, no el producto (§0.1, CERRADA).
 **Naturaleza de este archivo:** fuente única de verdad. Contiene todo lo concebido y nada de lo descartado. Quien lo lea —persona o IA— puede ejecutar el proyecto completo sin necesitar contexto previo ni conversaciones anteriores.
 
 ---
@@ -10,13 +11,45 @@
 
 Si eres una IA trabajando en este repositorio, lee este documento entero antes de escribir código y respeta estas reglas:
 
-**What ishakat is, in one sentence, before anything else:** a general-purpose
-agent runtime that lives in a terminal — one static binary that reads, writes
-and runs things on the user's machine, and that grows new capabilities by
-writing them itself. The chat interface is how a human talks to it. It is not
-the product.
+### 0.1 Qué es ishakat, antes que cualquier otra cosa
 
-Read the rules below before writing code:
+**Ishakat is a general-purpose agent runtime that lives in a terminal** — one
+static binary that reads, writes and runs things on the user's machine, and that
+grows new capabilities by writing them itself (§19). The chat interface is how a
+human talks to it. **It is not the product.**
+
+**CERRADA — confirmed 2026-08-03.** This is not one decision among others: it
+decides what counts as progress, which is why it sits here in the reading
+instructions instead of in the list in §3. Every other section must be read
+through it.
+
+**How to resolve the conflict you are going to find.** Large parts of this
+document were written when ishakat was conceived as a terminal chat whose
+differentiator was the model picker. Those parts are not wrong — the picker, the
+verified hot swap and the 40-column layout are still real differentiators — but
+their *framing* predates the pivot. **When a section reads as if chat were the
+goal, the agent frame wins:** treat the section as stale rather than
+authoritative, fix it in passing when you are already editing it, and do not
+launch a rewrite of the whole document to chase the wording.
+
+**The three consequences you will actually feel while working:**
+
+1. **The three front doors are peers** (§1), not a main one plus two extras. The
+   engine must never learn which door a request came through. A capability that
+   works only in the TUI is, by that fact, unfinished — which is why `tool_create`
+   has a headless answer (`--allow-tool-create`, §13) instead of simply requiring
+   a terminal.
+2. **"Ishakat should be able to do X" is almost never a change to the binary**
+   (§19.1). It resolves to a capability on disk: a skill or a tool, costing zero
+   binary size and zero dependencies. Reaching for Go is the exception, and the
+   exception needs an argument.
+3. **Chat polish loses to agent capability every time** — the rule two bullets
+   below, now with its reason: a prettier transcript of a model that cannot *do*
+   anything is the product this pivot exists to stop building.
+
+### 0.2 Reglas de trabajo
+
+Read these before writing code:
 
 - Las decisiones marcadas como **CERRADA** no se rediscuten, se implementan. Si crees que una está equivocada, dilo explícitamente antes de cambiar nada, no la cambies por iniciativa propia.
 - **Scope discipline cuts both ways.** When this document says "out of scope in
@@ -53,31 +86,71 @@ not know which door a request came through:
 | **Headless** (`ishakat -p "…"`) | scripts, pipes, cron, CI | ✅ built |
 | **Serve** (`ishakat serve`) | another agent — a voice model, n8n, an editor plugin | ⬜ Step 23 |
 
-That last door is the one that matters strategically: a realtime voice model
-(or any orchestrator) can drive ishakat as its single "do the technical work"
-tool, and ishakat neither knows nor cares that the caller is speech. There is
-no audio code anywhere in this repository and there never will be — the voice
-layer is somebody else's process, talking to a door.
+**These three are peers, not a main door plus two extras** (§0.1). The engine
+does not know which one it is serving, and that is a hard invariant rather than a
+tidy diagram: it is what makes the third door possible at all. A realtime voice
+model (or n8n, or cron, or an editor plugin) can drive ishakat as its single "do
+the technical work" tool, and ishakat neither knows nor cares that the caller is
+speech. There is no audio code anywhere in this repository and there never will
+be — the voice layer is somebody else's process, talking to a door.
+
+The practical test: **a capability that works only in the TUI is unfinished.**
+Not "nice to generalize later" — unfinished. That is why `tool_create` has a
+headless answer (`--allow-tool-create`) instead of just demanding a terminal.
+
+### 1.0 Why the chat is the interface and not the product
+
+Worth stating plainly, because the industry's default assumption is the
+opposite and this document spent its first version making it too.
+
+An agent's value is what it *does* to the world: files changed, commands run,
+APIs called, work that existed as a task and now exists as a result. The chat is
+where a human states the task and reads what happened. It is indispensable and
+it is *not* the value — the same way a text editor's value is the code, not the
+cursor.
+
+The distinction is not academic; it changes what gets built, in three places
+where this document previously would have chosen differently:
+
+- **A prettier transcript is worth less than a new tool.** Markdown rendering and
+  syntax highlighting are deliberately in Phase 3, *after* the agent works.
+- **Serve is not a "power user" feature.** If chat were the product, `ishakat
+  serve` would be an integration nicety. Under the agent frame it is the door
+  that lets a voice model do real technical work — arguably the most valuable
+  door, and the acceptance target of Phase 2.5.
+- **A tool that only a human can approve is a broken tool.** Hence the headless
+  permission flags rather than a TTY requirement.
 
 Conversar con un modelo desde el terminal ya lo hacen gemini-cli de Google,
-opencode, Claude Code, Pi y una docena más. Todas comparten dos defectos que
-ishakat existe para resolver, y a los que ahora se suma un tercero.
+opencode, Claude Code, Pi y una docena más. Ishakat compite en otra categoría
+—agentes que se extienden solos— pero hereda el terreno de esas herramientas, y
+ese terreno tiene tres defectos que ishakat existe para resolver.
 
-El primero es que cambiar de modelo es doloroso. La mayoría eligen el modelo al arrancar y lo amarran al proceso: para pasar de un modelo caro y potente a uno barato y rápido a mitad de conversación hay que cerrar el programa, cambiar una variable de entorno, reabrirlo y perder el hilo. Y para elegir hay que escribir el identificador exacto, cosa de teclear `anthropic/claude-sonnet-4-5` sin fallar un carácter, entre quinientas opciones.
+**El primero es el que nadie ha resuelto, y es el que define la categoría.**
+Every agent in this class ships a fixed set of abilities. When you need one it
+does not have — talk to your exchange, send that mail, hit that internal API —
+you either wait for the vendor, install a plugin someone else wrote, or
+re-explain the whole procedure to the model every single time, burning thousands
+of tokens rediscovering the same HMAC signature you already explained yesterday.
+Ishakat closes that loop: it researches the API, writes a tool, tests the tool,
+and from then on calls it in ~120 tokens instead of reasoning it out in ~4.000
+(§19.4). **It does not need a new version to gain a capability. It gains one on
+the spot.**
 
-El segundo es que casi ninguna funciona bien en el teléfono. Termux es un emulador de terminal para Android que mucha gente usa como computador de bolsillo. La mayoría de estos CLIs se instalan con dificultad o no se instalan, porque arrastran dependencias que hay que compilar en el dispositivo o binarios que asumen un Linux de escritorio.
+El segundo es que cambiar de modelo es doloroso. La mayoría eligen el modelo al arrancar y lo amarran al proceso: para pasar de un modelo caro y potente a uno barato y rápido a mitad de conversación hay que cerrar el programa, cambiar una variable de entorno, reabrirlo y perder el hilo. Y para elegir hay que escribir el identificador exacto, cosa de teclear `anthropic/claude-sonnet-4-5` sin fallar un carácter, entre quinientas opciones. Bajo el marco de agente esto pesa más que como comodidad de chat: a mitad de una tarea larga se quiere bajar a un modelo barato para los pasos mecánicos y volver al caro para el difícil, **sin perder el estado de la tarea** (§4.6).
 
-**The third defect is the one nobody has fixed.** Every agent in this category
-ships a fixed set of abilities. When you need one it does not have — talk to
-your exchange, send that mail, hit that internal API — you either wait for the
-vendor, install a plugin someone else wrote, or re-explain the whole procedure
-to the model every single time, burning thousands of tokens on rediscovering
-the same HMAC signature you already explained yesterday. Ishakat closes that
-loop: it researches the API, writes a tool, tests the tool, and from then on
-calls it in ~120 tokens instead of reasoning it out in ~4.000 (§19.4). It does
-not get a new version to gain a capability. It gains one on the spot.
+El tercero es que casi ninguna funciona bien en el teléfono. Termux es un emulador de terminal para Android que mucha gente usa como computador de bolsillo. La mayoría de estos CLIs se instalan con dificultad o no se instalan, porque arrastran dependencias que hay que compilar en el dispositivo o binarios que asumen un Linux de escritorio.
 
-Ishakat es un solo archivo ejecutable, sin nada que instalar alrededor, que arranca en menos de 150 milisegundos, se ve bonito, y en el que cambiar de modelo es escribir `/model son45` y presionar Enter — con la conversación intacta.
+Note the order: **this list is ranked by the agent frame, not by how visible each
+defect is in a demo.** The third one constrains the first — it is why
+self-extension may not depend on a package manager (§19.3) and why the tool layer
+is stdlib-only (§6.4).
+
+Ishakat es un solo archivo ejecutable, sin nada que instalar alrededor, que
+arranca en menos de 150 milisegundos, se ve bonito, **hace trabajo real en la
+máquina y aprende herramientas nuevas mientras lo hace** — y en el que cambiar de
+modelo a mitad de la tarea es escribir `/model son45` y presionar Enter, con el
+hilo intacto.
 
 ### 1.1 La oportunidad
 
@@ -85,7 +158,18 @@ El acceso a modelos de IA se está fragmentando y abaratando a la vez. Un usuari
 
 Al mismo tiempo existe una capa nueva de infraestructura que resuelve el problema del lado del servidor: los gateways locales. OmniRoute es uno de ellos —código abierto, licencia MIT— que corre en tu propia máquina en `http://localhost:20128/v1` y expone cientos de proveedores tras una sola interfaz compatible con OpenAI. Ishakat no tiene que implementar 290 integraciones: implementa bien un dialecto y habla con todo.
 
-El hueco de mercado es el cliente de terminal que aprovecha esa capa, cabe en un teléfono, y hace del cambio de modelo su función principal en vez de una configuración escondida.
+El hueco de mercado es el **agente** de terminal que aprovecha esa capa, cabe en
+un teléfono, y trata el cambio de modelo como una operación de primera clase en
+vez de una configuración escondida.
+
+Y hay una segunda oportunidad que la primera hace posible. Los gateways
+convirtieron el acceso a modelos en algo abundante y barato; lo que sigue siendo
+escaso es que el agente **sepa hacer lo tuyo**. Ese hueco lo llenan hoy los
+ecosistemas de plugins, que resuelven el problema equivocado: te dan lo que otro
+escribió y necesitó. La alternativa es un agente que escriba lo que *tú*
+necesitaste, a partir de la evidencia de tu propio uso (§19). Un dialecto bien
+implementado da cientos de modelos; una escalera de cristalización bien
+implementada da capacidades ilimitadas — y ninguna de las dos agrega dependencias.
 
 ### 1.2 Los seis diferenciadores
 
@@ -211,15 +295,34 @@ work anyway, only with extra ceremony on top. "Planning" is the model thinking
 in text before it calls a tool; it is not a package. Sub-agents (`dispatch`,
 Step 22) are goroutines with isolated context, not a scheduler.
 
-**Inline rendering stays. CERRADA, with a known cost.** Committed transcript
-lines are printed once and never repainted, which is what buys native phone
-scrolling and native text selection — both worth more on Termux than perfect
-reflow. **Accepted consequence: already-printed lines do not re-wrap when the
-terminal width changes** (i.e. when you zoom). Competitors that reflow do so by
-repainting the whole transcript in alt-screen, which costs native scroll and
-copy/paste. A *middle* option — reflow only the live region (last N turns) while
-committed scrollback stays as-is — is deliberately left open as Phase 3 work
-(§16). Full alt-screen repaint is rejected outright.
+**Inline rendering stays, as-is, with no reflow. CERRADA — confirmed
+2026-08-03.** Committed transcript lines are printed once and never repainted,
+which is what buys native phone scrolling and native text selection — both worth
+more on Termux than perfect reflow. **Accepted consequence: already-printed lines
+do not re-wrap when the terminal width changes** (i.e. when you zoom).
+
+All three options were considered and two are now rejected, so this does not get
+reopened as a "small improvement":
+
+| Option | Verdict |
+|---|---|
+| **(a) Inline as-is, no reflow** | ✅ **CERRADA.** Preserves the terminal's native behaviour and adds no state |
+| (b) Reflow only the live region in Phase 3 | ❌ rejected — half the benefit for a permanent complication |
+| (c) Full alt-screen repaint | ❌ rejected outright — costs native scroll and copy/paste |
+
+The reason (b) was rejected despite looking cheap: it requires the renderer to
+keep, for every live turn, the text it was built from, so the boundary between
+"committed" and "live" stops being *when we printed it* and becomes a second
+piece of mutable state that every future feature has to respect. The visible
+payoff is that the last few turns look right after a zoom the user rarely
+performs. **Zoom is rare; the invariant "printed means final" is load-bearing in
+every path that prints.** Trading a permanent invariant for an occasional
+cosmetic win is the wrong side of that deal.
+
+Practical consequence for anyone writing renderer code: `tea.Printf` output is
+immutable by contract. If you find yourself wanting to re-render a committed
+line, the answer is no — and if the underlying need is real, it belongs in the
+live region, which is repainted anyway.
 
 **Five contracts govern the whole system:** el modelo de conversación agnóstico
 (§4), el catálogo de modelos (§4bis), el esquema de configuración (§5), el tema
@@ -738,13 +841,23 @@ ishakat/
 │   └── xdg/                   # rutas config/cache/data/state
 ├── testdata/                  # fixtures: /v1/models real, recorte api.json, SSE grabado
 ├── themes/ascua.toml
+├── examples/skills/           # Fase 2.5, paso 19: skills de ejemplo (prosa, no sensibles)
+│                              # NO va aquí ninguna herramienta que toque dinero (§16.1)
 ├── docs/PLAN.md               # este archivo
 ├── docs/ARCHITECTURE.md       # números del spike + decisiones fechadas
 ├── config.example.toml
 ├── AGENTS.md
 ├── Makefile
-└── .github/workflows/
+├── install.sh                 # Paso 13bis: detecta Termux ($PREFIX), instala el binario
+└── .github/workflows/         # release.yml (13bis) + ci.yml
 ```
+
+**Dos entradas de ese árbol todavía no existen y es deliberado:**
+`examples/skills/` aparece en el paso 19 e `install.sh` en el 13bis. Están
+listadas aquí porque el sitio donde alguien busca «dónde va esto» es el árbol, no
+la fase — y porque `examples/` es donde la regla de §16.1 tiene que estar visible:
+lo que entra ahí demuestra el mecanismo, no hace trabajo con las credenciales de
+nadie.
 
 ### 6.3 Comandos de arranque
 
@@ -1195,7 +1308,11 @@ Orden concreto de implementación. Cada paso deja algo funcionando y probable, y
 | 11 | Cambio en caliente (CheckSwap) | ✅ hecho |
 | 12 | `/compact` del lado del cliente | ✅ hecho |
 | 13 | Cierre: historial, `/copy`, `/retry`, `/stats`, `doctor`, `--resume` | ⬜ siguiente |
-| 13bis | **Distribución: `curl \| sh` + GitHub Actions** (pulled forward from Phase 5) | ⬜ |
+| 13bis | **Distribución: `curl \| sh` + GitHub Actions** (adelantado desde Fase 5 · **CERRADA**) | ⬜ |
+
+**El paso 14 no empieza antes de que 13bis cierre.** La razón está en §13bis: de
+ahí en adelante todo es capa de agente, y la capa de agente no se valida desde un
+escritorio.
 
 **Aceptación de la Fase 2.** En un teléfono limpio: un `curl \| sh` instala el binario en menos de dos minutos; se conversa con OmniRoute con streaming visible; se cambia de modelo tres veces en la misma conversación, al menos una hacia un modelo con ventana más chica, sin perder el hilo; `esc` cancela sin romper nada; se cierra y `ishakat --resume` recupera la sesión completa; todo a 40 columnas en vertical sin una línea rota. Números: arranque bajo 150 ms con catálogo cacheado, RSS bajo 60 MB con 50 turnos, y cero repintados en reposo (verificable con `top` mostrando 0% de CPU).
 
@@ -1206,21 +1323,52 @@ phase below, because it is the product rather than a temptation to resist. MCP
 stays out, correctly — §19's ladder covers the same ground without a daemon per
 integration.
 
-### Step 13bis — Distribution, pulled forward from Phase 5
+### Step 13bis — Distribution · CERRADA: goes immediately after step 13
+
+**Confirmed 2026-08-03.** Not a recommendation: it is the next step after 13, and
+step 14 does not start before it closes.
 
 **Why it jumps the queue:** `make build` is not an installation method.
 Single-binary install is differentiator #2, it costs about one afternoon, and
 until it exists nobody — including its author on his own phone — can actually
 use ishakat day to day. An installable ishakat that only chats is a product
 people try; an agentic ishakat that requires `make build` is a product nobody
-tries. It also unblocks dogfooding, which every later step depends on.
+tries.
 
-Scope: a `release.yml` GitHub Actions matrix over linux/amd64, linux/arm64,
-darwin/arm64, android/arm64 (NDK + CGO, per §3) and windows/amd64; an
-`install.sh` that detects Termux (`$PREFIX` set) and installs into
-`$PREFIX/bin`; and optionally an npm shim that only downloads the right binary.
-Closing criterion: on a clean phone, `curl -fsSL … | sh` yields a working
-`ishakat doctor` in under two minutes, with no toolchain installed.
+**And there is a sequencing reason that only applies now that the pivot is
+closed** (§0.1). Every step from 14 onward is an agent step, and agent steps are
+the ones that cannot be validated from a desk. Whether `bash` behaves on Termux,
+whether a `danger: high` confirmation is readable at 40 columns, whether a
+tool loop drains a phone battery — these are answered by using ishakat on a
+phone, all day, on real tasks. Landing distribution *before* step 14 means every
+subsequent step is dogfooded as it lands. Landing it after means building the
+entire agent layer against assumptions and discovering at step 25 which of them
+were wrong, with the whole layer built on top of them.
+
+That is also why "one afternoon" is the right price to pay here rather than in
+Phase 5: it is not paying for distribution, it is **buying the feedback loop for
+the twelve steps that follow.**
+
+**Scope:**
+
+- `release.yml` — a GitHub Actions matrix over linux/amd64, linux/arm64,
+  darwin/arm64, **android/arm64 (NDK + CGO, mandatory per §3)** and
+  windows/amd64.
+- `install.sh` — detects Termux (`$PREFIX` set) and installs into `$PREFIX/bin`,
+  otherwise `/usr/local/bin` or `~/.local/bin`.
+- Optionally an npm shim that only downloads the right binary.
+
+**The android/arm64 leg is the one that can actually fail**, and it fails
+silently: a CGO-less build starts, prints `--version`, looks perfect, and dies on
+the first HTTP request with `lookup … connection refused`, because Go's pure
+resolver reads `/etc/resolv.conf` and Android has no such file (§3). The default
+path is `localhost:20128`, which never touches DNS, so the symptom can hide for
+weeks. **The release job must therefore verify a real remote DNS resolution on
+the android artifact, not just that it compiled.**
+
+**Closing criterion:** on a clean phone with no toolchain installed,
+`curl -fsSL … | sh` yields a working `ishakat doctor` in under two minutes, and
+`doctor` reports a successful HTTPS request to a remote host.
 
 ### Fase 2.5 — El agente · the phase this document was restructured for
 
@@ -2143,6 +2291,16 @@ El DNS de Android, ya descrito, que tiene la propiedad venenosa de esconderse du
 
 ## 16. Decisiones abiertas a revisión
 
+**Lo que queda abierto aquí son tres cosas, y ninguna bloquea el paso 13 ni el
+13bis.** La ronda de cuatro preguntas que estaba pendiente se cerró el
+2026-08-03; sus decisiones viven en sus secciones propias y el razonamiento
+quedó en §16.1, para que quien quiera reabrirlas encuentre por qué se
+resolvieron así.
+
+Una decisión en esta sección es una que **se puede tomar más tarde sin pagar
+intereses.** Si al leer una notas que ya no es reversible sin refactor, dilo:
+significa que se quedó aquí más tiempo del que debía.
+
 `mouse = false` por defecto y el selector con dos líneas por modelo están optimizados para pantalla de celular en vertical. Si el uso principal termina siendo escritorio con terminal ancha, el selector de dos líneas se sentirá desperdiciado y conviene invertir el default. Es fácil de cambiar ahora y molesto después.
 
 **Embedded Starlark for script tools. Explicitly undecided — do not implement
@@ -2158,13 +2316,6 @@ revisiting: if the absence of Python turns out to be a real obstacle in practice
 on Termux.** Until then, rung 1 (declarative, no interpreter at all) covers ~70%
 of cases and `sh` is the fallback.
 
-**Live-region reflow on width change.** §3 keeps inline rendering, which means
-already-committed lines do not re-wrap when the terminal is zoomed. A middle
-option is open for Phase 3: reflow only the live region (the last N turns, which
-are repainted anyway) while committed scrollback stays as printed. Half the
-benefit, little risk, no loss of native scroll or text selection. Full
-alt-screen repaint is rejected, not open.
-
 **Default evolve mode.** §19.7 sets `mode = "suggest"` as the default, so a
 fresh install proposes crystallization when gate 1 passes. The conservative
 alternative is shipping `on_request` and letting users opt in once they trust it.
@@ -2173,12 +2324,48 @@ mode of `suggest` (mild annoyance, self-limiting via the decay rule) is much
 cheaper than the failure mode of `on_request` (the feature is never discovered
 and the whole §19 investment is decorative).
 
-**Where example skills and tools live.** Recommendation on record: ship
-`examples/skills/` with broadly useful ones (image generation, deep research)
-inside the repo, and keep money-touching integrations such as Bybit **outside**
-it — as private user tools, which doubles as the living proof that
-self-extension works without putting one author's trading workflow into a
-general-purpose product's core.
+---
+
+### 16.1 Decisiones cerradas en esta ronda
+
+Kept here, next to the open questions, so the reasoning stays where someone
+would look to reopen it. The decisions themselves live in their proper sections.
+
+**Where example skills and tools live. CERRADA — confirmed 2026-08-03.**
+
+- **Inside the repo:** `examples/skills/` with broadly useful, non-sensitive
+  capabilities (image generation, deep research). These are documentation that
+  happens to be executable.
+- **Outside the repo: Bybit and every money-touching integration.** They live as
+  private user tools under `$XDG_DATA_HOME/ishakat/tools/`, or as a separate
+  demo project.
+
+The rule that generalizes it, so this is not re-argued per integration: **the
+repo ships capabilities that demonstrate the mechanism; the user's machine holds
+capabilities that do work.** An example exists to teach the format. A Bybit tool
+exists to move money.
+
+Three reasons it must be outside:
+
+1. **The main repo stays generalist.** Ishakat is a general-purpose agent runtime
+   (§0.1). A trading integration in the core would make one author's workflow
+   look like part of the product, and the next contributor would reasonably infer
+   that shipping *their* vertical is in scope too.
+2. **It is the stronger proof, not the weaker one.** A Bybit tool inside the repo
+   proves the authors can write a tool. A Bybit tool built *by ishakat* on a
+   user's machine, from the API docs, and never merged, proves **the
+   self-extension architecture works on a real case** — which is the claim §19
+   actually makes. Merging it would replace the evidence with an assertion.
+3. **Credentials and blast radius.** Examples get copied without being read. An
+   in-repo example that signs requests with `BYBIT_API_SECRET` invites someone to
+   run it against mainnet by accident, and puts a `danger: high` path (§19.5) in
+   the one place we tell people to look for templates.
+
+**Consequence for the Phase 2.5 demo:** the Bybit case stays the reference
+scenario throughout §19 — the walk-through in §19.4, the ladder in §19.2, the
+crystallization dialogue — as **illustration**. Those are examples in prose, and
+prose costs nothing and ships nothing. What is forbidden is a runnable
+`examples/tools/bybit_*/` directory in this repository.
 
 ---
 
@@ -2197,7 +2384,7 @@ Actualizar al cerrar cada paso. Una línea por entrada: fecha, paso, resultado, 
 | 2026-07-31 | Paso 3 · Esqueleto de TUI | Cerrado. `internal/tui` completo sobre Bubble Tea v2 + Lipgloss v2 + Bubbles v2: `Root` con los cinco `Mode` de §7.1 y despacho en dos capas (mensajes/teclas globales → switch de modo); `View()` devuelve `tea.View` con `AltScreen=false` (inline) y cursor real vía `textarea.Cursor()`; breakpoints de §9.1 (`Layout`/`ClassifyBreakpoint`) recalculados en cada `WindowSizeMsg`; banner con degradado Oklab (`theme.Styles.GradientLines`) que solo aparece con TTY, `ui.banner` y alto ≥20; footer de una o dos secciones que se recorta de derecha a izquierda según `ui.footer.items`; caja de input con `textarea.Model` y prefijo de un carácter en BPMinimo; animación tipo Crush (`▚▞▘▝▚▗▘▚▞`) y contador de "pensando" en `ModeBusy`; `esc` y un solo `ctrl+c` cancelan el turno sin salir; doble `ctrl+c` dentro de 1s sí sale (`tea.Quit`); `ctrl+l` limpia el transcript. Sin red y sin engine: el input hace eco de lo escrito, simulando streaming a trozos de 3 runas por `streamTickMsg` para poder ver las transiciones de modo. Frontera de §6.1 verificada: `TestTUINoImportaHTTP` sigue en verde. `go build ./...`, `go vet ./...` y `go test ./...` en verde, incluidos los tests nuevos de `internal/tui` (breakpoints, footer, keymap, banner y transiciones de `Root` sin levantar un `tea.Program`). Pendiente para el cierre visual completo del paso: verificación manual a 40/60/120 columnas en una terminal real y medición de CPU en reposo (verificaciones de §14 que requieren TTY real, no cubiertas en este entorno sandbox). Commit: `feat(tui): root.go + view.go`. |
 | 2026-07-31 | Language policy | From this entry onward, all new code, comments, identifiers, commit messages and documentation additions are written in English (see `AGENTS.md`). Pre-existing Spanish content, including the rest of this document, is left as-is and will be migrated later — it is not being retroactively translated as a side effect of unrelated changes. |
 | 2026-07-31 | Step 5 · Headless mode | Closed. `internal/app/wiring.go` translates `config.Provider` into `provider.Settings` (`Settings`, `NewProvider`, `FindProvider`, `EnabledProviders`, `SystemPrompt`, `Dialects`) without `internal/app` needing to know the HTTP dialect details. `internal/app/modelref.go` adds `ResolveModel`, a deliberately partial resolver (exact match, config alias with cycle guard, provider/wire_id split on the *first* slash only per §4.2) — the full four-stage §4.5 resolver needs the catalog and is Step 6/7. `internal/app/sink.go` + `internal/app/headless.go` implement the full pipeline: config load → sink selection (plain text vs `--json` one-event-per-line) → prompt assembly (flag + stdin, §Step 5 order rule) → model/provider resolution → session persistence via `convo.Store` (never blocks the response on a save failure) → turn execution with handshake-only retry on `provider.Error.Retryable` (429/5xx honoring `Retry-After`, exponential backoff otherwise) → exit codes 0/1/2/130. `cmd/ishakat/main.go` gained the CLI surface: `-p/--prompt`, `-m/--model`, `--system`, `--json`, `--stream`/`--no-stream`, `--no-save`, `-q/--quiet`, `--config`, proper `-v/--version` (previously dead code, since it lived behind a switch branch only reachable for args *not* starting with `-`), and headless mode auto-activates whenever stdin/stdout isn't a TTY so pipes never try to draw the TUI. Also fixed, as a prerequisite bug found while wiring `session.dir`: `$XDG_DATA_HOME` (and the other three XDG vars) were expanding to `xdg.DataDir()` etc., which already appends the `ishakat` suffix, producing `~/.local/share/ishakat/ishakat/sessions` instead of `~/.local/share/ishakat/sessions`; added `xdg.*Home()` (base, no suffix) and pointed `config/expand.go` at those instead. Covered by `internal/app/modelref_test.go` (alias/cycle/disabled-provider/timeout-override table tests) and `internal/app/headless_test.go` (13 cases against `provider/fake`'s `httptest.Server`: clean stdout, no duplicated trailing newline, `--json` well-formed one-per-line stream, stdin+flag concatenation order, stdin-only prompt, missing-prompt usage error, HTTP error not leaking into stdout, 429 handshake retry, truncated mid-stream keeps the partial response, session JSONL contents, `--no-save`, `--no-stream`, system-prompt precedence, reasoning visibility per `ui.reasoning`). Manually smoke-tested end to end against a local fake SSE server in text mode, `--json` mode, and `doctor`/`-v`. `go build ./...`, `go vet ./...` and `go test ./...` all green. |
-| 2026-08-01 | Step 6 · Catalog | Closed. `internal/catalog` implements contract 2 (§4bis) as a pure package —types, cache, three-source merge, models.dev parsing— with the network isolated in `internal/catalog/fetch` (parallel provider discovery with a 2 s per-provider budget, and a models.dev client with `If-None-Match` over `api.json` + `models.json`). **Deviation from the §6.2 tree, deliberate:** §6.2 puts `modelsdev.go` (an HTTP client) inside `internal/catalog`, but §6.1 forbids `net/http` in the transitive closure of `internal/tui`, and the model picker imports `catalog`; both cannot hold, so the transport moved to the `fetch` subpackage while payload decoding —being pure— stayed. `internal/app/catalog.go` wires the §4.4 startup sequence: `LoadCatalog` only reads files (cache → embedded seed) and never fails, `RefreshCatalog` is the only thing that goes out and is never on the critical path. Merge rules of §4.3 enforced field by field: existence comes from discovery, models.dev fills only the holes, the user always wins, and a declared-but-undiscovered model stays visible tagged `unlisted` (OmniRoute's virtual models). Unknown context is never guessed at 128k — it stays 0 with a 32k floor for compaction math only — and `Cost == nil` means unknown, never free. Closing criteria verified by `internal/app/catalog_test.go`: the real OmniRoute `/models` fixture plus a trimmed models.dev pair produces the expected four models (the id-less entry is dropped, the three different context field names are all read, per-token price strings become per-million, `gpt-5-nano` gets its name and price through the vendor-prefix rung of the cascade and `llama-3.3-70b` through the agnostic base), a cold start against a provider that never answers returns the cached catalog in milliseconds with **zero** HTTP calls, an expired cache is still painted with the "catalog from 3 days ago" strip, and with no cache and no network the embedded seed appears marked as unverified. Also covered: corrupt-cache degradation, a failed refresh keeping the cached models with `unreachable` health, the `[catalog].sources` filter, `refresh = startup|manual` expressed purely through the TTL, 0600 cache permissions and the on-disk shape of §4.4. `internal/catalog/merge_test.go` and `seed_test.go` pin the same rules at unit level. `ishakat models [--json|--refresh|--all]` ships in `internal/app/models_cmd.go`. `go build ./...`, `go vet ./...` and `go test ./...` all green. |
+| 2026-08-01 | Step 6 · Catalog | Closed. `internal/catalog` implements contract 2 (§4bis) as a pure package —types, cache, three-source merge, models.dev parsing— with the network isolated in `internal/catalog/fetch` (parallel provider discovery with a 2 s per-provider budget, and a models.dev client with `If-None-Match` over `api.json` + `models.json`). **Deviation from the §6.2 tree, deliberate:** §6.2 puts `modelsdev.go` (an HTTP client) inside `internal/catalog`, but §6.1 forbids `net/http` in the transitive closure of `internal/tui`, and the model picker imports `catalog`; both cannot hold, so the transport moved to the `fetch` subpackage while payload decoding —being pure— stayed. `internal/app/catalog.go` wires the §4.4 startup sequence: `LoadCatalog` only reads files (cache → embedded seed) and never fails, `RefreshCatalog` is the only thing that goes out and is never on the critical path. Merge rules of §4.3 enforced field by field: existence comes from discovery, models.dev fills only the holes, the user always wins, and a declared-but-undiscovered model stays visible tagged `unlisted` (OmniRoute's virtual models). Unknown context is never guessed at 128k — it stays 0 with a 32k floor for compaction math only — and `Cost == nil` means unknown, never free. Closing criteria verified by `internal/app/catalog_test.go`: the real OmniRoute `/models` fixture plus a trimmed models.dev pair produces the expected four models (the id-less entry is dropped, the three different context field names are all read, per-token price strings become per-million, `gpt-5-nano` gets its name and price through the vendor-prefix rung of the cascade and `llama-3.3-70b` through the agnostic base), a cold start against a provider that never answers returns the cached catalog in milliseconds with **zero** HTTP calls, an expired cache is still painted with the "catalog from 3 days ago" strip, and with no cache and no network the embedded seed appears marked as unverified. Also covered: corrupt-cache degradation, a failed refresh keeping the cached models with `unreachable` health, the `[catalog].sources` filter, `refresh = startup\|manual` expressed purely through the TTL, 0600 cache permissions and the on-disk shape of §4.4. `internal/catalog/merge_test.go` and `seed_test.go` pin the same rules at unit level. `ishakat models [--json\|--refresh\|--all]` ships in `internal/app/models_cmd.go`. `go build ./...`, `go vet ./...` and `go test ./...` all green. |
 | 2026-08-01 | Step 7 · Resolution and fuzzy matcher | Closed. `internal/catalog/resolve.go` implements the four stages of §4.5 as `(*Catalog).Resolve(text, ResolveOptions)`: exact `Ref` match, config alias (walked with a `seen`-set cycle guard, not a hop counter — a cycle now falls through to `OutcomePicker` with the *original* query instead of silently fuzzy-scoring the last alias name, which is the bug the mandatory table caught), unique suffix (two rungs: word-aligned suffix, then whole-word-inside), and last a full fuzzy score. The scorer is a subsequence DP with a per-query-rune gap penalty (§4.5's "puntaje difuso... con penalización por hueco"), plus the bonuses the plan calls out by name: word-start, contiguous run, exact-leaf and leaf-coverage (so `gpt5` picks `gpt-5` over `gpt-5-nano`), provider-prefix, digits-in-order (`son45` beats `sonnet-4-0` because digit mismatch is a flat penalty, not just a lower subsequence score), recency/frequency from `Model.UseCount`/`LastUsed` capped low so they only break ties, a deprecated penalty, and a free bonus gated on `ResolveOptions.PreferFree`. The 20% clear-winner margin and the "never a bare error, always `OutcomePicker`" rule of §4.5 are enforced in one place (`clearWinner`) so `Resolve` and the picker's incremental `Filter` can never disagree about what counts as ambiguous. Closing criteria verified by `internal/catalog/resolve_test.go`'s mandatory table: `son45`→`claude-sonnet-4-5` (not `-4-0`), `gpt5`→`gpt-5` (not `-nano`), `haiku`→unique suffix, `smart`→alias, two providers serving the same suffix→picker, and a string with no reasonable match→picker, never an error — plus unit coverage for `normalizeRef`, `matchQuality`, the digit/leaf/deprecated/stats bonuses, `prefer_free`, and the alias-cycle fix above. `ResolveModel` in `internal/app/modelref.go` (Step 5) is deliberately left as the partial resolver for now: wiring headless `-m` and the TUI picker to this full matcher is Step 8/10, not Step 7's closing criterion, which is only the table passing. `go build ./...`, `go vet ./...` and `go test ./...` all green. |
 | 2026-08-01 | Interlude · first hands-on session with the built binary | Six problems found by using the interface on a real Termux and a real PowerShell, all fixed before starting Step 8, because five of them are properties of the step-3 skeleton that Step 8 would have built on top of. **(1) Crash while streaming** — `panic: strings: illegal use of non-zero Builder copied by value`, reproducible by typing long text repeatedly. Bubble Tea v2 models are values: every `Update` copies the struct, and a `strings.Builder` held as a field records the address it was first written at, so the copy panics on the next write. `liveTurn.text` is a plain `string` now — anything stored in a Bubble Tea model must be safe to copy, and concatenation being O(n²) in theory is irrelevant for a turn of a few kilobytes next to a crash that takes the process down — and `internal/tui/chat_internal_test.go` plays a full streamed turn through many `Update` copies so a copy-hostile field cannot come back. **(2) Colour detection wrong on Windows** — the hand-rolled `theme.Detect` returned \"no colour\" whenever `TERM` was empty, which is the normal state of `powershell.exe` and `cmd.exe`, so every style was built flat: the banner was white there and a gradient in Termux, from the same binary. Detection is delegated to `charmbracelet/colorprofile` (the library Bubble Tea itself uses to decide what it may write, so the two can no longer disagree) plus a console-hint table for `WT_SESSION`/`ConEmuANSI`/`TERM_PROGRAM`/`ANSICON`. **(3) The logo was illegible** — it was six quadrant blocks (`▖▘▝▗`) arranged into shapes that spelled nothing, and those code points are absent from Consolas, so on a Windows console it was a grid of boxes. Replaced by a three-row pixel face that spells ISHAKAT using only `▀ ▄ █` — in WGL4, in cp437, and in every monospace font Windows has ever shipped. **(4) The repertoire was never a decision** — decorative characters were literals sprinkled through six render functions, which is why each earlier fix only moved the boxes elsewhere on screen. Added `theme.GlyphSet` (a second axis of terminal capability, orthogonal to colour, with `[ui] glyphs = auto\\|unicode\\|ascii`), one table per repertoire in `internal/tui/glyphs.go`, and an end-to-end test that plays a whole turn and fails if a single byte above U+007F reaches the screen in ASCII mode. **(5) Cursor and path display** — the terminal cursor was reported near the banner instead of inside the input box (`tea.View.Cursor` was built from the wrong origin), and the working directory printed as `~/ishakat` for `~/projects/ishakat` on Termux and `~/D:\\projects\\ishakat` on Windows: the display form was hand-built by string-replacing `$HOME` with `~`, which does not survive a drive letter or a nested path. Now `xdg.Pretty` (cross-platform, drive-letter aware) plus `tui.ShortenPath` (width-aware, abbreviates from the left). **(6) The binary would not run on Windows** — `make build` wrote `bin/ishakat` with no extension, which is not a program to the Windows loader, so PowerShell consulted its file associations and opened it in an editor; worse, a Linux ELF named `ishakat` had been committed to `bin/` in Step 1, so cloning on Windows was enough to hit it. The Makefile appends `.exe` on a Windows host, `make windows`/`windows-arm64` cross-compile with the suffix, and `bin/` is ignored. Finally, `ishakat doctor` gained the terminal section that makes all of the above diagnosable from a user's report instead of by guesswork: `theme.Diagnose` prints both decisions **with the variable that decided each**, the signals it read, and `tui.GlyphSample` — the logo and every decorative character, drawn from the interface's own table, so boxes, mojibake and \"the guess was right\" are told apart by eye. `go build ./...`, `go vet ./...`, `go test ./...` and `gofmt -l` all green. Not covered here and still owed from Step 3's closing criteria: manual verification at 40/60/120 columns and idle-CPU measurement, both of which need a real TTY. |
 | 2026-08-01 | Step 3's two remaining closing debts, closed | Both items the Interlude entry above left owed — "needs a real TTY" was true for eyeballing the frame, but each debt turned out to have a necessary condition a sandbox test could check exactly. **Idle CPU.** `Init` armed a 500 ms ticker (`blinkCmd`) that re-armed itself for the life of the process and flipped `Root.blinkOn`, a field nothing rendered (`input.go` already draws the terminal's own hardware cursor via `SetVirtualCursor(false)`, so nothing needed a software blink). Removed, along with the message type. `internal/tui/idle_internal_test.go` pins the property instead of a percentage: `Init`, the first `WindowSizeMsg`, and a keystroke must arm zero timers; the stream and animation tickers must both refuse to re-arm once a turn ends; and — so "no timers anywhere" cannot pass by an interface that never animates — submitting a prompt must still arm exactly two. Confirmed to catch the regression by reintroducing a ticker in `Init` and watching the test go red. **40/60/120 columns.** `internal/tui/width_internal_test.go`'s `TestNoOverflowAtCriticalWidths` renders the startup banner, a live turn at three stages, the post-turn transcript, and the help screen at each width, with a deep nested CWD chosen to force `ShortenPath` to give something up, and fails if any row's `lipgloss.Width` exceeds the terminal's. Confirmed to catch a regression the same way (widening the path budget in `bannerPath` by a fixed slop). It deliberately does not exercise `chat.go`'s documented, deferred prose-wrap gap (see the next entry's aside) — an early version used long unbroken text and immediately overflowed at all three widths including 120, which is real but out of Step 3's scope, so the test now sends a short message instead. **A third, previously undocumented bug found in the same pass:** `ui.animations.mode` and `ui.animations.battery_saver` were each read only far enough to recognise one literal string ("off", "on"); the documented `auto` default for either key resolved to "as if unset" no matter what the terminal or host was, and the verdict `mode` did compute ended up in `Layout.AnimationsOff`, a field with no reader at all. `internal/tui/anim.go` now resolves both rules — quoting the exact `docs/PLAN.md` comment each implements — and `root.go` consumes them: the animation ticker is skipped when `mode` resolves to off, and a resize now re-resolves `AnimationsOff` instead of carrying forward whatever `NewRoot` decided at the initial 80 columns. `gradient_scroll` is read but still has no consumer; `anim.go`'s package comment explains why rather than leaving the gap silent — the only element a "scroll" could describe is the startup banner, and the banner is only ever visible before the first turn, i.e. while idle, so animating it would mean arming a ticker from `Init` and reintroducing the first bug in this entry under a different name. Step 3 is now fully closed against every criterion in its own section, not just against the six symptoms of the Interlude entry. `go build ./...`, `go vet ./...`, `go test ./...` and `gofmt -l` all green. |
@@ -2213,8 +2400,9 @@ Actualizar al cerrar cada paso. Una línea por entrada: fecha, paso, resultado, 
 | 2026-08-02 | Step 10 · Model picker — closed | `internal/tui/picker.go` implements the §9.4 overlay as `Picker`, a value type following the same copy-safety rule as every other component in this package (`chat.go`'s `liveTurn` comment): `pickerFilter` (all→free→tools→vision→favorites, cycled by `ctrl+f`), `pickerRow` (a header or a model row, headers carrying `collapsed`/`count` so a collapsed group stays reachable to expand again), and `Picker.rebuild` as the single place that calls `catalog.Filter` — the picker's incremental search shares §4.5's exact scorer with `/model`'s direct resolution, so the two can never rank results differently. Rows are grouped by provider in first-appearance/rank order (`groupCandidates`), collapsible with left/right (`collapseCurrent`, which keeps the selection on the group's own header once its models disappear), and rendered two lines per model (id + `contextLabel`/`costLabel`/`capsLabel`/`latencyLabel`) plus one line per header, using only glyphs already in the WGL4-restricted repertoire (`glyphs.go`) rather than the wireframe's emoji. `modelChosenMsg{Ref}` (`msgs.go`) is the overlay's only output, dispatched through `Root.updateDispatch` like any other message rather than the picker mutating `Root` directly. `Root` gained `cat *catalog.Catalog`, `alias map[string]string`, `preferFree bool`, `favorites []string` and `picker Picker` (`root.go`), all threaded from new `Options` fields the same way `Engine`/`Model`/`System` already were in Step 8; `ctrl+p` opens the picker from `ModeChat` via `openPicker`, `updatePicker` owns the keyboard outright while `ModePicker` is active (esc closes, up/down move, left/right collapse/expand, backspace edits the query, enter chooses a model row or toggles a header, any other key with `Text` types into the query), and `applyModelChosen` switches the model and leaves the §4.6 confirmation line (`confirmLine`, riding `Root.slashNotice` like any other notice) — Step 10 closes with an unconditional switch, §4.6's `CheckSwap` conflict dialog is Step 11's job. `view.go`'s `renderRaw` takes the picker over the whole live region while active, the same pattern `ModeHelp` already used. `internal/tui/slashrun.go` routes `slash.KindModel` (added to `internal/slash/slash.go`, replacing that row's `KindUnimplemented`) to `runModelCommand`, implementing all three closing behaviors of §12 in one place: no argument opens the picker unfiltered, an argument `catalog.Resolve` decides unambiguously switches straight away with no overlay ever drawn, and anything else opens the picker prefiltered with the query — never a bare "model not found" (§4.5's own rule). **Prerequisite bug fixed in the same step, found while wiring this up:** `internal/app.Run` (the real interactive entry point, as opposed to headless mode and every `internal/tui` test, which build their own `Options`) never called `BuildEngine` or `LoadCatalog` — every real session hit `ErrNoProvider` on the first turn and `/model` had no catalog to search, regardless of how correct the picker itself was. Fixed by calling `LoadCatalog` (disk-only, §4.4, safe unconditionally) and `BuildEngine` before constructing `tui.Options`; a `BuildEngine` failure is reported on stderr and degrades to a nil engine (already a supported value, per `Options.Engine`'s own doc comment) instead of aborting startup — headless treats the same failure as fatal only because it has nothing else useful to do with a `-p` prompt. Also fixed in the plan document itself: the §11 status table still marked Steps 8 and 9 as not done despite both having their own closed bitácora entries above; corrected to ✅ through Step 10 alongside this entry. Covered by `internal/tui/picker_internal_test.go` (ctrl+p open, esc close without touching the model, typing narrows/backspace undoes, enter on a model row emits and applies `modelChosenMsg`, ctrl+f cycles the filter label, left/right collapse and expand a group, `Picker.Active()` on the zero value, `rebuild` clamping the selection once a query empties the list) and new cases in `internal/tui/slashrun_internal_test.go` for `/model`'s three closing behaviors (the pre-existing "unimplemented command" test was retargeted to `/theme`, since `/model` no longer qualifies). `gofmt -l`, `go build ./...`, `go vet ./...`, and `go test -race ./...` all green. |
 | 2026-08-02 | Step 11 · Hot swap (CheckSwap) — closed | `internal/engine/hotswap.go` implements the §4.6 pure checks: `ConflictKind` (`ContextTooSmall`, `MissingCaps`, `NoAuth`), `Conflict` (raw data only — token counts, a `catalog.Caps` bitmask — never pre-rendered prose, the same separation §4.2 already draws between `catalog.Cost` and the picker's `costLabel`), `Action` (`Cancel` as the zero value on purpose, then `Compact`/`DropOldest`), and `CheckSwap(c *convo.Conversation, from, to catalog.Model) Plan`. The context check compares `c.ContextTokens()` against `to.EffectiveContext()`; the capability check walks `c.Active()`'s blocks for images/tool calls the destination cannot serve, deliberately ignoring `from` — what matters is what the history already contains, not which model produced it; the auth check is `!to.Health.Usable()`. A context conflict is the only one CheckSwap can suggest a mechanical remedy for, estimated via `convo.PlanCompact` plus a flat placeholder budget for the summary block Step 12's real `compact_model` call would eventually write. `internal/tui/confirm.go` is the §9.5 dialog: `ModeConfirm`'s own state (`confirmDialog`) and `renderConfirm`, drawn borderless like `renderPicker` (this package's glyph table has no box-drawing characters, and inventing one for a single screen is exactly the temptation `glyphs.go`'s own comment warns against). `confirmOptionsFor` picks the row set by conflict priority: a context conflict offers compact/drop-oldest/cancel (matching the wireframe, compact pre-selected); `NoAuth` alone offers only cancel — §4.6 says the credential has to exist "before you're allowed to switch", so there is nothing to proceed with; `MissingCaps` alone offers a TUI-only "switch anyway" row alongside cancel, since §4.6 says those blocks degrade to descriptive text rather than breaking the request, which makes proceeding a legitimate choice once the warning has been read (this third option has no `engine.Action` of its own — a `confirmOption.proceed` bool, documented as a deliberate one-package extension over the PLAN's literal three-action sketch). `Root.applyModelChosen` — the single funnel every switch already went through since Step 10 (the picker's enter key and `/model`'s direct-resolution branch both end here) — now looks both the current and destination model up in the catalog and runs `CheckSwap` before committing anything; when either side is unresolvable (no catalog, or a ref the catalog does not know) it falls back to Step 10's unconditional switch, which is also what keeps every pre-Step-11 test in this package passing unchanged. Accepting compact or drop-oldest appends a marker message via `convo.ApplySummary` (§10's own audit rule: nothing is ever deleted from `Messages`, a replacement marker is appended and `Active()` excludes what it names) — compact's marker says plainly that it is a placeholder pending Step 12, drop-oldest's says it discarded rather than summarized. Covered by `internal/engine/hotswap_test.go` (each conflict kind individually, the no-conflict and nil-conversation cases, and the PLAN's own closing criterion: a ~142k-token conversation against a 128k window offers `ActionCompact`, and after applying that plan the next turn reaches the new model through a fake `Streamer` with headroom to spare) and `internal/tui/confirm_internal_test.go` (opening on each conflict kind, accepting compact/drop-oldest/switch-anyway, cancelling via esc and via the explicit row, and the catalog-miss fallback). `gofmt -l`, `go build ./...`, `go vet ./...`, and `go test -race ./...` all green across the whole module. |
 | 2026-08-02 | Step 12 · `/compact` client-side — closed | Two halves, split along the §6.1 boundary Step 11's own entry already leaned on. The pure half lived in `internal/convo/compact.go` before this step (`Plan`, `PlanCompact`, `ApplySummary`, `NeedsCompact`, `DropOldest` — no network, table-tested already); the model-calling half is new: `internal/engine/compact.go`'s `Summarize(ctx, eng, model, msgs, plan)` renders `plan.Replace` into a plain-text transcript (`renderTranscript`, with `blockPlaceholder` degrading images/tool calls to a bracketed note rather than dropping them, the same §4.6 degrade-not-break rule Step 11 already applies to a hot swap) and asks `compact_model` for a summary via the new `Engine.RunToCompletion` — a non-streaming sibling of `Start`/`run` for a call with exactly one final answer, not a sequence of deltas. `internal/tui/compact.go` is the client wiring: `startCompact(switchTo)` computes the `Plan` once and either resolves it synchronously (`plan.Empty()`, `[compact].strategy = "drop-oldest"`, or no working `compactEng` — three distinct reasons to skip the model call, all falling back to the same "nothing was summarized" marker `applyDropOldestCompact` appends) or opens a new `ModeCompact` and schedules `summarizeCmd` as a `tea.Cmd` — Bubble Tea already runs every `Cmd` in its own goroutine (`Program.handleCommands`), so blocking on `RunToCompletion` inside the closure needs no manually-spawned goroutine of its own, unlike `Engine.Start`'s streamed turn. `compactDoneMsg` carries the result back through `updateDispatch` to `finishCompact`, which applies the real summary via `convo.ApplySummary`, or — on error — falls back to the discard marker when `[compact].on_error = "drop-oldest"` (the documented default) and otherwise surfaces a plain warning notice while leaving the conversation untouched, since guessing an unconfigured remedy would be worse than doing nothing. `cancelCompact` (esc, or the lone ctrl+c `handleGlobalKey` already special-cases for `ModeBusy`) cancels the in-flight context and restores `ModeChat` with no partial result to keep — `Summarize` has exactly one answer, never something half-typed. The §10 auto-trigger lives in `finishTurn`: once a turn's own answer lands, it checks `convo.NeedsCompact` against the active model's `EffectiveContext()` and `[compact].trigger_pct`, starting a bare compaction (no `switchTo`) on its own rather than waiting for the user to notice and type `/compact`. `compact_model` is deliberately a second, independent `*engine.Engine` (`Root.compactEng`, wired in `internal/app/app.go` via a second `BuildEngine` call) rather than reusing the conversation's own `m.eng`: `internal/app.NewStreamer` binds one `Engine` to exactly one provider, and `compact_model` is free to name a different one. `NewRoot` floors `compactKeepLastTurns` at 4 whenever the caller leaves it at 0 (a bare `Options{}}`, or `[compact]` never loaded) — `convo.PlanCompact`'s own boundary arithmetic (`starts[len(starts)-keepLastTurns]`) reads `keepLastTurns == 0` as "keep nothing" and indexes out of bounds, a latent bug in already-tested code this step deliberately routes around rather than touches. **Repertoire discipline, not a shortcut:** §9.8's wireframe shows a leading "✓" and a "→" arrow on the success line; U+2713 CHECK MARK is in the Dingbats block, which is outside the WGL4 set `theme.GlyphsUnicode` restricts to (confirmed against alanwood.net's WGL4 reference), and `glyphs.go`'s own comment warns against adding a decorative character without that verification — so `reportCompactDone`'s notice drops the checkmark entirely and spells the arrow as plain ASCII `"->"` instead of `"→"` (which, being in the already-supported Arrows block, would have been fine on the Unicode side, but a decorative glyph belongs in the glyphs table so both repertoires agree on it, not inlined once for a single line). Covered by `internal/tui/confirm_internal_test.go`'s rewritten `TestConfirmAcceptingCompactSwitchesAndShrinksTheConversation` (the "compactar y cambiar" dialog path, now asserting the real async round trip and the model's actual summary text landing in the last message) and the new `internal/tui/compact_internal_test.go`: no-engine and `strategy = "drop-oldest"` fallbacks (with a call-tracking fake streamer proving the model is never touched in the latter case), an empty-plan short circuit with no spurious notice, the `/compact` slash path end to end, both `on_error` branches, cancellation via the direct call and via the real `esc`/`ctrl+c` key dispatch, and both sides of the §10 auto-trigger (fires past `trigger_pct` with `compact.auto` on, stays silent with it off). `gofmt -l`, `go build ./...`, `go vet ./...`, and `go test -race ./...` all green across the whole module. |
-| 2026-08-03 | Contract 5 (§19) · the agent and self-extension layer — documented and configured, not implemented | Restructuring pass, no runtime behaviour changed. **Why it was needed:** §0 said "un chat impecable vale más que un agente a medias", and that single line was the instruction every reader followed to defer the agent — while `convo.BlockToolCall`, `convo.BlockToolResult`, `provider.EventToolCall`, `provider.Caps.Tools` and `provider.Degradation.ToolsFlattened` had all existed since Step 2. The data contract for tool calling was written on day one and switched off by the document, not by the code. The rule is now symmetric: polish must not be postponed for the agent, and the agent must not be postponed for polish. **Documented:** §1 reframed around three front doors over one brain (TUI ✅, headless ✅, `serve` ⬜ step 23) with §1.3 as an explicit competitive frame; three new CERRADA decisions in §3 (no Go plugins — `plugin.Open` needs CGO, does not exist on Android at all, pins the exact toolchain and every dependency version, and cannot unload, so generated capabilities are auditable text files instead of opaque model-authored binaries in-process; reactive single loop, no planner, per the AutoGPT lesson that a plan cannot know what execution reveals; inline rendering stays, with its zoom re-wrap cost written down instead of forgotten); §19 in full as contract 5 — the two-layer rule, the four-rung crystallization ladder (skill → declarative → script → native Go by human PR), the economics (~4,100 tokens as prose against ~120 as a tool, ≈34× cheaper, amortized at the twelfth use, with the real prize being a clean context rather than money), the registry and lifecycle (`unverified` → `verified` → promoted → `archived`), the three governance gates with three *different* deciders, and the threat model — self-extension makes prompt injection **permanent**, which is strictly worse than one bad `bash` command, so seven mitigations ship with the feature and not after it. Phase 2.5 (steps 14–25) added to §11 with step 13bis (distribution) pulled forward from Phase 5, because `make build` is not an installation method. **Implemented, and it is only configuration:** `[tools]` in `internal/config` — schema, embedded defaults, and validation. Zero new dependencies; `go.mod` stays at seven. The schema deliberately lands **before** the code it governs: permissions and limits are much harder to add credibly once the code that should have been obeying them already works without them. `[tools]` is the first section where a bad value is fatal rather than degraded, and the reason is that a misspelled permission has no safe reading — degrading `write = "alow"` to "deny" silently removes writing, degrading it to "allow" writes without asking on the machine of someone who believed they had asked for the opposite; there is no prudent option, only a coin flip that resolves at the worst moment. Four settings that are unsafe but legitimately the user's choice warn and start instead (§5.3). **Two real bugs found while doing it, both unrelated to §19 and both pre-existing.** (1) *The four architecture boundary tests had never run.* A Go test runs with its working directory set to its own package, so `deps(t, "./internal/tui")` in `internal/arch_test.go` resolved to `internal/internal/tui`; `go list` exited non-zero, the helper read any failure as "no toolchain in PATH" and called `t.Skipf`. Four boundary guarantees had been reporting green since `5ac0ca6` while checking nothing — worse than having no test, because the green also bought confidence. Fixed by addressing packages through the full module path and by separating the two failure modes the helper had merged: no `go` binary is a skip, but `go list` existing and failing is now fatal, because the question could not be asked. Verified by mutation. (2) *`ishakat config init` shipped a stale file.* It writes the **embedded** `internal/config/example.toml`, while the file people read and edit is `config.example.toml` at the repo root; nothing tied them together and they had already diverged, the embedded copy having lost the `color` and `glyphs` documentation — precisely the option a Windows user needs most. Synced, and `TestExampleTOMLInSync` now fails on a one-line drift and prints the exact `cp` to fix it. **New tests, all verified non-vacuous by mutation:** `TestToolsDefaultsLoad` (asserts concrete numbers rather than "not zero", and that the deny lists are non-empty, because an empty deny list is the dangerous shape — it looks like a working config and blocks nothing), `TestToolsFatalErrors` (7 cases), `TestToolsWarnings` (4), `TestEvolveOffSkipsSelftestWarning` (a warning only earns its place when the risk it names is reachable), plus `TestEngineNoImportaProvider` and a dormant `TestToolsNoImportaTUI` that wakes with that package's first file — a rule added after the coupling has happened arrives too late, because by then removing it is a refactor rather than a correction. `gofmt -l`, `go build ./...`, `go vet ./...` and `go test ./...` all green. **Nothing executes a tool yet: step 14 is next.** Four questions from this round are still unanswered by the user and are recorded in §16 as recommendations on record, not closed decisions. |
+| 2026-08-03 | Contract 5 (§19) · the agent and self-extension layer — documented and configured, not implemented | Restructuring pass, no runtime behaviour changed. **Why it was needed:** §0 said "un chat impecable vale más que un agente a medias", and that single line was the instruction every reader followed to defer the agent — while `convo.BlockToolCall`, `convo.BlockToolResult`, `provider.EventToolCall`, `provider.Caps.Tools` and `provider.Degradation.ToolsFlattened` had all existed since Step 2. The data contract for tool calling was written on day one and switched off by the document, not by the code. The rule is now symmetric: polish must not be postponed for the agent, and the agent must not be postponed for polish. **Documented:** §1 reframed around three front doors over one brain (TUI ✅, headless ✅, `serve` ⬜ step 23) with §1.3 as an explicit competitive frame; three new CERRADA decisions in §3 (no Go plugins — `plugin.Open` needs CGO, does not exist on Android at all, pins the exact toolchain and every dependency version, and cannot unload, so generated capabilities are auditable text files instead of opaque model-authored binaries in-process; reactive single loop, no planner, per the AutoGPT lesson that a plan cannot know what execution reveals; inline rendering stays, with its zoom re-wrap cost written down instead of forgotten); §19 in full as contract 5 — the two-layer rule, the four-rung crystallization ladder (skill → declarative → script → native Go by human PR), the economics (~4,100 tokens as prose against ~120 as a tool, ≈34× cheaper, amortized at the twelfth use, with the real prize being a clean context rather than money), the registry and lifecycle (`unverified` → `verified` → promoted → `archived`), the three governance gates with three *different* deciders, and the threat model — self-extension makes prompt injection **permanent**, which is strictly worse than one bad `bash` command, so seven mitigations ship with the feature and not after it. Phase 2.5 (steps 14–25) added to §11 with step 13bis (distribution) pulled forward from Phase 5, because `make build` is not an installation method. **Implemented, and it is only configuration:** `[tools]` in `internal/config` — schema, embedded defaults, and validation. Zero new dependencies; `go.mod` stays at seven. The schema deliberately lands **before** the code it governs: permissions and limits are much harder to add credibly once the code that should have been obeying them already works without them. `[tools]` is the first section where a bad value is fatal rather than degraded, and the reason is that a misspelled permission has no safe reading — degrading `write = "alow"` to "deny" silently removes writing, degrading it to "allow" writes without asking on the machine of someone who believed they had asked for the opposite; there is no prudent option, only a coin flip that resolves at the worst moment. Four settings that are unsafe but legitimately the user's choice warn and start instead (§5.3). **Two real bugs found while doing it, both unrelated to §19 and both pre-existing.** (1) *The four architecture boundary tests had never run.* A Go test runs with its working directory set to its own package, so `deps(t, "./internal/tui")` in `internal/arch_test.go` resolved to `internal/internal/tui`; `go list` exited non-zero, the helper read any failure as "no toolchain in PATH" and called `t.Skipf`. Four boundary guarantees had been reporting green since `5ac0ca6` while checking nothing — worse than having no test, because the green also bought confidence. Fixed by addressing packages through the full module path and by separating the two failure modes the helper had merged: no `go` binary is a skip, but `go list` existing and failing is now fatal, because the question could not be asked. Verified by mutation. (2) *`ishakat config init` shipped a stale file.* It writes the **embedded** `internal/config/example.toml`, while the file people read and edit is `config.example.toml` at the repo root; nothing tied them together and they had already diverged, the embedded copy having lost the `color` and `glyphs` documentation — precisely the option a Windows user needs most. Synced, and `TestExampleTOMLInSync` now fails on a one-line drift and prints the exact `cp` to fix it. **New tests, all verified non-vacuous by mutation:** `TestToolsDefaultsLoad` (asserts concrete numbers rather than "not zero", and that the deny lists are non-empty, because an empty deny list is the dangerous shape — it looks like a working config and blocks nothing), `TestToolsFatalErrors` (7 cases), `TestToolsWarnings` (4), `TestEvolveOffSkipsSelftestWarning` (a warning only earns its place when the risk it names is reachable), plus `TestEngineNoImportaProvider` and a dormant `TestToolsNoImportaTUI` that wakes with that package's first file — a rule added after the coupling has happened arrives too late, because by then removing it is a refactor rather than a correction. `gofmt -l`, `go build ./...`, `go vet ./...` and `go test ./...` all green. **Nothing executes a tool yet.** Four questions from this round were left for the user and were recorded in §16 as recommendations on record rather than closed decisions; all four were answered on 2026-08-03 (see the following entry). |
 | 2026-08-03 | Contract 5 · segunda pasada — huecos de coherencia y el campo que faltaba | Revisión de lo que la pasada anterior dejó inconsistente, con un hallazgo que habría bloqueado el paso 14. **El hueco real:** §12bis afirmaba que `convo.BlockToolCall` "tiene `Name` y `Args`", y era cierto — ese era el problema. El dialecto OpenAI exige un `tool_call_id` en cada mensaje `role: "tool"`, así que un turno con dos llamadas en paralelo **no se podía serializar**: el proveedor no tendría forma de saber qué resultado corresponde a qué llamada. El contrato de datos para tool-calling existía desde el paso 2 y le faltaba justo el campo que hace representable el paralelismo. Emparejar por posición en el array parece funcionar y se rompe en cuanto una herramienta responde antes que otra, que es exactamente lo que pasa cuando una lectura rápida y un comando lento corren en el mismo turno; de ahí que `TestToolCallIDCorrelaciona` devuelva los resultados en orden inverso a propósito, porque con emparejamiento posicional el test pasaría sin probar nada. Añadidos `Block.ToolCallID` y `Block.IsError`, con los constructores `ToolCallBlock`/`ToolResultBlock`/`ToolErrorBlock` — el tercero existe en vez de un booleano en el segundo para que el sitio de la llamada tenga que decir cuál de los dos casos es. **`IsError` tuvo que sobrevivir en tres sitios, y en dos no lo hacía:** el JSONL (se relee al reanudar, así que un campo que no persiste se pierde justo al retomar un turno agéntico a medias), el serializador OpenAI, y el placeholder de `/compact`. Los dos últimos aplanaban un fallo con la misma palabra que una salida normal, y el caso que lo demuestra es que una salida que dice `permission denied` y un fallo cuyo texto es `permission denied` son sucesos distintos: en el primero el comando corrió, en el segundo no. El del resumen es el peor de los dos porque la pérdida es duradera y no momentánea — el resumen sustituye los turnos viejos y les sobrevive, así que un fallo registrado como "resultado" puede llevar al resumen a afirmar que algo funcionó, y el turno que habría corregido el registro es precisamente el que se descarta. `hotswap.go` se revisó y ya estaba bien: `missingCaps` cuenta ambos tipos de bloque como prueba de que la conversación usó herramientas. **Coherencia del documento:** §13, que se llama "comandos y atajos **definitivos**" y es donde alguien mira para saber qué se puede escribir, no mencionaba `/tools` — mientras §19 lo usa en cuatro sitios, incluido `/tools audit` como mitigación 7 del modelo de amenazas. Un comando que carga una garantía de seguridad en una sección y no existe en la lista canónica es la misma clase de deriva que produjo el bug de `example.toml`. Reescrita con columna de estado, los dos flags de permiso separados en su propia tabla con una columna de "qué **no** concede", y `ishakat serve`/`login` añadidos. §14 no tenía ningún número para la capa agéntica, que es donde el rendimiento se degrada sin que nadie lo note porque un bucle lento parece un modelo lento; el presupuesto que carga peso es que **el arranque no crece**: descubrir capacidades es leer un directorio y solo nombre y descripción entran al prompt, así que cuarenta capacidades tienen que costar menos de 10 ms y 600 tokens. §6.1 dice que la frontera "se prueba, no se promete" y llevaba meses sin probarse; la lección quedó escrita ahí y no solo en el mensaje de un commit, con la regla general: **un guardia nunca debe poder saltarse por la misma vía por la que fallaría.** Todo verificado por mutación. `gofmt`, `build`, `vet` y `test` verdes; 7 dependencias directas, sin cambios. |
+| 2026-08-03 | §16 · las cuatro decisiones pendientes, cerradas por el usuario | Ronda de decisiones, sin cambio de comportamiento. Las cuatro preguntas que la segunda pasada dejó en §16 como recomendaciones quedaron resueltas, y cada una se movió a su sección propia en vez de quedarse en la lista de abiertas — un documento que declara algo cerrado en un sitio y lo ofrece como abierto en otro es la misma deriva que se acababa de arreglar en §13. **(1) El pivote, CERRADA:** ishakat es un runtime de agente de propósito general y el chat es su interfaz, no el producto. Se escribió en §0.1 y no en la lista de §3 porque no es una decisión entre otras: decide qué cuenta como progreso, así que el resto del documento se lee a través de ella. Lo que hacía falta de verdad era la regla de resolución de conflictos, porque buena parte del documento se escribió cuando ishakat era un chat cuyo diferenciador era el picker y un lector no tiene cómo saber si una sección vieja es autoritativa o un resto: gana el marco de agente, la sección se trata como desactualizada, se corrige al pasar por ella y no se lanza una reescritura completa a perseguir redacción. Con las tres consecuencias que se sienten al trabajar — las tres puertas son pares (una capacidad que solo funciona en el TUI está *inacabada* por ese hecho, de ahí que `tool_create` tenga respuesta headless en vez de exigir terminal), "ishakat debería poder hacer X" casi nunca es un cambio al binario sino una capacidad en disco, y el pulido de chat pierde siempre contra capacidad de agente. §1 se reordenó en consecuencia: los tres defectos estaban listados con la autoextensión en tercer lugar, heredado de la versión vieja y en contradicción con §1.2, que la rankea primera; ahora coinciden, y queda escrita la dependencia que el orden viejo escondía — el defecto del teléfono restringe al de la autoextensión, que es por qué esta no puede depender de un gestor de paquetes. El hot swap se reencuadra: el valor no es la comodidad de cambiar de modelo en un chat, es bajar a uno barato para los pasos mecánicos de una tarea larga y volver al caro para el difícil sin perder el estado de la tarea. **(2) Re-wrap al hacer zoom: opción (a), inline tal cual, CERRADA.** §3 muestra ahora las tres opciones con dos rechazadas explícitamente, para que no vuelva como "mejora pequeña". Lo que valía registrar es por qué se rechazó la (b) —reflow solo de la región viva— pese a parecer barata: obliga al renderizador a retener el texto fuente de cada turno vivo, con lo que la frontera entre "confirmado" y "vivo" deja de ser *cuándo lo imprimimos* y pasa a ser un segundo estado mutable que toda función futura tiene que respetar. El zoom es raro; el invariante "impreso es definitivo" carga peso en todos los caminos que imprimen. En forma operativa: la salida de `tea.Printf` es inmutable por contrato. **(3) 13bis, CERRADA y ahora con consecuencia:** el paso 14 no empieza hasta que 13bis cierre. Ya estaba en §11 como "adelantado", pero como recomendación sin nada que impidiera arrancar el 14 antes. El argumento de secuencia solo estuvo disponible al cerrar el pivote y es más fuerte que el original de que `make build` no es un método de instalación: del 14 en adelante todo es capa de agente, y la capa de agente no se valida desde un escritorio —si `bash` se porta en Termux, si una confirmación `danger: high` se lee a 40 columnas, si un bucle de herramientas se come la batería—, así que aterrizar la distribución antes hace que cada paso posterior se dogfoodee al aterrizar, y aterrizarla después es construir doce pasos contra suposiciones y descubrir en el 25 cuáles estaban mal con toda la capa ya encima. La tarde no compra distribución, compra el bucle de feedback de lo que sigue. Queda registrado además qué puede fallar de verdad en ese paso y por qué se esconde: la pata android/arm64 compilada sin CGO arranca, imprime `--version` y muere en la primera petición HTTP porque el resolver puro de Go lee `/etc/resolv.conf` y Android no tiene ese archivo (§3); el camino por defecto `localhost:20128` nunca toca DNS, así que el síntoma puede tardar semanas en aparecer. El job de release tiene que verificar una resolución DNS remota real sobre el artefacto de android, no solo que compiló. **(4) Bybit: fuera del repo, CERRADA**, con la regla que lo generaliza para no re-litigarlo integración por integración: el repo envía capacidades que **demuestran el mecanismo**, la máquina del usuario guarda capacidades que **hacen trabajo**. Tres razones: el núcleo sigue siendo generalista; una herramienta de Bybit dentro del repo probaría solo que los autores saben escribir una herramienta, mientras que una construida *por ishakat* en la máquina de un usuario a partir de los docs de la API prueba la afirmación que §19 realmente hace —mergearla sustituye la evidencia por una aserción—; y los ejemplos se copian sin leerse, así que uno que firma con `BYBIT_API_SECRET` invita a una ejecución accidental contra mainnet desde el único sitio al que mandamos a la gente a buscar plantillas. Consecuencia explícita, porque §19 menciona Bybit en una docena de sitios: la ilustración en prosa se queda, un `examples/tools/bybit_*/` ejecutable queda prohibido. §16 conserva tres decisiones abiertas (mouse/picker, Starlark, modo evolve por defecto) y gana la definición de qué merece estar ahí: una decisión que se puede tomar más tarde **sin pagar intereses**; si al leerla ya no es reversible sin refactor, se quedó más de lo que debía. Sin cambios en código: `gofmt`, `build`, `vet` y `test` verdes; 7 dependencias directas. |
 
 ---
 
@@ -2326,6 +2514,15 @@ extract = "result.list[0].coin[*].{coin, walletBalance, usdValue}"
 env    = { BYBIT_TESTNET = "1" }
 expect = "status_ok"
 ```
+
+> **That manifest is an illustration, not a shipped file.** Bybit is used as the
+> running example throughout §19 because it exercises every hard part at once —
+> HMAC signing, `danger: high`, a testnet self-test. But **no runnable
+> `examples/tools/bybit_*/` may exist in this repository** (§16.1, CERRADA):
+> money-touching tools live on the user's machine, ideally written by ishakat
+> itself, which is the actual proof this section claims. Prose examples cost
+> nothing and ship nothing; a copyable manifest that signs with a real API secret
+> is an invitation to run it against mainnet by accident.
 
 Rung 1 is interpreted with `net/http` + `encoding/json` + `crypto/hmac` +
 `text/template`. Rung 2 adds `os/exec`. **Zero new dependencies — the seven in
