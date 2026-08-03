@@ -182,7 +182,49 @@ models.dev publica tres endpoints, no uno. `api.json` (combinación proveedor+mo
 
 **No se inventa ningún protocolo nuevo.** Tres adaptadores de dialecto cubren el mercado: OpenAI (`chat/completions`), Anthropic (`messages`) y Google (`generateContent`). El 95% de los proveedores hablan OpenAI. Lo que sí se construye es un adaptador declarativo por configuración: agregar un proveedor es pegar cinco líneas de TOML, no escribir código.
 
-Cuatro contratos internos gobiernan todo el sistema: el modelo de conversación agnóstico (§4.0), el catálogo de modelos (§4), el esquema de configuración (§5) y el tema como datos (§8).
+**No Go plugins. CERRADA, and it is not a compromise — it is the decision that
+makes self-extension auditable.** The obvious design for §19 would be "the agent
+writes `bybit.go`, compiles it, loads it". That path is closed on the merits:
+
+- `plugin.Open` requires CGO, works only on linux/darwin/freebsd, and **does not
+  work on Android/Termux** — the primary target platform.
+- It demands the exact same toolchain version and the exact same version of
+  every shared dependency; any drift is a crash at load time.
+- Plugins cannot be unloaded. Once in, they are in for the life of the process.
+- Compiling on-device needs the Go toolchain (~500 MB), which is precisely the
+  class of problem ishakat exists to avoid.
+
+So generated capabilities are **text files on disk**: a TOML manifest, optionally
+a script. That means every capability the agent grants itself can be read with
+`cat`, diffed, version-controlled and deleted. A compiled plugin authored by a
+language model would be an opaque blob executing inside the process — the worst
+possible security property for a program that also reaches your exchange
+account. The platform limitation forced the right architecture.
+
+**The agentic loop is reactive, single-loop. CERRADA.** No `Planner`,
+`Scheduler` or `Memory` modules. The model sees the accumulated context —
+including the stderr of the command that just failed, as a `BlockToolResult` —
+and picks the next tool, one step at a time, until it answers without a tool
+call. This is the AutoGPT lesson: plans made before execution cannot know what
+execution reveals, so the plan gets discarded and a reactive loop does the real
+work anyway, only with extra ceremony on top. "Planning" is the model thinking
+in text before it calls a tool; it is not a package. Sub-agents (`dispatch`,
+Step 22) are goroutines with isolated context, not a scheduler.
+
+**Inline rendering stays. CERRADA, with a known cost.** Committed transcript
+lines are printed once and never repainted, which is what buys native phone
+scrolling and native text selection — both worth more on Termux than perfect
+reflow. **Accepted consequence: already-printed lines do not re-wrap when the
+terminal width changes** (i.e. when you zoom). Competitors that reflow do so by
+repainting the whole transcript in alt-screen, which costs native scroll and
+copy/paste. A *middle* option — reflow only the live region (last N turns) while
+committed scrollback stays as-is — is deliberately left open as Phase 3 work
+(§16). Full alt-screen repaint is rejected outright.
+
+**Five contracts govern the whole system:** el modelo de conversación agnóstico
+(§4), el catálogo de modelos (§4bis), el esquema de configuración (§5), el tema
+como datos (§8), and **the tool contract with its lifecycle and governance
+(§19)**.
 
 ---
 
