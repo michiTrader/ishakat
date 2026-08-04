@@ -339,8 +339,10 @@ func (m Root) renderPicker() string {
 	if len(p.rows) == 0 {
 		b.WriteString(" " + emptyPickerMessage(p) + "\n")
 	}
-	for i, row := range p.rows {
-		for _, line := range renderPickerRow(g, m.styles, width, row, i == p.sel, row.provider != "" && row.cand.Model.Ref == p.active, p.favorites[strings.ToLower(row.cand.Model.Ref)]) {
+	visible, offset := visiblePickerRows(p.rows, p.sel, pickerMaxVisibleRows)
+	for i, row := range visible {
+		idx := offset + i
+		for _, line := range renderPickerRow(g, m.styles, width, row, idx == p.sel, row.provider != "" && row.cand.Model.Ref == p.active, p.favorites[strings.ToLower(row.cand.Model.Ref)]) {
 			b.WriteString(" " + line + "\n")
 		}
 	}
@@ -399,15 +401,60 @@ func countModelRows(rows []pickerRow) int {
 	return n
 }
 
+// pickerMaxVisibleRows caps how many picker rows are drawn at once,
+// regardless of how many the catalog matched — reported in practice as
+// "muestra demasiados modelos" once OmniRoute alone hands back a few
+// hundred: with every row drawn unconditionally the frame grew taller than
+// most terminals, so moving the cursor past whatever the terminal could
+// actually show scrolled the *terminal's own backscroll*, not the picker's
+// selection — the top of the list (and the cursor sitting in it) simply
+// fell off the top of the screen with nothing left redrawing it back into
+// view. 10 matches slashMenuRows' own reasoning in spirit (§9.6 picked 5
+// for a single-line dropdown squeezed above the input box; the picker owns
+// the full screen and models read as two short lines each, so its budget
+// is roughly double).
+const pickerMaxVisibleRows = 10
+
+// visiblePickerRows returns the window of rows that keeps sel on screen
+// when there are more rows than max can show at once, plus the index the
+// window starts at (so the caller can map a visible position back to its
+// real row index). It is picker.go's own copy of slashmenu.go's
+// visibleSlashRows rather than a shared helper: the two packages' rows are
+// different types, and Go's lack of a lightweight way to share four lines
+// of index arithmetic across two unrelated slice element types is not
+// worth a generic parameter only ever instantiated twice.
+func visiblePickerRows(rows []pickerRow, sel, max int) ([]pickerRow, int) {
+	if len(rows) <= max {
+		return rows, 0
+	}
+	start := sel - max/2
+	if start < 0 {
+		start = 0
+	}
+	if start > len(rows)-max {
+		start = len(rows) - max
+	}
+	return rows[start : start+max], start
+}
+
 // searchGlyph is the search field's leading mark. It reuses the model
 // footer's own bullet rather than inventing a new repertoire entry — see
 // glyphs.go's package comment on why a new decorative character is never
 // added lightly.
 func searchGlyph(g glyphs) string { return g.modelMark }
 
-// renderPickerRow draws one row: a single line for a provider header, two
-// for a model (§9.4: "Dos líneas por modelo: identificador arriba,
-// metadatos abajo").
+// renderPickerRow draws one row: a single line for a provider header, and
+// for a model either one line or two depending on width. §9.4's own
+// wireframe ("Dos líneas por modelo: identificador arriba, metadatos
+// abajo") is drawn at 40 columns, and its prose gives the actual reason:
+// "A 40 columnas meterlo todo en una línea obliga a truncar el ID, que es
+// justamente el dato que hay que leer" — the two-line layout exists to
+// protect the id from truncation, not because a model is entitled to two
+// rows on principle. Once the terminal is wide enough that id and metadata
+// fit side by side without cutting either, stacking them anyway is exactly
+// the wasted space reported in practice — a picker that only shows a
+// handful of rows at a time was burning half of them on blank-looking
+// metadata lines while the cursor scrolled off screen.
 func renderPickerRow(g glyphs, st theme.Styles, width int, row pickerRow, selected, active, favorite bool) []string {
 	pointer := " "
 	if selected {
@@ -446,19 +493,30 @@ func renderPickerRow(g glyphs, st theme.Styles, width int, row pickerRow, select
 		wireID = row.cand.Model.Ref
 	}
 	id := fmt.Sprintf("%s %s %s", pointer, mark, wireID)
-	id = ansi.Truncate(id, width, "…")
+	meta := pickerMetaLine(g, row.cand.Model)
 
-	meta := "   " + pickerMetaLine(g, row.cand.Model)
-	meta = ansi.Truncate(meta, width, "…")
-
-	if selected {
-		id = st.Accent.Render(id)
-	} else if favorite {
-		id = st.Warn.Render(id)
+	styleID := func(s string) string {
+		switch {
+		case selected:
+			return st.Accent.Render(s)
+		case favorite:
+			return st.Warn.Render(s)
+		default:
+			return s
+		}
 	}
-	meta = st.Dim.Render(meta)
 
-	return []string{id, meta}
+	// pickerRowGap separates id from metadata when they share a line — two
+	// spaces, the same visual break the two-line layout's leading "   "
+	// left in front of the metadata below the id.
+	const pickerRowGap = "  "
+	if lipglossWidth(id)+lipglossWidth(pickerRowGap)+lipglossWidth(meta) <= width {
+		return []string{styleID(id) + pickerRowGap + st.Dim.Render(meta)}
+	}
+
+	id = ansi.Truncate(id, width, "…")
+	metaLine := ansi.Truncate("   "+meta, width, "…")
+	return []string{styleID(id), st.Dim.Render(metaLine)}
 }
 
 // pickerMetaLine is the second row of a model entry: context window, cost,
