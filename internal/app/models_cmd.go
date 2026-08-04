@@ -103,7 +103,7 @@ func Models(opts ModelsOptions) int {
 	if opts.JSON {
 		return writeModelsJSON(out, errw, snap, models)
 	}
-	return writeModelsText(out, errw, snap, models, opts.All)
+	return writeModelsText(out, errw, snap, models, opts.All, cfg)
 }
 
 // modelLine is the JSON shape emitted by --json. It is deliberately flatter
@@ -169,13 +169,14 @@ func writeModelsJSON(out, errw io.Writer, snap CatalogSnapshot, models []catalog
 	return ExitOK
 }
 
-func writeModelsText(out, errw io.Writer, snap CatalogSnapshot, models []catalog.Model, all bool) int {
+func writeModelsText(out, errw io.Writer, snap CatalogSnapshot, models []catalog.Model, all bool, cfg *config.Config) int {
 	if len(models) == 0 {
 		fmt.Fprintln(errw, "no models in the catalog. Run `ishakat models --refresh` "+
 			"or check the [[provider]] entries in your configuration.")
 		for _, n := range snap.Catalog.Notes {
 			fmt.Fprintf(errw, "⚠ %s\n", n)
 		}
+		printDisabledProviders(errw, cfg)
 		return ExitError
 	}
 
@@ -230,7 +231,39 @@ func writeModelsText(out, errw io.Writer, snap CatalogSnapshot, models []catalog
 	for _, n := range snap.Catalog.Notes {
 		fmt.Fprintf(errw, "⚠ %s\n", n)
 	}
+	printDisabledProviders(errw, cfg)
 	return ExitOK
+}
+
+// printDisabledProviders is the fix for a confusion reported in practice: a
+// user adds NVIDIA, Gemini or Aerolink to their configuration, exports the
+// matching API key, refreshes the catalog — and still only sees OmniRoute.
+// The provider entry was there, but `enabled = false` (the value
+// config.example.toml ships for every provider except the first one, so a
+// copy-pasted block stays off until edited) filtered it out of
+// EnabledProviders silently, with nothing on screen pointing at the one line
+// that needed to change.
+//
+// This prints right after the model table/notes, in every text-mode run
+// (including the "0 models" early return), so the missing provider is never
+// more than one command away from the reason it is missing.
+func printDisabledProviders(errw io.Writer, cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	var disabled []string
+	for _, p := range cfg.Providers {
+		if !p.Enabled {
+			disabled = append(disabled, p.ID)
+		}
+	}
+	if len(disabled) == 0 {
+		return
+	}
+	fmt.Fprintf(errw, "○ %d provider(s) configured but disabled: %s\n",
+		len(disabled), strings.Join(disabled, ", "))
+	fmt.Fprintln(errw, "  set enabled = true under its [[provider]] block in "+
+		"your config.toml and run `ishakat models --refresh` again.")
 }
 
 // contextCol renders the window. An unknown one is "—" and not a guessed
