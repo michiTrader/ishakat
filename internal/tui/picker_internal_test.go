@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
+	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
 func TestCtrlPOpensThePickerFromModeChat(t *testing.T) {
@@ -180,4 +182,142 @@ func TestPickerRebuildClampsSelectionAfterTheListShrinks(t *testing.T) {
 	if len(p.rows) != 0 {
 		t.Errorf("expected no rows for a query matching nothing, got %v", p.rows)
 	}
+}
+
+// --- Regression: picker row layout must not waste rows on a mostly-blank
+// metadata line, and its window must never grow past the terminal's own
+// scroll — both reported directly against a live OmniRoute catalog of ~300
+// models, where they compounded into the same symptom: the cursor scrolled
+// off the top of the visible area with no way back into view. See
+// pickerMaxVisibleRows and renderPickerRow's own comments for the
+// mechanics; these tests exist so neither regresses silently.
+
+// TestRenderPickerRowFitsIDAndMetaOnOneLineWhenThereIsRoom is the fix for
+// "no aprovecha el espacio": at a normal terminal width, "provider/model"
+// plus its "200k · — · TV" metadata comfortably share one line, so they
+// must be drawn on one — not stacked across two, the wireframe's 40-column
+// layout that was being applied unconditionally at every width.
+func TestRenderPickerRowFitsIDAndMetaOnOneLineWhenThereIsRoom(t *testing.T) {
+	g := unicodeGlyphs
+	st := theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
+	row := pickerRow{
+		provider: "tllm",
+		cand: catalog.Candidate{Model: catalog.Model{
+			Ref:      "tllm/openrouter_grok_4",
+			Provider: "tllm",
+			Context:  200_000,
+			Caps:     catalog.Caps{Tools: true, Vision: true},
+		}},
+	}
+
+	lines := renderPickerRow(g, st, 80, row, false, false, false)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines at width 80, want exactly 1 (id and meta should share a line): %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "openrouter_grok_4") {
+		t.Errorf("the one line drawn must still contain the model id, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "200k") {
+		t.Errorf("the one line drawn must still contain the metadata, got %q", lines[0])
+	}
+}
+
+// TestRenderPickerRowFallsBackToTwoLinesWhenTooNarrow keeps §9.4's own
+// reason for the two-line layout intact: at a width too narrow to fit both
+// without truncating the id — the datum that actually has to be readable —
+// it must still fall back to stacking id above metadata, exactly as the
+// 40-column wireframe shows.
+func TestRenderPickerRowFallsBackToTwoLinesWhenTooNarrow(t *testing.T) {
+	g := unicodeGlyphs
+	st := theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
+	row := pickerRow{
+		provider: "tllm",
+		cand: catalog.Candidate{Model: catalog.Model{
+			Ref:      "tllm/openrouter_deepseek_r1_a_rather_long_wire_id",
+			Provider: "tllm",
+			Context:  200_000,
+			Caps:     catalog.Caps{Tools: true},
+		}},
+	}
+
+	lines := renderPickerRow(g, st, 40, row, false, false, false)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines at width 40, want 2 (id must not be truncated to make room for meta): %q", len(lines), lines)
+	}
+}
+
+// TestVisiblePickerRowsCapsAtTenAndFollowsTheCursor is the fix for "solo
+// veo los ultimos modelos": with a catalog of a few hundred models every
+// row used to be drawn unconditionally, so the rendered frame grew far
+// taller than any real terminal — moving the cursor into the first rows of
+// that frame scrolled them past the top of the *terminal's own* backscroll
+// before Bubble Tea ever got to redraw them back into view. Capping the
+// window at pickerMaxVisibleRows and keeping sel inside it (the same
+// windowing slashmenu.go's own dropdown already relies on) is what makes
+// the cursor visible at every position, not just near the end of the list.
+func TestVisiblePickerRowsCapsAtTenAndFollowsTheCursor(t *testing.T) {
+	rows := make([]pickerRow, 300)
+	for i := range rows {
+		rows[i] = pickerRow{provider: "tllm", cand: catalog.Candidate{}}
+	}
+
+	for _, sel := range []int{0, 1, 50, 149, 150, 298, 299} {
+		visible, offset := visiblePickerRows(rows, sel, pickerMaxVisibleRows)
+		if len(visible) != pickerMaxVisibleRows {
+			t.Fatalf("sel=%d: got %d visible rows, want %d", sel, len(visible), pickerMaxVisibleRows)
+		}
+		if sel < offset || sel >= offset+len(visible) {
+			t.Errorf("sel=%d fell outside the visible window [%d,%d) — the cursor would have scrolled off screen", sel, offset, offset+len(visible))
+		}
+	}
+}
+
+// TestRenderPickerNeverDrawsMoreThanTenRows is the same fix exercised
+// through the whole renderPicker path, on a catalog sized like the one
+// reported live (hundreds of OmniRoute models): the number of picker rows
+// actually written to the frame must stay capped regardless of how many
+// rows the catalog matched, or a terminal shorter than the frame is back to
+// losing the cursor off the top.
+func TestRenderPickerNeverDrawsMoreThanTenRows(t *testing.T) {
+	refs := make([]string, 300)
+	for i := range refs {
+		refs[i] = fmt.Sprintf("tllm/model_%03d", i)
+	}
+	root := rootWithCatalog(catalogWithModels(refs...))
+	root.lay = NewLayout(80, 24, 0, false, false)
+	root.styles = theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
+	root.picker = newPicker(root.cat, root.resolveOptions(), nil, "", "")
+	root.mode = ModePicker
+	root.picker.sel = len(root.picker.rows) - 1 // jump to the very last row
+
+	out := root.renderPicker()
+	drawn := countDrawnModelRows(out, refs)
+	if drawn > pickerMaxVisibleRows {
+		t.Errorf("renderPicker drew %d model rows, want at most %d", drawn, pickerMaxVisibleRows)
+	}
+	// renderPickerRow draws the wireID (the part of Ref after the provider's
+	// own slash, per catalog.SplitRef), never the full "provider/wireID"
+	// Ref — so the string to look for is "model_299", not "tllm/model_299".
+	_, lastWireID, _ := catalog.SplitRef(refs[len(refs)-1])
+	if !strings.Contains(out, lastWireID) {
+		t.Error("the selected (last) row must still be visible in the drawn window")
+	}
+}
+
+// countDrawnModelRows counts how many distinct model refs appear in out —
+// a simpler and more robust signal than counting newlines, since a model
+// row can legitimately be drawn as either one line (fix for the wasted
+// two-line layout) or two, depending on width.
+func countDrawnModelRows(out string, refs []string) int {
+	n := 0
+	for _, ref := range refs {
+		_, wireID, ok := catalog.SplitRef(ref)
+		if !ok {
+			wireID = ref
+		}
+		if strings.Contains(out, wireID) {
+			n++
+		}
+	}
+	return n
 }
