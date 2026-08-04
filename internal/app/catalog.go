@@ -230,7 +230,19 @@ func RefreshCatalog(ctx context.Context, cfg *config.Config, version string, pre
 				}
 				continue
 			}
-			targets = append(targets, fetch.Target{ID: p.ID, Provider: prov})
+
+			discoverTimeout := time.Duration(p.TimeoutS) * time.Second
+			if discoverTimeout <= 0 {
+				discoverTimeout = time.Duration(cfg.App.TimeoutS) * time.Second
+			}
+			if discoverTimeout <= 0 {
+				discoverTimeout = fetch.DefaultDiscoverTimeout
+			}
+			targets = append(targets, fetch.Target{
+				ID:       p.ID,
+				Provider: prov,
+				Timeout:  discoverTimeout,
+			})
 		}
 		if len(targets) > 0 {
 			results := fetch.Discover(ctx, targets, fetch.DefaultDiscoverTimeout)
