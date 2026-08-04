@@ -141,7 +141,7 @@ func validEvolveMode(m string) bool {
 
 func validKind(k string) bool {
 	switch strings.ToLower(k) {
-	case "openai", "anthropic", "gemini", "fake":
+	case "openai", "responses", "anthropic", "gemini", "fake":
 		return true
 	default:
 		return false

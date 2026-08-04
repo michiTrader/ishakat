@@ -18,6 +18,10 @@ import (
 // DeepSeek, Ollama o LM Studio sin tocar una línea de código.
 func init() {
 	provider.Register("openai", New)
+	// Aerolink and Codex-compatible gateways use the OpenAI Responses wire API
+	// rather than chat/completions, but share the same authentication, model
+	// discovery and transport settings.
+	provider.Register("responses", New)
 }
 
 // defaultBaseURL es el de OpenAI. En la práctica siempre viene de la
