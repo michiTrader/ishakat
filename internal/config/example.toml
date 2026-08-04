@@ -160,3 +160,44 @@ base_url = "https://api.anthropic.com/v1"
 api_key = "$ANTHROPIC_API_KEY"
 discover = true
 enabled = false
+
+# Direct NVIDIA access through its OpenAI-compatible API.
+# export NVIDIA_API_KEY=...
+[[provider]]
+id = "nvidia"
+name = "NVIDIA NIM"
+kind = "openai"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key = "$NVIDIA_API_KEY"
+discover = true
+enabled = false
+
+# Direct Gemini access through Google's OpenAI-compatible API.
+# export GEMINI_API_KEY=...
+[[provider]]
+id = "gemini-direct"
+name = "Google Gemini"
+kind = "openai"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key = "$GEMINI_API_KEY"
+discover = true
+enabled = false
+
+# Aerolink/Codex uses the OpenAI Responses wire API, not chat/completions.
+# Aerolink's public setup does not document GET /models, so declare the model
+# locally and keep discovery off.
+# export AEROLINK_API_KEY=...
+[[provider]]
+id = "aerolink"
+name = "Aerolink"
+kind = "responses"
+base_url = "https://cgapi.aerolink.lat"
+api_key = "$AEROLINK_API_KEY"
+discover = false
+enabled = false
+timeout_s = 180
+
+[[provider.model]]
+id = "gpt-5.6-sol"
+name = "GPT-5.6 Sol"
+tags = ["codex", "responses"]

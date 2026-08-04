@@ -17,11 +17,11 @@ import (
 // responsesRequest is the small common subset accepted by the OpenAI
 // Responses API and Codex-compatible gateways such as Aerolink.
 type responsesRequest struct {
-	Model           string         `json:"model"`
-	Input           []ChatMessage  `json:"input"`
-	Stream          bool           `json:"stream"`
-	Store           bool           `json:"store"`
-	MaxOutputTokens *int           `json:"max_output_tokens,omitempty"`
+	Model           string        `json:"model"`
+	Input           []ChatMessage `json:"input"`
+	Stream          bool          `json:"stream"`
+	Store           bool          `json:"store"`
+	MaxOutputTokens *int          `json:"max_output_tokens,omitempty"`
 }
 
 // responseUsage uses the field names from the Responses API.
@@ -42,8 +42,8 @@ type responseOutputItem struct {
 
 type responseDocument struct {
 	Output []responseOutputItem `json:"output,omitempty"`
-	Usage  *responseUsage        `json:"usage,omitempty"`
-	Error  *wireError            `json:"error,omitempty"`
+	Usage  *responseUsage       `json:"usage,omitempty"`
+	Error  *wireError           `json:"error,omitempty"`
 }
 
 type responseEvent struct {
