@@ -42,6 +42,10 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 		return nil, fmt.Errorf("openai: el turno no tiene ningún mensaje con contenido")
 	}
 
+	if p.set.Kind == "responses" || strings.EqualFold(p.set.WireAPI, "responses") {
+		return p.streamResponses(ctx, req, msgs, deg)
+	}
+
 	body, err := p.buildBody(req, msgs)
 	if err != nil {
 		return nil, err
