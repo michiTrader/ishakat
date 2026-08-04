@@ -36,6 +36,7 @@ SUBCOMMANDS
   provider add|list|remove configure API credentials without editing TOML
   doctor                   network, path and dialect diagnostics
   models [--json] [--refresh] [--all] [filter]   the model catalog
+  models clean             delete the cached catalog (catalog.json) on disk
   version                  prints the version
 
 FLAGS
@@ -71,6 +72,9 @@ func main() {
 			fmt.Println("ishakat", version)
 			return
 		case "models":
+			if len(os.Args) > 2 && os.Args[2] == "clean" {
+				os.Exit(cmdModelsClean(os.Args[3:]))
+			}
 			os.Exit(cmdModels(os.Args[2:]))
 		case "help":
 			fmt.Print(usage)
@@ -268,6 +272,54 @@ func cmdModels(args []string) int {
 		Filter:     *filter,
 		ConfigPath: *cfgPath,
 	})
+}
+
+// cmdModelsClean implements `ishakat models clean`: it deletes the on-disk
+// catalog cache (catalog.json and its models.dev digest sibling), which
+// lives under $XDG_CACHE_HOME/ishakat and therefore survives deleting
+// $XDG_CONFIG_HOME/ishakat (config.toml, credentials.toml) — a distinction
+// that is not obvious from the outside and has caused real confusion: a
+// provider removed from config.toml, or a gateway that stopped answering,
+// leaves its last successful discovery sitting in this cache and showing up
+// in `ishakat models` until either a fresh discovery overwrites it or the
+// file is deleted by hand. This subcommand is that "by hand" step, without
+// requiring the user to know the path.
+func cmdModelsClean(args []string) int {
+	fs := flag.NewFlagSet("models clean", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	cfgPath := fs.String("config", "", "alternate config.toml path")
+	if err := fs.Parse(args); err != nil {
+		return app.ExitUsage
+	}
+
+	path := *cfgPath
+	if path == "" {
+		path = xdg.ConfigFile()
+	}
+	cfg, err := config.Load(config.Options{UserPath: path})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ configuration error: %v\n", err)
+		return app.ExitError
+	}
+
+	res, err := app.CleanCatalogCache(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ could not clear the catalog cache: %v\n", err)
+		return app.ExitError
+	}
+
+	switch {
+	case res.CacheRemoved || res.DigestRemoved:
+		fmt.Printf("Removed %s\n", res.CachePath)
+		if res.DigestRemoved {
+			fmt.Printf("Removed %s\n", res.DigestPath)
+		}
+		fmt.Println("The catalog cache is empty; the next `ishakat models --refresh` " +
+			"starts from a clean discovery for every enabled provider.")
+	default:
+		fmt.Printf("Nothing to remove: %s did not exist.\n", res.CachePath)
+	}
+	return app.ExitOK
 }
 
 func cmdDoctor() int {

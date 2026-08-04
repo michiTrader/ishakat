@@ -104,32 +104,50 @@ func SaveProviderConnection(preset ProviderPreset, force bool) (overwrote bool, 
 // config.Load leaves a provider with enabled = true and no api_key, which
 // surfaces only as ErrNoAPIKey the next time something tries to use it,
 // instead of the provider simply not being offered.
+//
+// If the provider has no entry of its own in config.toml, an explicit
+// override ({id, enabled = false}) is appended rather than treating "no
+// entry to flip" as "nothing to do". This matters for providers declared
+// only in the embedded defaults.toml — omniroute is the one that ships that
+// way — because mergeProviders (merge.go) merges layers by id: a later
+// layer's {id, enabled = false} wins over the embedded default's
+// enabled = true for that same id while leaving every other field
+// (base_url, kind, timeout_s) untouched. Without this append, `provider
+// remove omniroute` silently did nothing on a fresh install — there was no
+// config.toml entry for omniroute to flip, so the embedded default kept
+// applying enabled = true unopposed on every subsequent config.Load, and
+// the provider kept showing up (with a "no resolved credential" warning)
+// even after being explicitly removed.
 func disableProviderConnection(providerID string) error {
 	path := xdg.ConfigFile()
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if err := xdg.EnsureDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err != nil {
+
+	raw := map[string]any{"schema": 1}
+	if existing, err := os.ReadFile(path); err == nil {
+		if _, err := toml.Decode(string(existing), &raw); err != nil {
+			return fmt.Errorf("read config file: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("read config file: %w", err)
 	}
 
-	raw := map[string]any{}
-	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return fmt.Errorf("read config file: %w", err)
-	}
 	providers := toTables(raw["provider"])
-	changed := false
+	found := false
 	for i := range providers {
 		id, _ := providers[i]["id"].(string)
 		if id == providerID {
 			providers[i]["enabled"] = false
-			changed = true
+			found = true
 			break
 		}
 	}
-	if !changed {
-		return nil
+	if !found {
+		providers = append(providers, map[string]any{
+			"id":      providerID,
+			"enabled": false,
+		})
 	}
 	raw["provider"] = providers
 
