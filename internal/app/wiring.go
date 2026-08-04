@@ -38,6 +38,7 @@ func Settings(cfg *config.Config, p config.Provider, version string) provider.Se
 		Name:           p.Name,
 		Kind:           strings.ToLower(p.Kind),
 		BaseURL:        p.BaseURL,
+		WireAPI:        p.WireAPI,
 		APIKey:         p.APIKey,
 		Headers:        p.Headers,
 		Params:         p.Params,
