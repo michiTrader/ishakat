@@ -169,6 +169,7 @@ type Settings struct {
 	Name    string
 	Kind    string
 	BaseURL string
+	WireAPI string
 
 	// APIKey ya expandida (config resuelve ${env:VAR}). Vacía significa
 	// "servicio local sin autenticación", como Ollama o LM Studio.
