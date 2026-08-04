@@ -208,6 +208,61 @@ func TestRemoveCredentialDeletesPrivateFileAndDisables(t *testing.T) {
 	}
 }
 
+// TestRemoveCredentialDisablesDefaultsOnlyProvider is the regression test
+// for the omniroute case reported in practice: `omniroute` never has a
+// config.toml entry of its own on a fresh install — it only exists via the
+// embedded defaults.toml (enabled = true there) — so RemoveCredential had
+// nothing to flip and silently did nothing, leaving the provider enabled
+// (and unauthenticated, warning on every run) even after being explicitly
+// removed. RemoveCredential must append an {id, enabled = false} override
+// to config.toml in this case, not just edit an existing entry.
+func TestRemoveCredentialDisablesDefaultsOnlyProvider(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// No config.toml is written at all: omniroute is reachable only through
+	// the embedded default, exactly like a fresh clone with no config file.
+	if _, err := os.Stat(xdg.ConfigFile()); !os.IsNotExist(err) {
+		t.Fatalf("config.toml unexpectedly exists before the test runs")
+	}
+
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	found := false
+	for _, p := range cfg.Providers {
+		if p.ID == "omniroute" {
+			found = true
+			if !p.Enabled {
+				t.Fatalf("omniroute enabled = false before RemoveCredential; " +
+					"the embedded default should start it enabled")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("omniroute not present before RemoveCredential; embedded defaults.toml changed?")
+	}
+
+	if err := config.RemoveCredential("omniroute"); err != nil {
+		t.Fatalf("RemoveCredential() error = %v", err)
+	}
+
+	if _, err := os.Stat(xdg.ConfigFile()); err != nil {
+		t.Fatalf("config.toml was not created by RemoveCredential: %v", err)
+	}
+
+	cfg, err = config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error after RemoveCredential = %v", err)
+	}
+	for _, p := range cfg.Providers {
+		if p.ID == "omniroute" && p.Enabled {
+			t.Fatalf("omniroute still enabled after RemoveCredential; " +
+				"disableProviderConnection should have appended an override")
+		}
+	}
+}
+
 func TestResolveProviderPresetAliases(t *testing.T) {
 	for _, name := range []string{"gemini", "google"} {
 		p, err := config.ResolveProviderPreset(name)

@@ -652,6 +652,58 @@ func TestBackgroundRefreshKeepsCachedModelsDespiteTheError(t *testing.T) {
 	mustGet(t, *got, "omniroute/openai/gpt-5")
 }
 
+// TestCleanCatalogCacheRemovesBothFiles is the regression test for a stale
+// discovery cache surviving a config wipe: catalog.json (and its
+// models.dev digest sibling) live under $XDG_CACHE_HOME, a different tree
+// from $XDG_CONFIG_HOME, so deleting the config directory never touches
+// them. CleanCatalogCache is the explicit "delete the cache" operation and
+// must remove both files when present.
+func TestCleanCatalogCacheRemovesBothFiles(t *testing.T) {
+	gw := newOmniRouteServer(t)
+	md := newModelsDevServer(t)
+	cfg := catalogCfg(t, gw.URL, md.URL)
+
+	// Populate both files the way a real refresh would.
+	if _, err := RefreshCatalog(context.Background(), cfg, "test", LoadCatalog(cfg)); err != nil {
+		t.Fatalf("RefreshCatalog: %v", err)
+	}
+	cachePath := CatalogCachePath(cfg)
+	digestPath := catalog.DigestPath(cachePath)
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("catalog cache was not written by RefreshCatalog: %v", err)
+	}
+	if _, err := os.Stat(digestPath); err != nil {
+		t.Fatalf("models.dev digest was not written by RefreshCatalog: %v", err)
+	}
+
+	res, err := CleanCatalogCache(cfg)
+	if err != nil {
+		t.Fatalf("CleanCatalogCache() error = %v", err)
+	}
+	if !res.CacheRemoved {
+		t.Error("CleanCatalogCache() did not report removing the catalog cache")
+	}
+	if !res.DigestRemoved {
+		t.Error("CleanCatalogCache() did not report removing the models.dev digest")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Errorf("catalog cache still exists after CleanCatalogCache, stat error = %v", err)
+	}
+	if _, err := os.Stat(digestPath); !os.IsNotExist(err) {
+		t.Errorf("models.dev digest still exists after CleanCatalogCache, stat error = %v", err)
+	}
+
+	// A second call on an already-clean cache must not error and must
+	// honestly report there was nothing to remove.
+	res, err = CleanCatalogCache(cfg)
+	if err != nil {
+		t.Fatalf("CleanCatalogCache() on an empty cache: error = %v", err)
+	}
+	if res.CacheRemoved || res.DigestRemoved {
+		t.Error("CleanCatalogCache() reported removing files on an already-clean cache")
+	}
+}
+
 // TestHumanAge is what the staleness strip actually prints.
 func TestHumanAge(t *testing.T) {
 	cases := []struct {
