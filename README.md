@@ -334,10 +334,22 @@ ishakat models               # offline, from cache or the embedded seed
 ishakat models --refresh     # goes to the network once
 ishakat models --json | jq .
 ishakat models sonnet        # substring filter
+ishakat models clean         # delete the on-disk catalog cache
 ```
 
 With no cache and no network you still get a usable list: an embedded seed
 catalog, marked as unverified.
+
+`ishakat models clean` deletes `catalog.json` and its models.dev digest
+sibling from `$XDG_CACHE_HOME/ishakat` (see [Which console](#which-console)
+for the exact path on your platform). This is the cache of the *last
+successful discovery* for every provider that has ever been enabled,
+independent from `config.toml`/`credentials.toml`
+(`$XDG_CONFIG_HOME/ishakat`): deleting the config directory alone does not
+clear it, so a provider you removed can keep showing its old model list
+until either a fresh `ishakat models --refresh` overwrites it or you run
+`models clean`. Safe to run any time; the next `--refresh` rebuilds it from
+scratch for whichever providers are enabled at that point.
 
 ## Troubleshooting
 
@@ -354,6 +366,63 @@ gateway is actually listening (`curl $BASE_URL/models`).
 **`⚠ seed catalog: nothing verified against the provider yet`**
 Expected on a first run with no cache and no reachable provider. Run
 `ishakat models --refresh` once a provider answers.
+
+**I only want a direct provider (e.g. Gemini), but `omniroute` keeps showing
+up with a "falta la clave de API"/"no resolved credential" warning even on a
+fresh clone, and I never configured it.**
+`omniroute` ships as an enabled provider in the embedded defaults so the CLI
+is never zero-provider out of the box; it is meant to be replaced, not
+tolerated. Two independent things need clearing, and each has its own fix:
+1. Run `ishakat provider remove omniroute` (works even with no
+   `config.toml` on disk at all — it creates one with an explicit
+   `enabled = false` override for that id). Then `ishakat provider add
+   gemini` (or whichever provider you actually use) as usual.
+2. If you still see stale discovered models after that (e.g. "139 model(s)"
+   that predate the removal), that is the on-disk catalog *cache*, not the
+   configuration — run `ishakat models clean` (see [above](#6-see-the-catalog)).
+   Deleting `~/.config/ishakat` alone never clears this cache, because it
+   lives under a different XDG directory (`~/.cache/ishakat` on Linux/macOS
+   by default; run `ishakat doctor` to see the exact path on your system).
+
+**Google Gemini free-tier verification fails with `HTTP 429` during
+`provider add`.**
+`provider add`'s verification step sends one real, minimal request to
+confirm the key works before saving anything. Google's free tier applies a
+requests-per-minute cap independent of any billing status; a `429` there
+means the *verification probe itself* got rate-limited, not that the key is
+invalid or that a paid plan is required — direct Gemini API access works
+fully on the free tier. If you hit this, wait a few seconds and retry, or
+save the key without the live check: `ishakat provider add gemini
+--no-verify` (the message printed on failure already says this). The key is
+stored either way; `--no-verify` only skips the one-token probe, it does
+not weaken how the key itself is used afterwards.
+
+**How do I point a provider at a different API path (e.g. Gemini's native
+`v1beta/models` instead of the OpenAI-compatible `v1beta/openai` ishakat's
+preset uses)?**
+`ishakat provider add <name>` writes the OpenAI-compatible endpoint because
+that is the one dialect this CLI currently speaks (see `provider add
+--help` and the `kind = "openai"` line `config check` prints for that
+entry) — pointing `base_url` at Gemini's native `v1beta/models` path would
+save without error but fail on the first real request, since the two APIs
+use different request/response shapes. To use a different base URL with the
+*same* OpenAI-compatible dialect (a proxy, a regional endpoint, a pinned API
+version), edit `base_url` directly under that provider's `[[provider]]`
+block in `config.toml` — `provider add` will not silently overwrite a
+`base_url` you already customized unless you pass `--force`.
+
+**If I both run `provider add` and export the matching `_API_KEY`
+environment variable, which one wins?**
+`credentials.toml` (written by `provider add`/`SaveCredential`) is loaded as
+the last configuration layer and merged field by field, so its literal
+`api_key` value replaces `config.toml`'s `api_key = "$GEMINI_API_KEY"`
+placeholder entirely, before that placeholder ever gets a chance to expand
+against the environment — see `internal/config/load.go`'s layer order and
+`mergeProviders` in `internal/config/merge.go`. In practice: once you have
+run `provider add`, the exported variable is completely ignored for that
+provider. `provider remove` deletes the stored entry, at which point
+`config.toml`'s `$GEMINI_API_KEY` placeholder (if it still has one) is
+expanded against the environment again on the next run.
 
 **The logo is unreadable / everything is blocks and question marks.**
 Run `ishakat doctor` and read the glyph sample it prints (see
