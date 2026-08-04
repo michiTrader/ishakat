@@ -152,10 +152,15 @@ api_key = "$OPENAI_API_KEY"
 discover = true
 enabled = false
 
+# Anthropic has no native adapter in this build (see internal/provider's
+# registry: only "openai" and "responses" kinds are registered). It is
+# reached through Anthropic's own OpenAI-compatible chat/completions shim,
+# verified directly against the live API. That shim does not support prompt
+# caching, extended thinking, or the full native tool-use format.
 [[provider]]
 id = "anthropic"
 name = "Anthropic"
-kind = "anthropic"
+kind = "openai"
 base_url = "https://api.anthropic.com/v1"
 api_key = "$ANTHROPIC_API_KEY"
 discover = true
