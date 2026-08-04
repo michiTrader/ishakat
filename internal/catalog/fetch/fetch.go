@@ -23,16 +23,21 @@ import (
 	"github.com/MichiTrader/ishakat/internal/provider"
 )
 
-// DefaultDiscoverTimeout is the per-provider budget of §4.4. Two seconds is
-// not generous by accident: a provider that cannot list its models in two
-// seconds is not going to make the refresh feel live, and the cached list is
-// already on screen.
-const DefaultDiscoverTimeout = 2 * time.Second
+// DefaultDiscoverTimeout is the fallback per-provider budget of §4.4. A
+// provider-specific timeout takes precedence when one is configured. Ten
+// seconds gives a local gateway enough time to assemble a large model list
+// without making a broken provider hold up the other results indefinitely.
+const DefaultDiscoverTimeout = 10 * time.Second
 
 // Target is one provider to interrogate.
 type Target struct {
 	ID       string
 	Provider provider.Provider
+
+	// Timeout overrides the discovery budget for this provider. This is kept on
+	// the target rather than the Provider interface because the timeout belongs
+	// to configuration, not to a service implementation.
+	Timeout time.Duration
 }
 
 // Result is what one provider answered.
