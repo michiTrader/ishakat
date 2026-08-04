@@ -82,6 +82,10 @@ func Discover(ctx context.Context, targets []Target, timeout time.Duration) []Re
 }
 
 func discoverOne(ctx context.Context, t Target, timeout time.Duration) Result {
+	if t.Timeout > 0 {
+		timeout = t.Timeout
+	}
+
 	start := time.Now()
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
