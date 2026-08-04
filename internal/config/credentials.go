@@ -17,16 +17,19 @@ import (
 type ProviderPreset struct {
 	ID          string
 	Name        string
+	Kind        string
+	BaseURL     string
+	Discover    bool
 	Environment string
 }
 
 var providerPresets = map[string]ProviderPreset{
-	"omniroute": {ID: "omniroute", Name: "OmniRoute", Environment: "OMNIROUTE_API_KEY"},
-	"openai":    {ID: "openai", Name: "OpenAI", Environment: "OPENAI_API_KEY"},
-	"anthropic": {ID: "anthropic", Name: "Anthropic", Environment: "ANTHROPIC_API_KEY"},
-	"nvidia":    {ID: "nvidia", Name: "NVIDIA NIM", Environment: "NVIDIA_API_KEY"},
-	"gemini":    {ID: "gemini-direct", Name: "Google Gemini", Environment: "GEMINI_API_KEY"},
-	"google":    {ID: "gemini-direct", Name: "Google Gemini", Environment: "GEMINI_API_KEY"},
+	"omniroute": {ID: "omniroute", Name: "OmniRoute", Kind: "openai", BaseURL: "http://localhost:20128/v1", Discover: true, Environment: "OMNIROUTE_API_KEY"},
+	"openai":    {ID: "openai", Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com/v1", Discover: true, Environment: "OPENAI_API_KEY"},
+	"anthropic": {ID: "anthropic", Name: "Anthropic", Kind: "anthropic", BaseURL: "https://api.anthropic.com/v1", Discover: true, Environment: "ANTHROPIC_API_KEY"},
+	"nvidia":    {ID: "nvidia", Name: "NVIDIA NIM", Kind: "openai", BaseURL: "https://integrate.api.nvidia.com/v1", Discover: true, Environment: "NVIDIA_API_KEY"},
+	"gemini":    {ID: "gemini-direct", Name: "Google Gemini", Kind: "openai", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Discover: true, Environment: "GEMINI_API_KEY"},
+	"google":    {ID: "gemini-direct", Name: "Google Gemini", Kind: "openai", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Discover: true, Environment: "GEMINI_API_KEY"},
 }
 
 // ProviderPresets returns the supported setup names in stable display order.
@@ -47,6 +50,15 @@ func ResolveProviderPreset(name string) (ProviderPreset, error) {
 		return p, nil
 	}
 	return ProviderPreset{}, fmt.Errorf("unknown provider %q (use omniroute, openai, anthropic, nvidia or gemini)", name)
+}
+
+func presetByID(id string) (ProviderPreset, bool) {
+	for _, preset := range providerPresets {
+		if preset.ID == id {
+			return preset, true
+		}
+	}
+	return ProviderPreset{}, false
 }
 
 // SaveCredential atomically stores a provider key in the private credentials file.
@@ -75,20 +87,32 @@ func SaveCredential(providerID, apiKey string) error {
 
 	providers := toTables(raw["provider"])
 	updated := false
+	preset, ok := presetByID(providerID)
+	if !ok {
+		return fmt.Errorf("unknown provider id %q", providerID)
+	}
 	for i := range providers {
 		id, _ := providers[i]["id"].(string)
 		if id == providerID {
 			providers[i]["api_key"] = apiKey
 			providers[i]["enabled"] = true
+			providers[i]["name"] = preset.Name
+			providers[i]["kind"] = preset.Kind
+			providers[i]["base_url"] = preset.BaseURL
+			providers[i]["discover"] = preset.Discover
 			updated = true
 			break
 		}
 	}
 	if !updated {
 		providers = append(providers, map[string]any{
-			"id":      providerID,
-			"api_key": apiKey,
-			"enabled": true,
+			"id":        providerID,
+			"name":      preset.Name,
+			"kind":      preset.Kind,
+			"base_url":  preset.BaseURL,
+			"api_key":   apiKey,
+			"discover":  preset.Discover,
+			"enabled":   true,
 		})
 	}
 	raw["provider"] = providers
