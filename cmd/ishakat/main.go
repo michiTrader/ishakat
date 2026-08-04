@@ -33,6 +33,7 @@ USAGE
 
 SUBCOMMANDS
   config init|path|check   creates, locates or validates the configuration
+  provider add|list|remove configure API credentials without editing TOML
   doctor                   network, path and dialect diagnostics
   models [--json] [--refresh] [--all] [filter]   the model catalog
   version                  prints the version
@@ -62,6 +63,8 @@ func main() {
 		switch os.Args[1] {
 		case "config":
 			os.Exit(cmdConfig(os.Args[2:]))
+		case "provider", "providers":
+			os.Exit(cmdProvider(os.Args[2:]))
 		case "doctor":
 			os.Exit(cmdDoctor())
 		case "version":

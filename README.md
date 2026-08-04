@@ -290,6 +290,31 @@ Validate:
 ishakat config check         # accepts the file or explains what is wrong
 ```
 
+To configure a provider without editing TOML, use the provider commands. With a
+terminal attached, `add` reads the key without echoing it:
+
+```sh
+ishakat provider add gemini
+ishakat provider add nvidia
+ishakat provider add anthropic
+ishakat provider list
+ishakat provider remove nvidia
+```
+
+For scripts and CI, pass the key through standard input rather than putting it
+in shell history or process arguments:
+
+```sh
+printf '%s\\n' "$GEMINI_API_KEY" | ishakat provider add gemini --api-key-stdin
+```
+
+The key is written atomically to `~/.config/ishakat/credentials.toml` with
+permissions `0600`. This private file is loaded as the final configuration
+layer, so adding a provider automatically supplies its credential and sets
+`enabled = true`; no manual `config.toml` edit is needed. The key is never
+printed by Ishakat. Run `ishakat models --refresh` after adding a provider to
+refresh its model catalog.
+
 ### 5. Talk to a model
 
 ```sh

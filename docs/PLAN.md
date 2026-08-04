@@ -2964,6 +2964,8 @@ The governing philosophy, in one sentence:
 > job repeated often enough to justify making one — not because it occurred to
 > it that it could have one.**
 
+| 2026-08-04 | Provider credential setup · pulled forward | Added `ishakat provider add|list|remove` so users can configure supported providers without editing TOML or manually toggling `enabled`. Keys are stored atomically in a separate owner-only `credentials.toml` layer (0600), loaded after project configuration, and never printed. Interactive setup hides input; scripts can use `--api-key-stdin`. Tests cover activation, permissions, aliases, and removal. Direct Anthropic remains subject to the currently implemented provider dialects; OmniRoute remains the compatible route when needed. |
+
 ---
 
 *Fin del documento.*

@@ -38,11 +38,12 @@ func CacheDir() string  { return filepath.Join(CacheHome(), App) }
 func DataDir() string   { return filepath.Join(DataHome(), App) }
 func StateDir() string  { return filepath.Join(StateHome(), App) }
 
-func ConfigFile() string  { return filepath.Join(ConfigDir(), "config.toml") }
-func ThemesDir() string   { return filepath.Join(ConfigDir(), "themes") }
-func CatalogFile() string { return filepath.Join(CacheDir(), "catalog.json") }
-func SessionsDir() string { return filepath.Join(DataDir(), "sessions") }
-func ErrorFile() string   { return filepath.Join(StateDir(), "last-error.json") }
+func ConfigFile() string      { return filepath.Join(ConfigDir(), "config.toml") }
+func CredentialsFile() string { return filepath.Join(ConfigDir(), "credentials.toml") }
+func ThemesDir() string       { return filepath.Join(ConfigDir(), "themes") }
+func CatalogFile() string     { return filepath.Join(CacheDir(), "catalog.json") }
+func SessionsDir() string     { return filepath.Join(DataDir(), "sessions") }
+func ErrorFile() string       { return filepath.Join(StateDir(), "last-error.json") }
 
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
