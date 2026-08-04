@@ -270,6 +270,7 @@ type Provider struct {
 	Name     string            `toml:"name"`
 	Kind     string            `toml:"kind"`
 	BaseURL  string            `toml:"base_url"`
+	WireAPI  string            `toml:"wire_api"`
 	APIKey   string            `toml:"api_key"`
 	Discover bool              `toml:"discover"`
 	Enabled  bool              `toml:"enabled"`
