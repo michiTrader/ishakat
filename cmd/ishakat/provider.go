@@ -101,7 +101,7 @@ func cmdProviderAdd(args []string) int {
 
 func readAPIKeyPrompt(provider string) (string, error) {
 	fmt.Fprintf(os.Stderr, "%s API key (input hidden): ", provider)
-	key, err := term.ReadPassword(int(os.Stdin.Fd()))
+	key, err := term.ReadPassword(os.Stdin.Fd())
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", fmt.Errorf("read API key: %w", err)
