@@ -15,6 +15,21 @@ func home() string {
 	return "."
 }
 
+// HomeResolved reports whether the OS could tell us the user's home
+// directory. When it can't (a stripped-down container, a CI runner with no
+// $HOME, a broken environment), home() above silently falls back to the
+// current working directory — harmless for anything that only *reads*
+// config, since the embedded defaults still apply, but never safe for code
+// about to *write* a secret: "." can be a cloned git repository, and a
+// credentials file dropped there has nothing stopping it from being
+// committed and pushed. Callers about to persist something sensitive must
+// check this first and refuse instead of silently writing into whatever
+// directory the process happened to start in.
+func HomeResolved() bool {
+	h, err := os.UserHomeDir()
+	return err == nil && h != ""
+}
+
 func base(env string, def ...string) string {
 	if v := os.Getenv(env); v != "" {
 		return v
