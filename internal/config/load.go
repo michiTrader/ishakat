@@ -42,6 +42,9 @@ func Load(o Options) (*Config, error) {
 	if !o.SkipProject {
 		layers = append(layers, o.ProjectPath)
 	}
+	// Credentials are a final user-owned layer: they override provider keys and
+	// activation without changing shareable project configuration.
+	layers = append(layers, xdg.CredentialsFile())
 	for _, p := range layers {
 		b, err := os.ReadFile(p)
 		if errors.Is(err, fs.ErrNotExist) {
