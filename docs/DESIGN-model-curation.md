@@ -438,7 +438,7 @@ verb belongs.
 1...5....0....5....0....5....0....5....0
  models · 26 shown · 15 hidden
  > gemini▊
- ────────────────────────────────────────
+ ───────────────────────────────────────
  GEMINI-DIRECT                        26
  ● gemini-3.1-pro-preview
      1.0M · $1.25/$10 · TV
@@ -446,7 +446,7 @@ verb belongs.
      1.0M · $0.30/$2.50 · TV
    gemini-flash-latest
      1.0M · $0.30/$2.50 · TV
- ────────────────────────────────────────
+ ───────────────────────────────────────
  + 15 hidden · ctrl+h show
  ↑↓ move  enter use  ←→ collapse
  ctrl+x hide  ctrl+f filter:all  esc
