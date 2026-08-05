@@ -397,14 +397,19 @@ lists apply, `keep` always wins. No override semantics — "did the provider blo
 replace or extend the global list?" is a question a config format should never make
 the user ask.
 
-#### 1.4 Health-based demotion, nearly free
+#### 1.4 Health-based demotion — half-built already, so finish it in the picker
 
-`Stat.FailStreak` already exists in the cache and **nothing reads it for display**.
-A model that has failed its last N calls — a 404 from a shim that lists a model it
-does not actually serve, which is a real Gemini-via-OpenAI-shim shape — demotes
-itself with `ReasonUnhealthy` and no user action. Ranking-only by default (bottom of
-the list, `⚠ failed 3×`), hiding only above a higher threshold, because a transient
-outage must not evict a model permanently.
+Reading the code corrected this item too. `applyStats` **already** promotes a
+failing model to `HealthCooling` at `FailStreak >= 3` (`merge.go:377`), and
+`ishakat models` **already** prints it as a `[cooling]` badge
+(`internal/app/models_cmd.go:320`). What is missing is that the *picker* ignores
+`Health` entirely — the one place a user actually chooses a model.
+
+So this is not new machinery: it is `ReasonUnhealthy` reusing an existing signal.
+A model that 404s from a shim which lists it but does not serve it — a real
+Gemini-via-OpenAI-shim shape — sorts to the bottom of the picker with `⚠ cooling`,
+with no user action. Ranking-only by default; hiding only above a higher threshold,
+because a transient outage must not evict a model permanently.
 
 **Closing criterion for layer 1.** A table test over a fixture containing the 41
 real Google ids asserts exactly which 15 are hidden and under which reason,
