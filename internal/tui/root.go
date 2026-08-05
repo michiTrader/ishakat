@@ -76,7 +76,35 @@ type Root struct {
 	// eng runs the turn (§7.3). Never nil: NewRoot pushes Options.Engine
 	// through engineOr, so a Root built without a provider still has
 	// something to call — it just fails the handshake with ErrNoProvider.
+	//
+	// eng is bound to whichever provider m.model pointed at the last time
+	// it (or engineFor) rebuilt it — see engineFor's own comment for why a
+	// Ref string alone is not enough to keep this in sync on every switch.
 	eng *engine.Engine
+
+	// engineFor rebuilds eng for a newly chosen model Ref, or reports why it
+	// could not (a disabled/undeclared provider, a bad API key expansion —
+	// the same failures NewProvider already names). nil is a supported
+	// value (most of this package's own tests, which never touch a real
+	// provider): every switch path falls back to reusing the current eng
+	// unchanged, exactly Step 10's original behaviour, so a Root built from
+	// a bare Options keeps working with no provider at all.
+	//
+	// This exists because switching models used to mean only replacing the
+	// two display strings, m.model and m.footer.Model: internal/app.Run
+	// builds exactly one *engine.Engine, over app.default_model's provider,
+	// at startup, and no path that changes m.model afterwards (/model, the
+	// picker, /resume, the confirm dialog's remedies, /compact's
+	// finishSwitchAfterCompact) ever touched eng. A user who picked, say,
+	// gemini-direct/... from the picker saw the footer say "gemini-direct"
+	// while every request kept going out over whatever HTTP client
+	// default_model had bound at boot — silently the wrong provider's
+	// base_url and credentials, not a missing one, which is why the
+	// handshake failure this produces reads as "no hay proveedor
+	// configurado" or a stray 4xx instead of a clean "wrong key" error.
+	// engineFor is the fix: every switch site now asks it for a fresh
+	// engine bound to the destination Ref before committing the switch.
+	engineFor EngineFactory
 
 	// buf is the landing zone for the turn currently in flight: the engine's
 	// goroutine writes into it, and streamTickMsg drains it on the repaint
@@ -273,6 +301,14 @@ type Options struct {
 	// not about the network — buildable from a bare Options.
 	Engine *engine.Engine
 
+	// EngineFor rebuilds Engine for a Ref the user just switched to — see
+	// Root.engineFor's own comment for the bug this closes (every switch
+	// path used to relabel the model without ever rebinding the HTTP
+	// client underneath it). nil is a supported value, same reasoning as
+	// Engine above: every test in this package, and any caller with
+	// nothing wired, keeps the pre-existing "relabel only" behaviour.
+	EngineFor EngineFactory
+
 	// Model is the model reference to show and to send, in §4.2's Ref form
 	// ("provider/model" or a bare alias as the user typed it), never the
 	// wire ID directly: Root resolves the Ref to its WireID (wireModel, in
@@ -426,6 +462,7 @@ func NewRoot(o Options) Root {
 		animMode:   anim.Mode,
 		cap:        o.Cap,
 		eng:        engineOr(o.Engine),
+		engineFor:  o.EngineFor,
 		model:      model,
 		system:     o.System,
 		commands:   slash.Default(),
@@ -748,8 +785,29 @@ func (m Root) applyModelChosen(ref string) (tea.Model, tea.Cmd) {
 	}
 
 	m.mode = ModeChat
+	return m.commitModelSwitch(ref)
+}
+
+// commitModelSwitch is applyModelChosen's, resolveConfirm's and
+// finishSwitchAfterCompact's shared tail: rebind m.eng to ref via
+// engineFor (see switchEngine's own comment on why this step exists at
+// all) before touching the two display fields, then leave the same §4.6
+// confirmation line either way. A rebuild failure — the destination
+// provider disabled, undeclared, or missing its API key, the exact set
+// NewProvider already names — still switches the label (hiding the
+// picker's own choice would be a worse surprise than showing it) but
+// replaces the confirmation line with a warning that says plainly the new
+// model has no working provider, so the very next turn's failure does not
+// arrive as a surprise "no hay proveedor configurado" with no context.
+func (m Root) commitModelSwitch(ref string) (tea.Model, tea.Cmd) {
+	next, err := switchEngine(m, ref)
+	m = next
 	m.model = ref
 	m.footer.Model = ref
+	if err != nil {
+		return m.slashNotice(m.lay.glyphs().warnMark + " cambiado a " + ref +
+			", pero no se pudo preparar ese proveedor: " + err.Error())
+	}
 	return m.slashNotice(confirmLine(m.lay.glyphs(), ref))
 }
 
@@ -780,8 +838,22 @@ func (m Root) applySessionChosen(id string) (tea.Model, tea.Cmd) {
 	m.conv = *conv
 	m.transcript = historyToTranscript(conv.Messages)
 	m.printedUpTo = 0
+
+	// Same rebind switchEngine's own comment describes: a resumed session
+	// can name a model from a provider that is no longer the one eng was
+	// last bound to, and conv.Model is the only place that ever recorded
+	// which one it was.
+	next, err := switchEngine(m, conv.Model)
+	m = next
 	m.model = conv.Model
 	m.footer.Model = conv.Model
+	if err != nil {
+		m.transcript = append(m.transcript, transcriptEntry{
+			role: "assistant", name: "ishakat", ts: time.Now(),
+			text: m.lay.glyphs().warnMark + " sesión reanudada con " + conv.Model +
+				", pero no se pudo preparar ese proveedor: " + err.Error(),
+		})
+	}
 	return m, clearScreenCmd
 }
 
@@ -1141,6 +1213,43 @@ const keepInline = 2
 //
 // It runs from Update, not View, because printing is an I/O side effect and
 // View has to stay pure — cursorFor and render both call it, and calling it
+// twice cannot be allowed to print anything twice.
+func (m Root) evictOverflow() (Root, tea.Cmd) {
+	if m.mode == ModeHelp || m.lay.Height <= 0 {
+		return m, nil
+	}
+	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
+	var cmds []tea.Cmd
+	for len(m.transcript)-m.printedUpTo > keepInline {
+		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
+			break
+		}
+		cmds = append(cmds, commitEntryCmd(g, width, m.transcript[m.printedUpTo]))
+		m.printedUpTo++
+	}
+	return m, tea.Batch(cmds...)
+}
+ runs from Update, not View, because printing is an I/O side effect and
+// View has to stay pure — cursorFor and render both call it, and calling it
+// twice cannot be allowed to print anything twice.
+func (m Root) evictOverflow() (Root, tea.Cmd) {
+	if m.mode == ModeHelp || m.lay.Height <= 0 {
+		return m, nil
+	}
+	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
+	var cmds []tea.Cmd
+	for len(m.transcript)-m.printedUpTo > keepInline {
+		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
+			break
+		}
+		cmds = append(cmds, commitEntryCmd(g, width, m.transcript[m.printedUpTo]))
+		m.printedUpTo++
+	}
+	return m, tea.Batch(cmds...)
+}
+ both call it, and calling it
 // twice cannot be allowed to print anything twice.
 func (m Root) evictOverflow() (Root, tea.Cmd) {
 	if m.mode == ModeHelp || m.lay.Height <= 0 {

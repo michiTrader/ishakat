@@ -168,6 +168,7 @@ func Run(version string, resume bool) int {
 		// key would have had no effect for the one host it names.
 		Termux:     xdg.IsTermux(),
 		Engine:     eng,
+		EngineFor:  NewEngineFactory(cfg, version),
 		Model:      model,
 		System:     system,
 		Catalog:    &snap.Catalog,

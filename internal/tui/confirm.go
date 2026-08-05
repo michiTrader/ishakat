@@ -152,9 +152,10 @@ func (m Root) resolveConfirm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.model = to.Ref
-	m.footer.Model = to.Ref
-	return m.slashNotice(confirmLine(m.lay.glyphs(), to.Ref))
+	// commitModelSwitch (root.go) is the same rebind applyModelChosen's own
+	// unconflicted path uses — see switchEngine's comment for why relabeling
+	// alone used to leave every subsequent turn on the wrong provider.
+	return m.commitModelSwitch(to.Ref)
 }
 
 // applyDropOldest discards the oldest messages until the conversation fits

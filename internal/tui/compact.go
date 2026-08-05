@@ -218,9 +218,10 @@ func (m Root) finishSwitchAfterCompact(switchTo string) (tea.Model, tea.Cmd) {
 	if switchTo == "" {
 		return m, nil
 	}
-	m.model = switchTo
-	m.footer.Model = switchTo
-	return m.slashNotice(confirmLine(m.lay.glyphs(), switchTo))
+	// commitModelSwitch (root.go) is the same rebind every other switch site
+	// uses — see switchEngine's comment for why relabeling alone used to
+	// leave every subsequent turn on the wrong provider.
+	return m.commitModelSwitch(switchTo)
 }
 
 // renderCompact draws the §9.8 "compactando" screen. Unlike renderLiveTurn

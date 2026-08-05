@@ -53,6 +53,44 @@ func engineOr(e *engine.Engine) *engine.Engine {
 	return engine.New(noProviderStreamer, 0)
 }
 
+// EngineFactory rebuilds an *engine.Engine bound to ref (a §4.2 Ref,
+// "provider/model") — internal/app.NewEngineFactory is the real
+// implementation, wrapping the exact same ResolveModel/FindProvider/
+// NewProvider/NewStreamer path BuildEngine already walks at startup, so a
+// model switch mid-session and the one at boot can never disagree about
+// what a given Ref resolves to. It lives here, as a function type rather
+// than an interface, purely so this package's own tests can hand Root a
+// three-line closure instead of a real provider — the same reason Streamer
+// itself (internal/engine) is a function type and not an interface.
+//
+// tui still does not know what a provider is (§6.1): this signature never
+// mentions internal/provider or internal/config, only the engine package
+// this file already imports.
+type EngineFactory func(ref string) (*engine.Engine, error)
+
+// switchEngine is every model-switch site's shared last step: ask
+// m.engineFor for a fresh Engine bound to ref, and only commit it into m.eng
+// if that succeeds. A nil engineFor (no factory wired — most of this
+// package's own tests) or an error (the destination provider is disabled,
+// undeclared, or missing its API key — the exact failures NewProvider
+// already names) leaves m.eng untouched and returns that reason instead of
+// silently pretending the switch bound a new client: the caller decides
+// whether that is worth surfacing as a warning, but the label (m.model) and
+// the transport (m.eng) must never disagree about which provider a turn
+// will actually reach, which is the bug this function exists to close (see
+// Root.eng's own comment).
+func switchEngine(m Root, ref string) (Root, error) {
+	if m.engineFor == nil {
+		return m, nil
+	}
+	eng, err := m.engineFor(ref)
+	if err != nil {
+		return m, err
+	}
+	m.eng = eng
+	return m, nil
+}
+
 // wireModel resolves ref — a §4.2 Ref ("provider/model", the form every
 // Root field that holds a model — m.model, m.compactModel — is documented
 // to carry, never the wire id) — to the WireID that actually belongs in the
