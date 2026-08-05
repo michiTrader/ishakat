@@ -418,3 +418,184 @@ including these named cases:
 - a record with no `temperature` key → **kept** (absent ≠ false)
 - `Keep` overrides every reason; `UseCount > 0` is never hidden
 - `Curate` is pure: same input, same output, no clock, no map-order dependence
+
+### Layer 2 — The interactive part: hide and keep from the picker
+
+This is the feature as literally requested: "some option so the user can remove
+them from the `/model` panel if they want".
+
+**One keystroke, in the place where the annoyance is felt.** Not a settings screen
+you have to remember exists — the moment you notice `veo-3.1-generate-preview` in
+your list is the moment you are looking at it in the picker, and that is where the
+verb belongs.
+
+```
+1...5....0....5....0....5....0....5....0
+ models · 26 shown · 15 hidden
+ > gemini▊
+ ────────────────────────────────────────
+ GEMINI-DIRECT                        26
+ ● gemini-3.1-pro-preview
+     1.0M · $1.25/$10 · TV
+ ▸ gemini-3.5-flash
+     1.0M · $0.30/$2.50 · TV
+   gemini-flash-latest
+     1.0M · $0.30/$2.50 · TV
+ ────────────────────────────────────────
+ + 15 hidden · ctrl+h show
+ ↑↓ move  enter use  ←→ collapse
+ ctrl+x hide  ctrl+f filter:all  esc
+```
+
+Three keys, and the third is the one that makes the first safe:
+
+| key | what it does |
+|---|---|
+| `ctrl+x` | hide the model under the cursor — appends its ref to the user's hide list, the row disappears, the counter increments |
+| `ctrl+h` | toggle "show hidden": hidden rows return, dimmed, each tagged with its reason (`deprecated`, `no text output`, `superseded`, `hidden by you`) |
+| `ctrl+x` on a hidden row | un-hide it — same key, reads as a toggle, and it is the escape hatch that makes pressing it a decision you cannot regret |
+
+**Why a chord and not a bare letter.** My first draft of this document said `x`,
+and reading the code before publishing proved that wrong. `updatePicker`'s
+`default` branch (`internal/tui/picker.go:658`) forwards **every** key with
+non-empty `Text` into the incremental search query:
+
+```go
+default:
+    if key.Text != "" {
+        m.picker = m.picker.typeText(key.Text)
+    }
+```
+
+A bare `x` is therefore already taken — by typing the letter x into the search
+box — and so is every other letter. Any new picker verb **must** be a chord, which
+is also why the existing filter cycle is `ctrl+f` and not `f`. Worth recording
+because it is exactly the kind of detail a design doc gets wrong and an
+implementation then quietly "fixes" by breaking incremental search.
+
+**Why `ctrl+h` and not another filter position.** `ctrl+f` cycles *what to include*
+(all → free → tools → vision → favorites, `cycleFilter`); hidden-visibility is an
+orthogonal axis — you may want "free models, including the hidden ones" — and
+folding it into the same cycle would make the two interfere. It is also the honesty
+guarantee of principle 2: the hidden ones are always one keystroke away, and the
+footer always says how many.
+
+Plus a one-line undo notice reusing `Root.slashNotice`, the same channel §4.6's
+confirmation line already rides, so `evictOverflow` treats it like any other line:
+
+```
+ hid gemini-embedding-2 · ctrl+z undo
+```
+
+#### 2.1 The slash-command surface
+
+For when the picker is not where you are, and for scripting:
+
+| command | what it does |
+|---|---|
+| `/model hide <query>` | resolve with §4.5's resolver, hide the winner (ambiguous → picker prefiltered, never a bare "not found") |
+| `/model keep <query>` | the inverse; also pins it against the automatic rules |
+| `/models hidden` | list what is hidden and why |
+| `/models reset` | drop every user hide, keep the automatic rules |
+
+And on the command line, because `ishakat models` is already the debugging window
+into the merge:
+
+```
+$ ishakat models --hidden               # only what is hidden, with reasons
+$ ishakat models --why gemini-embedding-2
+$ ishakat models --all                  # existing flag, now bypasses curation
+```
+
+`--why` is worth more than it looks. The failure mode of any filtering system is
+"where did my model go", and a question that answers itself is what keeps a
+mechanism from becoming a support burden:
+
+```
+$ ishakat models --why gemini-embedding-2
+gemini-direct/gemini-embedding-2
+  discovered   yes (provider lists it)
+  models.dev   matched (normalized)
+  hidden by    catalog.curate.chat_only
+  because      limit.output = 1 — cannot emit a conversational turn
+               (note: its output modality IS text, so the modality
+                check alone would not have caught it)
+  still usable yes — `/model gemini-direct/gemini-embedding-2` by exact ref
+  to show it   add "gemini-embedding-2" to [catalog.curate].keep
+```
+
+#### 2.2 Where the hide list is stored, and why not in `config.toml`
+
+**This is the design's one non-obvious decision, and it is load-bearing.**
+
+`config.toml` is hand-written and heavily commented: `config.example.toml` is 208
+lines of which 63 are comment lines explaining what each key does and what it
+costs. `BurntSushi/toml`'s encoder cannot preserve any of them — `SaveProviderConnection`
+(`internal/config/connection.go:41,85`) decodes into `map[string]any` and re-encodes
+from it, and comments are simply not representable in a `map[string]any`. The loss
+is structural, not a bug to be fixed.
+
+That loss is survivable in `SaveProviderConnection` because it happens once, from
+an explicit `ishakat provider add`. A key pressed casually inside a picker must not
+have the same consequence: hide four models, and the config file the README tells
+you to read has been stripped of the prose that made it readable.
+
+So interactive state goes to its own machine-written file:
+
+```
+$XDG_STATE_HOME/ishakat/curation.json   # written by the TUI, never hand-edited
+$XDG_CONFIG_HOME/ishakat/config.toml    # written by you, never by the TUI
+```
+
+```json
+{
+  "v": 1,
+  "hidden": [
+    { "ref": "gemini-direct/gemini-embedding-2",        "at": "2026-08-05T18:22:04Z" },
+    { "ref": "gemini-direct/veo-3.1-generate-preview",  "at": "..." }
+  ],
+  "kept": [
+    { "ref": "gemini-direct/gemini-3.1-flash-image",    "at": "..." }
+  ]
+}
+```
+
+`$XDG_STATE_HOME` is the right home and the precedent already exists:
+`xdg.StateHome()`, `xdg.StateDir()` and `xdg.ErrorFile()` are already there
+(`internal/xdg/xdg.go:49,54,61`), and `last-error.json` is the same category of
+thing — machine-written state, not configuration. Losing it is annoying, not
+destructive, and it must not end up in a dotfiles repo where a hide performed on
+one machine silently applies on another.
+
+Precedence, weakest to strongest, matching how every other layer in this program
+already resolves (`config.Load`'s layer order, §5.1):
+
+```
+built-in defaults
+  < config.toml [catalog.curate]
+    < [[provider]] hide/keep
+      < curation.json          ← what you just pressed always wins
+```
+
+`keep` beats `hide` at the same level, always. "Show me this one" is a more
+specific instruction than "hide that class of thing", and a user who explicitly
+kept a model and then watched it vanish because a rule also matched would be right
+to call it a bug.
+
+**Migration path for the power user:** `/models export-curation` prints the TOML
+block equivalent to the current state, to paste into `config.toml` by hand if they
+want it versioned and shared. The program suggests; it does not write.
+
+#### 2.3 Closing criteria for layer 2
+
+- Hiding from the picker persists across restarts and does **not** touch
+  `config.toml` — asserted byte-for-byte against a fixture, comments included.
+- A hidden model is still resolvable by exact ref, and `/model` says it is hidden
+  rather than failing (principle 4).
+- `ctrl+h` round-trips; `ctrl+x` on a hidden row un-hides it; neither key reaches
+  `typeText`, and typing `x` into the search box still filters.
+- The footer count equals `len(hidden)` for every rule combination in the table.
+- `curation.json` missing, empty, corrupt, or carrying a future `v` degrades to
+  "nothing hidden" plus a note — never a startup failure. Same contract as
+  `LoadCache` (`store.go`).
+- Every screen renders at 40 columns with no broken line.
