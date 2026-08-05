@@ -15,6 +15,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/tui"
 )
 
 // BuildEngine resolves modelText (the -m/--model flag, or "" to fall back to
@@ -42,12 +43,7 @@ func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Eng
 	if err != nil {
 		return nil, ModelRef{}, "", "", err
 	}
-	pc, ok := FindProvider(cfg, ref.Provider)
-	if !ok {
-		return nil, ModelRef{}, "", "", fmt.Errorf("provider %q for %q is not declared in %s",
-			ref.Provider, ref.Ref, configOrigin(cfg))
-	}
-	prov, err := NewProvider(cfg, pc, version)
+	prov, err := providerFor(cfg, ref, version)
 	if err != nil {
 		return nil, ModelRef{}, "", "", err
 	}
@@ -56,4 +52,49 @@ func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Eng
 
 	stream := NewStreamer(prov, provider.Caps{})
 	return engine.New(stream, cfg.App.MaxRetries), ref, system, warn, nil
+}
+
+// providerFor is BuildEngine's and NewEngineFactory's shared middle: once a
+// Ref is in hand (however it got resolved), find its provider and build the
+// adapter. Split out so both entry points fail with the exact same wording
+// for "provider not declared", instead of BuildEngine's own copy drifting
+// from a second one written for the factory.
+func providerFor(cfg *config.Config, ref ModelRef, version string) (provider.Provider, error) {
+	pc, ok := FindProvider(cfg, ref.Provider)
+	if !ok {
+		return nil, fmt.Errorf("provider %q for %q is not declared in %s",
+			ref.Provider, ref.Ref, configOrigin(cfg))
+	}
+	return NewProvider(cfg, pc, version)
+}
+
+// NewEngineFactory returns a tui.EngineFactory closed over cfg and version:
+// tui.Root calls it every time the user switches models (§4.2's Ref form,
+// "provider/model") so the *engine.Engine actually making requests is
+// rebuilt for the destination provider, not just the two display strings
+// (m.model, m.footer.Model) that used to be all a switch touched — see
+// tui.switchEngine's own comment for the bug this closes.
+//
+// It deliberately walks the exact same ResolveModel/FindProvider/NewProvider
+// path BuildEngine uses at startup (via providerFor above): a model switch
+// mid-session and the one at boot must resolve a given Ref identically, or
+// "works after a restart but not from the picker" becomes a second bug
+// layered on top of the first.
+//
+// maxRetries is bound to cfg.App.MaxRetries, same as BuildEngine's own
+// engine.New call — a mid-session switch has no reason to retry differently
+// than the session started.
+func NewEngineFactory(cfg *config.Config, version string) tui.EngineFactory {
+	return func(refText string) (*engine.Engine, error) {
+		ref, err := ResolveModel(cfg, refText)
+		if err != nil {
+			return nil, err
+		}
+		prov, err := providerFor(cfg, ref, version)
+		if err != nil {
+			return nil, err
+		}
+		stream := NewStreamer(prov, provider.Caps{})
+		return engine.New(stream, cfg.App.MaxRetries), nil
+	}
 }
