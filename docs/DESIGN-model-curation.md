@@ -219,3 +219,202 @@ otherwise-tempting design.
    list costs one line and loses nothing; a filter that guesses wrong loses a model.
 10. **Unknown is never a reason to hide.** A gateway model with no models.dev match
     has no modalities, no limits and no status. It is shown. Silence is not evidence.
+
+---
+
+## 3. What to build: four layers, cheapest first
+
+Each layer is independently shippable and independently useful. If only the first
+two ever get built, the reported problem is solved.
+
+```
+Layer 0  metadata      make hide_deprecated actually work            ~6 lines
+Layer 1  defaults      capability + supersede rules, on by default   no user action
+Layer 2  interactive   hide/keep from the picker, one keystroke      the asked-for feature
+Layer 3  settings      /config screen · per-provider screen          the second question
+```
+
+### Layer 0 — Read the metadata that already exists (bugfix)
+
+`internal/catalog/modelsdev.go`, in `wireMDModelRaw`:
+
+```go
+type wireMDModelRaw struct {
+    // …existing fields…
+    Status      string `json:"status"`      // "deprecated" | "beta" | "alpha" | ""
+    Temperature *bool  `json:"temperature"` // pointer: absent ≠ false (§1.2)
+}
+```
+
+carried into `MDModel` by `digest`, and in `applyModelsDev`:
+
+```go
+switch strings.ToLower(md.Status) {
+case "deprecated":    m.addTag(TagDeprecated)
+case "beta", "alpha": m.addTag(TagBeta)
+}
+```
+
+`Temperature` **must** be `*bool`. `false` is evidence of a non-sampled model
+(§1.2); *absent* is no evidence at all, and 6 of the records I sampled omit it
+entirely (`evroc/Qwen3-Embedding-8B` among them). A plain `bool` would silently
+convert "unknown" into "not a chat model" and violate principle 10.
+
+No new config, no new UI: `hide_deprecated = true` starts doing what its name has
+always promised, and `penaltyDeprecated` (`resolve.go`) starts pushing the survivors
+down the ranking instead of never firing.
+
+**Closing criterion:** a models.dev fixture whose record carries
+`"status": "deprecated"` produces a model tagged deprecated, and `Build` with
+`HideDeprecated: true` drops it — unless `UseCount > 0` or it came from config.
+A record with `"status": "beta"` gets `TagBeta`, which today no code path can
+produce. A record with no `temperature` key leaves `Temperature == nil`.
+
+### Layer 1 — Rules that are right for everybody, on by default
+
+New pure file `internal/catalog/curate.go`. One policy type, one function:
+
+```go
+// Rules is the curation policy: which models are worth showing. The zero value
+// shows everything, so a caller that does not care is never surprised.
+type Rules struct {
+    ChatOnly       bool     // drop models that cannot answer a chat turn (§1.2)
+    HideDeprecated bool     // moved here from BuildInput
+    HideSuperseded bool     // "X-preview" when "X" also exists
+    HideDatedTwins bool     // "X-20250219" when "X" also exists
+    HideLatest     bool     // "X-latest" aliases            (default OFF)
+    Hide           []string // user globs, e.g. "*-tts*", "veo-*"
+    Keep           []string // wins over every rule above, including ChatOnly
+}
+
+// Reason is why one model was dropped — carried so the interface can explain
+// itself and `models --why` has something to print.
+type Reason string
+
+const (
+    ReasonNonChatModality Reason = "no text output"      // §1.2 signal 1
+    ReasonNonChatLimit    Reason = "output limit 1"      // §1.2 signal 2
+    ReasonNonChatSampling Reason = "not a sampled model" // §1.2 signal 3
+    ReasonDeprecated      Reason = "deprecated"
+    ReasonSuperseded      Reason = "superseded"
+    ReasonDatedTwin       Reason = "dated snapshot"
+    ReasonLatestAlias     Reason = "latest alias"
+    ReasonUserGlob        Reason = "hidden by you"
+    ReasonUnhealthy       Reason = "failing"
+)
+
+type Hidden struct {
+    Model  Model
+    Reason Reason
+}
+
+// Curate partitions a snapshot. It never mutates cat and never deletes from the
+// cache: the second return value is the complete audit trail.
+func Curate(cat Catalog, r Rules) (kept Catalog, hidden []Hidden)
+```
+
+#### 1.1 `ChatOnly`, as corrected by the measurement
+
+Three signals, OR'd, each reporting its own reason (§1.2 proved no single one is
+sufficient):
+
+```go
+func nonChat(m Model) (Reason, bool) {
+    // 1. Declared output modalities that do not include text at all.
+    //    Empty modalities = unknown = keep (principle 10).
+    if len(m.Modalities) > 0 && !slices.Contains(m.Modalities, "text") {
+        return ReasonNonChatModality, true
+    }
+    // 2. An output limit of exactly 1 token cannot carry a turn. Zero is NOT
+    //    evidence: Poe reports missing limits as 0 (§1.2), so 0 means unknown.
+    if m.MaxOutput == 1 {
+        return ReasonNonChatLimit, true
+    }
+    // 3. No sampling, no tools, no structured output: a scorer, not a generator.
+    //    Requires Temperature to be explicitly false, never merely absent.
+    if m.Temperature != nil && !*m.Temperature &&
+        !m.Caps.Tools && !m.Caps.JSONSchema {
+        return ReasonNonChatSampling, true
+    }
+    return "", false
+}
+```
+
+This removes all 9 non-conversational Gemini entries, OpenAI's 3 embeddings and 5
+image endpoints, and NVIDIA's 24 embed/rerank/guard/diffusion models — with no list
+to maintain when Google ships `lyria-4`.
+
+#### 1.2 The relational rules, which must not be name-shape rules
+
+§1.3 measured why: 22 of Google's 41 ids contain `preview` and only 3 are
+redundant. So both duplicate rules compare against the ids actually present in the
+same provider, and hide nothing when the counterpart is absent.
+
+```go
+// HideSuperseded: hide "X-preview" only if "X" exists in the SAME provider.
+// gemini-3.1-flash-image-preview → hidden (gemini-3.1-flash-image exists)
+// gemini-3.1-pro-preview         → KEPT   (no gemini-3.1-pro; it is the only one)
+//
+// HideDatedTwins: reuse NormalizeID (modelsdev.go:311 already strips date
+// suffixes via dateSuffix) and hide "X-<date>" only if undated "X" exists.
+// claude-sonnet-4-5-20250929 → hidden (claude-sonnet-4-5 exists)
+// deep-research-preview-04-2026 → KEPT  (no undated counterpart)
+```
+
+`HideLatest` is **off by default**. `gemini-flash-latest` is what some users
+deliberately want — a moving target that never needs a config edit. Offered, not
+chosen for them.
+
+#### 1.3 Defaults, and the per-provider policy the report asked for
+
+`internal/config/defaults.toml`:
+
+```toml
+[catalog.curate]
+chat_only        = true    # models that cannot answer a chat turn are hidden
+hide_deprecated  = true    # moved from [catalog]; kept as an alias one release
+hide_superseded  = true    # "-preview" when the GA id also exists
+hide_dated_twins = true    # "-20250219" when the undated id also exists
+hide_latest      = false   # "-latest" aliases are a legitimate choice
+hide             = []      # your own globs
+keep             = []      # wins over everything above
+```
+
+§1.3 is the argument for per-provider rules: Google duplicates by `-preview`,
+Anthropic and OpenAI by date stamp, NVIDIA not at all. One global setting cannot
+be right for all three at once.
+
+```toml
+[[provider]]
+id   = "gemini-direct"
+# …
+hide = ["*-tts*", "veo-*", "lyria-*"]
+keep = ["gemini-3.1-flash-image"]   # yes, I do want this one
+```
+
+Provider rules **merge** with the global ones: both `hide` lists apply, both `keep`
+lists apply, `keep` always wins. No override semantics — "did the provider block
+replace or extend the global list?" is a question a config format should never make
+the user ask.
+
+#### 1.4 Health-based demotion, nearly free
+
+`Stat.FailStreak` already exists in the cache and **nothing reads it for display**.
+A model that has failed its last N calls — a 404 from a shim that lists a model it
+does not actually serve, which is a real Gemini-via-OpenAI-shim shape — demotes
+itself with `ReasonUnhealthy` and no user action. Ranking-only by default (bottom of
+the list, `⚠ failed 3×`), hiding only above a higher threshold, because a transient
+outage must not evict a model permanently.
+
+**Closing criterion for layer 1.** A table test over a fixture containing the 41
+real Google ids asserts exactly which 15 are hidden and under which reason,
+including these named cases:
+
+- `gemini-embedding-2` → `ReasonNonChatLimit` (**not** kept, despite `output: [text]`)
+- `gemini-3.1-pro-preview` → **kept** (contains `preview`, has no GA counterpart)
+- `gemini-3.1-flash-image-preview` → `ReasonSuperseded` (GA twin exists)
+- `veo-3.1-generate-preview` → `ReasonNonChatModality`
+- a record with `limit.output == 0` → **kept** (0 is unknown, not degenerate)
+- a record with no `temperature` key → **kept** (absent ≠ false)
+- `Keep` overrides every reason; `UseCount > 0` is never hidden
+- `Curate` is pure: same input, same output, no clock, no map-order dependence
