@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -340,6 +341,64 @@ func BackgroundRefresh(ctx context.Context, cfg *config.Config, version string, 
 		return nil
 	}
 	return &snap.Catalog
+}
+
+// CleanResult reports what CleanCatalogCache actually found and removed, so
+// the CLI can print an honest summary instead of a bare "done" that leaves
+// the user guessing whether there was anything to delete in the first
+// place.
+type CleanResult struct {
+	CachePath     string
+	DigestPath    string
+	CacheRemoved  bool
+	DigestRemoved bool
+}
+
+// CleanCatalogCache deletes the on-disk catalog cache (catalog.json) and its
+// sibling models.dev digest (catalog-modelsdev.json), the two files
+// LoadCatalog/RefreshCatalog read and write (see store.go and
+// modelsdev.go's DigestPath). Neither file lives under $XDG_CONFIG_HOME:
+// they are cache data ($XDG_CACHE_HOME/ishakat by default), so deleting
+// ~/.config/ishakat — the fix for a bad config.toml — does not touch them
+// and stale discovery results (a provider that used to answer, a model list
+// from months ago) survive a config wipe unless this is called explicitly.
+//
+// Missing files are not an error: "already clean" and "just cleaned" should
+// both report success, since the caller only cares that the cache is empty
+// afterwards.
+func CleanCatalogCache(cfg *config.Config) (CleanResult, error) {
+	cachePath := CatalogCachePath(cfg)
+	digestPath := catalog.DigestPath(cachePath)
+
+	res := CleanResult{CachePath: cachePath, DigestPath: digestPath}
+
+	removed, err := removeIfExists(cachePath)
+	if err != nil {
+		return res, fmt.Errorf("remove %s: %w", cachePath, err)
+	}
+	res.CacheRemoved = removed
+
+	if digestPath != "" {
+		removed, err = removeIfExists(digestPath)
+		if err != nil {
+			return res, fmt.Errorf("remove %s: %w", digestPath, err)
+		}
+		res.DigestRemoved = removed
+	}
+	return res, nil
+}
+
+func removeIfExists(path string) (bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return false, nil
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RecordModelUse bumps the local statistics after a turn. Best effort by
