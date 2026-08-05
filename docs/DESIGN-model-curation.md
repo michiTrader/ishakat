@@ -599,3 +599,136 @@ want it versioned and shared. The program suggests; it does not write.
   "nothing hidden" plus a note — never a startup failure. Same contract as
   `LoadCache` (`store.go`).
 - Every screen renders at 40 columns with no broken line.
+
+### Layer 3 — The settings surface: `/config`, and what a settings menu should *not* be
+
+The second half of the report asks for "some agent configuration option, or a
+settings menu, or per-provider configuration". Here is the recommendation, and it
+includes one deliberate refusal.
+
+**`/config` already exists as a table row with `KindUnimplemented`**
+(`internal/slash/slash.go:112`, described as "config efectiva"), and §13 lists it as
+owed by step 13 with a defined job: show the effective config with secrets
+redacted. Build **that**, read-only, first:
+
+```
+1...5....0....5....0....5....0....5....0
+ ── config · effective ────────────────
+ layers   defaults + config.toml
+          + credentials.toml
+ model    gemini-direct/gemini-3.5-flash
+ theme    ascua
+ stream   on
+ ── catalog ───────────────────────────
+ chat_only        true
+ hide_deprecated  true
+ hide_superseded  true
+ hide             2 globs             ▸
+ curated          26 shown · 15 hidden
+ ── providers ─────────────────────────
+ ● gemini-direct        26/41  key ✓  ▸
+ ○ openai                   —  key ✗  ▸
+ ── tools ─────────────────────────────
+ enabled  true      write  ask
+ shell    ask       evolve suggest
+ ──────────────────────────────────────
+ enter drill in · e edit · esc back
+```
+
+Four things this screen does that a flat key-value dump does not:
+
+1. **It says which layer a value came from.** The most common config complaint in
+   any program with layered configuration is "I set it and it didn't take".
+   `Config.Files` and `Config.EnvUsed` (`internal/config/schema.go:19,21`) already
+   carry exactly this information and **nothing currently displays it**.
+2. **It shows effective values, not the file.** `cat config.toml` is not a feature;
+   the merge of defaults + user + project + credentials is.
+3. **It redacts.** `api_key` renders as `key ✓` / `key ✗` — never a prefix, never a
+   length. §13 requires it, and it is the reason this screen cannot be a raw dump.
+4. **It shows the curation result inline** — `26 shown · 15 hidden` — which is what
+   connects this screen back to the reported problem.
+
+#### 3.1 The refusal: no general-purpose settings editor
+
+**Do not build a screen that can edit every key in `config.toml`.** Recommended
+against, with reasons:
+
+- The schema is **123 `toml`-tagged keys across 17 structs** (counted in
+  `internal/config/schema.go`), several of them security-relevant:
+  `tools.permissions.shell`, `shell_deny`, `write_deny`, `egress`. A TUI toggle for
+  those is a *worse* interface than a text file whose comments explain the
+  consequences — and §19.8's whole threat model rests on those values being
+  deliberately set, not flipped by someone browsing a menu.
+- Round-tripping the file destroys the comments (§2.2, structural). The comments are
+  the documentation. A settings menu that silently deletes the documentation is a
+  net loss.
+- It is a maintenance tax forever: every new key needs a widget, a validator and a
+  40-column layout, or the menu becomes a lie by omission.
+
+**Instead: `e` on a value opens `$EDITOR` at the right line, then re-validates.**
+Zero widgets, zero schema duplication, and the user lands in the file *with* the
+comments, which is where the real explanation lives. `config.Validate` already
+produces good messages; on a failed re-validate, offer to reopen rather than saving
+something broken.
+
+**Then narrow, purpose-built editors only where the value is a list of nouns the
+user cannot be expected to type from memory:** models (layer 2's picker), themes
+(`ctrl+t`, phase 3), providers (§3.2), favorites. Those four are the whole set.
+
+The distinguishing test: *is the value a choice from a list the program already
+knows, or a number/mode/path only the user knows?* Build a picker for the first;
+use `$EDITOR` for the second.
+
+#### 3.2 Per-provider settings, which is where the report started
+
+The report's own framing — "when I add the Gemini API, a pile of models loads" — is
+provider-scoped, and §1.3 measured why per-provider policy is *necessary* rather
+than merely nice: Google duplicates by `-preview`, Anthropic and OpenAI by date
+stamp, NVIDIA by neither. Reached with `enter` on a provider row in `/config`, or
+`/provider gemini-direct`:
+
+```
+1...5....0....5....0....5....0....5....0
+ ── gemini-direct ─────────────────────
+ name      Google Gemini
+ kind      openai (compat shim)
+ base_url  …googleapis.com/v1beta/openai
+ key       ✓ verified 2026-08-05
+ discover  on
+ ── models ────────────────────────────
+ discovered  41
+ shown       26
+ hidden      15
+   no text output          7
+   output limit 1          2
+   deprecated              4
+   superseded              2
+ ── actions ───────────────────────────
+ r  re-verify key
+ d  re-discover models
+ h  edit hide globs
+ c  clear cached models
+ !  disable provider
+ ──────────────────────────────────────
+ esc back
+```
+
+This is where "15 hidden" becomes explorable rather than mysterious, and it turns
+four things that today require knowing a CLI incantation — `provider add` to
+re-verify, `models --refresh` to re-discover, `models clean` to clear cache,
+hand-editing `enabled = false` to disable — into one place. All four commands
+already exist; this is a front door, not new machinery.
+
+**`ishakat provider add gemini` should print the curation summary on success.** The
+best moment to tell someone about noise control is the moment the noise would
+otherwise appear:
+
+```
+✓ Google Gemini verified and enabled
+  discovered 41 models · showing 26
+  15 hidden: 9 not conversational (embeddings, TTS, video),
+             4 deprecated, 2 superseded by a newer id
+  see them with `ishakat models --hidden`
+```
+
+That is the entire reported problem, answered before it is asked.
