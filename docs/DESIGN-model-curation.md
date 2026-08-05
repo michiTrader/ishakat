@@ -737,3 +737,139 @@ otherwise appear:
 ```
 
 That is the entire reported problem, answered before it is asked.
+
+---
+
+## 4. The other features worth building, ranked by value per unit of work
+
+The report's last question — "what other functionality can be built, in an
+intelligent, functional, comfortable way?" — answered with the same discipline:
+each item judged on what it costs, what already exists to build it on, and what it
+lets a user stop doing by hand.
+
+### 4.1 Build these — high value, foundations already present
+
+**1 · Model roles instead of one active model.** The strongest idea in this list.
+`[app]` already has three hardcoded names for the same concept —
+`default_model`, `compact_model`, `fallback_model` (`schema.go:25-27`,
+`defaults.toml:4-6`). Generalize to named roles:
+
+```toml
+[roles]
+chat    = "gemini-direct/gemini-3.5-flash"
+coding  = "omniroute/anthropic/claude-sonnet-4-5"
+cheap   = "gemini-direct/gemini-3.1-flash-lite"
+compact = "cheap"                              # roles may point at roles
+vision  = "gemini-direct/gemini-3.1-pro-preview"
+```
+
+`/model @coding` switches; `ctrl+o` rotates roles. That key is already bound
+(`keys.go:32`, `ModelCycle`) and its help text already promises "rotar favoritos"
+(`view.go:209`) — a role is just a favorite with a job. It composes with everything
+in this document: curation shrinks the list to models actually worth assigning a
+role to, and `CheckSwap` (`internal/engine/hotswap.go:142`) already validates every
+switch. Cost: small — a config section plus a resolver stage that already has an
+alias mechanism to imitate.
+
+**2 · Auto-role selection, opt-in.** Once roles exist: a turn carrying an image
+needs `vision`; `/compact` needs `compact`; a turn that would exceed the active
+model's window could use the role whose window fits. `CheckSwap` already computes
+that last conflict (`ContextTooSmall`, `hotswap.go:150`) — this is *acting* on what
+it returns instead of only reporting it. Ship behind `[app] auto_role = false`: a
+program that silently changes which model answers is a program you cannot reason
+about, so it must be a choice.
+
+**3 · Cost and latency ceilings as curation rules.** `Cost` and `P50Latency` are in
+the record and only ever rendered. `[catalog.curate] max_cost_out = 20.0` hides
+models above a price you would never knowingly pay, carrying its own reason. One
+predicate, reusing all of layer 1's machinery.
+
+**4 · `ishakat models --diff`.** Discovery already caches per provider with a
+timestamp, so comparing the previous snapshot against the new one is nearly free.
+"What changed since last week" (3 new, 1 newly deprecated, 2 gone) is exactly what a
+user of a fast-moving provider wants, and it makes deprecation **visible at the
+moment it happens** instead of being noticed months later as accumulated noise. This
+is the long-term answer to the reported problem.
+
+**5 · Surface `Health` in the picker** (§1.4). Already computed, already displayed by
+`ishakat models`, ignored by the one screen where it would change a decision.
+
+### 4.2 Build these later — good, but they need something else first
+
+**6 · A "recent" section in `/model`.** Straight from `Stat.LastUsed`, which
+`resolve.go:577` already reads for recency scoring. Cheap and pleasant — but it
+matters much less once curation cuts 41 rows to 26, which is why it is here and not
+above.
+
+**7 · Provider-level regex filters** instead of globs. Strictly more powerful,
+strictly worse to explain and to render at 40 columns. Only if globs demonstrably
+fail in practice.
+
+**8 · A sync path for `curation.json`.** Real once someone runs ishakat on a phone
+and a laptop. Deliberately out of scope until then (it is state, not config — §2.2).
+
+### 4.3 Do not build these
+
+**9 · A general settings editor.** §3.1, with reasons: 123 keys, security-relevant
+values, and structural comment loss.
+
+**10 · Auto-hiding by name pattern as a shipped default** (`*preview*`, `*exp*`).
+Measured in §1.3: 22 of Google's 41 ids contain `preview` and only 3 are redundant,
+so this would hide `gemini-3.1-pro-preview` — among the most wanted models Google
+offers today. Name shape is a bad proxy for quality, and a default that hides a good
+model is far worse than a default that shows a bad one.
+
+**11 · Pruning the cache to "remove" models.** §1.5. Existence comes from discovery;
+the next refresh undoes it, and meanwhile a saved session that named the model
+breaks.
+
+**12 · Fetching each provider's deprecation schedule from its own docs.** Every
+provider publishes it differently, in prose, and it would put network I/O on a path
+that must not have it (principle 6). models.dev's `status` field is the ecosystem's
+answer to this problem and it is **already in the payload we download** (§1.1).
+
+---
+
+## 5. Recommended order, and what each step is worth
+
+| # | step | effort | what the user notices |
+|---|---|---|---|
+| 0 | parse models.dev `status` → `TagDeprecated`/`TagBeta` | ~6 lines | deprecated models disappear, because `hide_deprecated` finally works |
+| 1 | `catalog.Curate` + `[catalog.curate]` defaults + `--hidden`/`--why` | small | Gemini 41 → 26 rows, OpenAI 47 → 28, nothing typed |
+| 2 | `ctrl+x` / `ctrl+h` in the picker + `curation.json` + `/model hide\|keep` | medium | "I can remove the ones I don't want" — the actual request |
+| 3 | `/config` read-only with layers + provider drill-in + `e` → `$EDITOR` | medium | one place to see what is set, where it came from, what got hidden |
+| 4 | roles + `ctrl+o` rotation | medium | switching by job instead of by model id |
+
+Steps 0 and 1 alone resolve the report. Step 2 is what was literally asked for.
+Steps 3 and 4 answer "what else", and 4 is the one that changes how the product
+*feels* rather than how tidy it looks.
+
+**Where this belongs in the plan.** Steps 0–2 are Phase 2 finishing work — layer 0
+is a bugfix against a shipped default and the picker already exists. Step 3
+discharges step 13's existing `/config` obligation (today `KindUnimplemented`,
+`slash.go:112`). Step 4 is the only genuinely new contract and should wait for a
+§16 decision, because turning `[app]`'s three model keys into aliases of a role
+table is a one-way door.
+
+---
+
+## 6. Open questions for the user
+
+1. **`chat_only = true` by default?** It hides 9 of Gemini's 41 entries and 24 of
+   NVIDIA's 98, with no ceremony. I am confident it is right — but it is the one
+   default that hides *current, working* models, so it deserves an explicit yes.
+2. **`ctrl+x` as the hide key.** It must be a chord: `updatePicker`'s default branch
+   sends every printable key into incremental search (§ layer 2), so bare letters
+   are unavailable. `ctrl+x` reads as "cut", which is closer to the truth than
+   "delete". Confirm, or name another chord.
+3. **Roles vs. favorites.** Roles largely subsume `[favorites]` (`schema.go:264`).
+   Keep both (roles for jobs, favorites for `ctrl+o` rotation), or migrate favorites
+   into roles and have one concept? Migrating is cleaner and breaks a config key.
+4. **Should `keep` also pin against `hide_deprecated`?** As designed, yes: `keep`
+   wins over every rule. The alternative — deprecation is non-negotiable — is
+   defensible, but it would surprise someone who explicitly asked for that model.
+5. **`limit.output == 1` as a hide signal.** It is what catches
+   `gemini-embedding-2`, whose modalities claim `text` output (§1.2). I treat `0` as
+   unknown because Poe reports missing limits as `0`. If a real chat model ever ships
+   with `limit.output == 1`, this rule hides it — I judge that acceptable, since such
+   a model could not answer anything anyway.
