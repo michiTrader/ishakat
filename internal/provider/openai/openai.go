@@ -212,12 +212,12 @@ func (p *Provider) httpError(resp *http.Response) *provider.Error {
 		e.Message = http.StatusText(resp.StatusCode)
 	}
 
-	// Un 401 con clave puesta y un 401 sin clave son problemas distintos y el
-	// mensaje tiene que decirlo, porque es el error más frecuente al
-	// configurar el programa por primera vez.
+	// A 401 with a key set and a 401 with no key are different problems,
+	// and the message has to say so, because this is the most common error
+	// when configuring the program for the first time.
 	if resp.StatusCode == http.StatusUnauthorized && p.set.APIKey == "" {
 		e.Err = provider.ErrNoAPIKey
-		e.Message = "el servicio pide autenticación y no hay api_key configurada para " + p.set.ID
+		e.Message = "the service requires authentication and no api_key is configured for " + p.set.ID
 	}
 	return e
 }

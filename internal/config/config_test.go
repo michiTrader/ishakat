@@ -49,7 +49,7 @@ func TestLoadExampleNoWarnings(t *testing.T) {
 // 0644 (SaveProviderConnection's own comment: "config.toml is not a secrets
 // file"), and checkPerms used to run against every loaded layer including
 // this one — so the very next `config check` (or any config.Load) warned
-// "permisos inseguros 0644 (se recomienda 0600)" about a mode the program
+// "insecure permissions 0644 (0600 recommended)" about a mode the program
 // itself had just chosen on purpose, recommending a mode
 // (SaveProviderConnection) explicitly rejected. Only credentials.toml
 // should ever trigger this warning.
@@ -350,7 +350,7 @@ func TestExampleTOMLLoads(t *testing.T) {
 // TestToolsDefaultsLoad guards against the failure mode where validateTools
 // exists but never actually sees the embedded defaults: if [tools] in
 // defaults.toml drifted out of sync with the schema, Load would emit
-// "clave ignorada" warnings instead of populating these fields, and every
+// "ignored key" warnings instead of populating these fields, and every
 // limit would silently read as its zero value. Asserting on concrete numbers
 // (rather than "not zero") is what makes this test able to fail.
 func TestToolsDefaultsLoad(t *testing.T) {

@@ -37,7 +37,7 @@ const backgroundRefreshTimeout = 60 * time.Second
 func Run(version string, resume bool) int {
 	cfg, err := config.Load(config.Options{UserPath: xdg.ConfigFile()})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Error de configuración: %v\n", err)
+		fmt.Fprintf(os.Stderr, "✗ Configuration error: %v\n", err)
 		return 1
 	}
 
@@ -219,7 +219,7 @@ func Run(version string, resume bool) int {
 	}
 
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Error ejecutando la interfaz: %v\n", err)
+		fmt.Fprintf(os.Stderr, "✗ Error running the interface: %v\n", err)
 		return 1
 	}
 	return 0

@@ -310,29 +310,29 @@ func cmdConfig(args []string) int {
 
 		cfg, err := config.Load(config.Options{UserPath: path, SkipProject: true})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "✗ Error de configuración: %v\n", err)
+			fmt.Fprintf(os.Stderr, "✗ Configuration error: %v\n", err)
 			return 1
 		}
 
-		fmt.Printf("✓ Configuración válida (%d proveedor(es) cargado(s))\n", len(cfg.Providers))
+		fmt.Printf("✓ Valid configuration (%d provider(s) loaded)\n", len(cfg.Providers))
 		if len(cfg.Files) > 0 {
-			fmt.Println("  Capas leídas:", strings.Join(cfg.Files, ", "))
+			fmt.Println("  Layers read:", strings.Join(cfg.Files, ", "))
 		}
 
 		if len(cfg.Warnings) > 0 {
-			fmt.Printf("  %d advertencia(s):\n", len(cfg.Warnings))
+			fmt.Printf("  %d warning(s):\n", len(cfg.Warnings))
 			for _, w := range cfg.Warnings {
 				fmt.Printf("    - [%s] %s\n", w.Where, w.Msg)
 			}
 			if *strict {
-				fmt.Fprintln(os.Stderr, "✗ Fallo por flag --strict")
+				fmt.Fprintln(os.Stderr, "✗ Failing due to --strict")
 				return 1
 			}
 		}
 		return 0
 
 	default:
-		fmt.Fprintf(os.Stderr, "subcomando desconocido: ishakat config %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown subcommand: ishakat config %s\n", args[0])
 		return 2
 	}
 }

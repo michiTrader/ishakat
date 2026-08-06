@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/term"
@@ -43,6 +44,7 @@ func printProviderUsage(w io.Writer) {
 	fmt.Fprintln(w, `ishakat provider — manage provider credentials
 
 USAGE
+  ishakat provider add                       (interactive: pick a provider from a short list)
   ishakat provider add <provider> [--api-key-unsafe <key>]
   ishakat provider add <provider> --api-key-stdin
   ishakat provider add <provider> --force   (overwrite a customized base_url)
@@ -67,8 +69,21 @@ verified; no manual config.toml edit is required.`)
 
 func cmdProviderAdd(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: ishakat provider add <provider> [flags]")
-		return 2
+		// No provider named: on a script/CI invocation (no TTY) there is
+		// nobody to ask, so this stays the same usage error it always
+		// was. With a TTY attached, `ishakat provider add` alone should
+		// complete the "download and just add my key" flow the audit
+		// asked for, instead of forcing a second invocation with a
+		// memorized preset id — offer the short list interactively.
+		if !term.IsTerminal(os.Stdin.Fd()) {
+			fmt.Fprintln(os.Stderr, "usage: ishakat provider add <provider> [flags]")
+			return 2
+		}
+		name, ok := pickProviderInteractively(os.Stdin, os.Stderr)
+		if !ok {
+			return 2
+		}
+		args = []string{name}
 	}
 	providerName := args[0]
 	fs := flag.NewFlagSet("provider add", flag.ContinueOnError)
@@ -245,6 +260,46 @@ func readYesNo(r io.Reader) (bool, error) {
 		return true, nil
 	}
 	return line[0] != 'n', nil
+}
+
+// pickProviderInteractively prints the short list of provider presets and
+// reads a single-line choice: either the list's 1-based number or the
+// preset's id/name typed directly (so someone who already knows they want
+// "gemini" doesn't have to count list entries). Returns false if the input
+// couldn't be read, was empty, or didn't match any preset — the caller
+// falls back to the usual usage error in all of those cases rather than
+// guessing.
+func pickProviderInteractively(r io.Reader, w io.Writer) (string, bool) {
+	presets := config.ProviderPresets()
+	fmt.Fprintln(w, "Which provider?")
+	for i, p := range presets {
+		fmt.Fprintf(w, "  %d. %s (%s)\n", i+1, p.Name, p.ID)
+	}
+	fmt.Fprint(w, "Enter a number or name: ")
+
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		fmt.Fprintf(w, "could not read your choice: %v\n", err)
+		return "", false
+	}
+	choice := strings.TrimSpace(line)
+	if choice == "" {
+		return "", false
+	}
+
+	if n, convErr := strconv.Atoi(choice); convErr == nil {
+		if n < 1 || n > len(presets) {
+			fmt.Fprintf(w, "%d is not one of the options above.\n", n)
+			return "", false
+		}
+		return presets[n-1].ID, true
+	}
+
+	if _, err := config.ResolveProviderPreset(choice); err != nil {
+		fmt.Fprintln(w, err)
+		return "", false
+	}
+	return choice, true
 }
 
 func readAPIKeyPrompt(provider string) (string, error) {
