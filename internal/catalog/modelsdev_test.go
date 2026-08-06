@@ -94,6 +94,62 @@ func TestLookupCascadeAllFourStages(t *testing.T) {
 	})
 }
 
+// TestParseAPIStatusAndTemperature is Layer 0's own closing criterion
+// (docs/DESIGN-model-curation.md): a models.dev record carrying
+// "status": "deprecated" must produce MDModel.Status == "deprecated", one
+// with "beta" or "alpha" must round-trip as-is (the tag mapping itself is
+// merge.go's job, tested end to end in merge_test.go), a record with no
+// status key must leave Status empty, and Temperature must stay nil when
+// the key is absent rather than becoming a false pointer.
+func TestParseAPIStatusAndTemperature(t *testing.T) {
+	raw := []byte(`{
+		"anthropic": {"id":"anthropic","name":"Anthropic","models":{
+			"claude-old":     {"id":"claude-old",     "status":"deprecated"},
+			"claude-preview": {"id":"claude-preview", "status":"beta"},
+			"claude-alpha":   {"id":"claude-alpha",   "status":"alpha"},
+			"claude-current": {"id":"claude-current"},
+			"claude-embed":   {"id":"claude-embed",   "temperature": false},
+			"claude-chat":    {"id":"claude-chat",    "temperature": true}
+		}}
+	}`)
+	ix := NewIndex()
+	if err := ix.ParseAPI(raw); err != nil {
+		t.Fatalf("ParseAPI: %v", err)
+	}
+
+	cases := []struct {
+		id         string
+		wantStatus string
+	}{
+		{"claude-old", "deprecated"},
+		{"claude-preview", "beta"},
+		{"claude-alpha", "alpha"},
+		{"claude-current", ""},
+	}
+	for _, c := range cases {
+		m, stage := ix.Lookup("anthropic", c.id)
+		if stage != MatchExact {
+			t.Fatalf("Lookup(%q) stage = %v, want MatchExact", c.id, stage)
+		}
+		if m.Status != c.wantStatus {
+			t.Errorf("Lookup(%q).Status = %q, want %q", c.id, m.Status, c.wantStatus)
+		}
+	}
+
+	current, _ := ix.Lookup("anthropic", "claude-current")
+	if current.Temperature != nil {
+		t.Errorf("claude-current.Temperature = %v, want nil (key absent)", *current.Temperature)
+	}
+	embed, _ := ix.Lookup("anthropic", "claude-embed")
+	if embed.Temperature == nil || *embed.Temperature != false {
+		t.Errorf("claude-embed.Temperature = %v, want a pointer to false", embed.Temperature)
+	}
+	chat, _ := ix.Lookup("anthropic", "claude-chat")
+	if chat.Temperature == nil || *chat.Temperature != true {
+		t.Errorf("claude-chat.Temperature = %v, want a pointer to true", chat.Temperature)
+	}
+}
+
 func TestParseAPISkipsBrokenEntriesButKeepsGoodOnes(t *testing.T) {
 	raw := []byte(`{
 		"anthropic": {"id":"anthropic","name":"Anthropic","models":{

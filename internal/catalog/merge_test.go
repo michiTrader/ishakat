@@ -377,6 +377,58 @@ func TestHideDeprecatedNeverHidesWhatYouUse(t *testing.T) {
 	}
 }
 
+// TestHideDeprecatedViaModelsDevStatus is Layer 0's other half of the
+// closing criterion: before this change, hide_deprecated=true had nothing
+// to hide for any provider that does not send its own "deprecated": true
+// on /models — which is OpenAI, Google and NVIDIA, i.e. most of them (see
+// docs/DESIGN-model-curation.md §1.1). This drives the deprecation signal
+// entirely from a models.dev fixture, with no gateway "deprecated" field
+// anywhere in sight, and a "beta" record to confirm TagBeta gets its first
+// real producer.
+func TestHideDeprecatedViaModelsDevStatus(t *testing.T) {
+	ix := NewIndex()
+	ix.ByProvider["gw"] = map[string]MDModel{
+		"old-unused": {ID: "old-unused", Status: "deprecated"},
+		"old-used":   {ID: "old-used", Status: "deprecated"},
+		"preview-1":  {ID: "preview-1", Status: "beta"},
+		"current":    {ID: "current"},
+	}
+	p := okProvider("gw", []DiscoveredModel{
+		{WireID: "old-unused"},
+		{WireID: "old-used"},
+		{WireID: "preview-1"},
+		{WireID: "current"},
+	})
+
+	cat := Build(BuildInput{
+		Providers:      []ProviderInput{p},
+		ModelsDev:      ix,
+		Stats:          map[string]Stat{"gw/old-used": {UseCount: 3}},
+		HideDeprecated: true,
+	})
+
+	mustNotHave(t, cat, "gw/old-unused")
+	find(t, cat, "gw/old-used") // used, so it survives despite the tag
+	find(t, cat, "gw/current")
+
+	preview := find(t, cat, "gw/preview-1")
+	if !preview.HasTag(TagBeta) {
+		t.Errorf("Tags = %v, want beta (from models.dev status)", preview.Tags)
+	}
+	if preview.Deprecated() {
+		t.Error("a beta model must not also read as deprecated")
+	}
+
+	used := find(t, cat, "gw/old-used")
+	if !used.Deprecated() {
+		t.Errorf("Tags = %v, want deprecated even though it is kept for having been used", used.Tags)
+	}
+
+	if len(cat.Notes) == 0 {
+		t.Fatal("hiding a model must leave a note saying so")
+	}
+}
+
 // TestNotesAreHonestAboutFailures: a provider that could not be reached, or
 // has no credential, produces a one-liner the interface can show. Never an
 // error that aborts the startup.
