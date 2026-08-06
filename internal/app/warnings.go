@@ -17,6 +17,8 @@
 package app
 
 import (
+	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -76,4 +78,42 @@ func FilterWarningsForProviders(warns []config.Warning, wanted ...string) []conf
 		}
 	}
 	return out
+}
+
+// WarningPrinter is P3's dedupe fix: app.go's own startup sequence prints
+// up to eight independent warning strings (BuildEngine's own warn for the
+// conversation model, BuildEngine's again for compact_model, one per
+// cfg.Warnings entry, resume, session recorder, session lister…), and
+// before this existed each fmt.Fprintf call had no way to know another
+// call already printed the exact same line — which is precisely how the
+// original bug report's two identical "missing $OMNIROUTE_API_KEY" lines
+// happened: default_model and compact_model both resolved to omniroute and
+// each produced its own, textually identical, provider warning.
+//
+// This is deliberately exact-string dedupe, not "one warning per
+// provider" or any other semantic grouping: two different warnings that
+// happen to mention the same provider (e.g. a missing credential and an
+// unsupported kind) are both real information and must both be printed.
+// It is only the literal repeat — the same sentence twice — that is noise.
+type WarningPrinter struct {
+	seen map[string]bool
+}
+
+// NewWarningPrinter returns a WarningPrinter with an empty seen-set, ready
+// to have Warn called on it for the whole span of one process's startup.
+func NewWarningPrinter() *WarningPrinter {
+	return &WarningPrinter{seen: map[string]bool{}}
+}
+
+// Warn prints "⚠ <msg>\n" to w the first time msg is seen, and does nothing
+// on every subsequent call with the same msg (including an empty msg,
+// which every call site here already guards against with `if warn != ""`
+// before calling — Warn treats "" as "nothing to say" too, so a caller
+// doesn't have to keep that check in two places).
+func (p *WarningPrinter) Warn(w io.Writer, msg string) {
+	if msg == "" || p.seen[msg] {
+		return
+	}
+	p.seen[msg] = true
+	fmt.Fprintf(w, "⚠ %s\n", msg)
 }

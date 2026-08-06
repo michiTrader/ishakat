@@ -26,12 +26,28 @@ import (
 // Returns the resolved reference (its Ref is what a caller should show in
 // the banner/footer, never WireID), the effective system prompt (§5.2's
 // file-wins-over-inline rule already applied), a warning worth printing
-// without aborting startup (an unreadable system_prompt_file, same as
-// Headless's own step 4 — "" means nothing to say), and err.
+// without aborting startup (either an unreadable system_prompt_file, same
+// as Headless's own step 4, or P2's boot fallback notice below — "" means
+// nothing to say), and err.
 //
 // err is fatal, exactly as it is in Headless's own step 4: there is nothing
 // for the TUI to open a turn against, so the caller must report it and exit
 // rather than start the interface with an engine that can never work.
+//
+// modelText == "" is resolved through ResolveModelForBoot rather than
+// ResolveModel directly — this is P2: when app.default_model/compact_model
+// itself is disabled or has no working credential, and some other declared
+// provider does, BuildEngine now falls back to that provider automatically
+// instead of returning err (and the caller starting with eng = nil, one
+// ctrl+p away from working) for a configuration mistake this package can
+// route around on its own. That silent-looking recovery is exactly why it
+// is reported: warn carries one line naming what changed, prefixed
+// "using X instead: ", so a caller printing it verbatim never has to know
+// this happened to say something sensible about it. An explicit
+// modelText (a real -m/--model, or a real compact_model, never "") keeps
+// going through ResolveModel's ordinary, non-fallback path — see
+// ResolveModelForBoot's own doc comment for why a caller-supplied choice
+// is never second-guessed the way an unresolved default is.
 //
 // Caps is deliberately the zero value (text-only): the model picker (Step
 // 10) is what will thread the catalog's per-model capabilities through once
@@ -39,7 +55,8 @@ import (
 // only text, which is always safe (never sends an image or a tool the
 // target can't take — see provider.Caps's own doc comment).
 func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Engine, ref ModelRef, system, warn string, err error) {
-	ref, err = ResolveModel(cfg, modelText)
+	var fb *BootFallback
+	ref, fb, err = ResolveModelForBoot(cfg, modelText)
 	if err != nil {
 		return nil, ModelRef{}, "", "", err
 	}
@@ -49,6 +66,14 @@ func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Eng
 	}
 
 	system, warn = SystemPrompt(cfg)
+	if fb != nil {
+		fbLine := fmt.Sprintf("app.default_model (%s) %s; using %s instead", fb.From, fb.Reason, fb.To)
+		if warn == "" {
+			warn = fbLine
+		} else {
+			warn = fbLine + "; " + warn
+		}
+	}
 
 	stream := NewStreamer(prov, provider.Caps{})
 	return engine.New(stream, cfg.App.MaxRetries), ref, system, warn, nil

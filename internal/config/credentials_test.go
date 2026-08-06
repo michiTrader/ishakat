@@ -317,6 +317,28 @@ func TestResolveProviderPresetAliases(t *testing.T) {
 	}
 }
 
+// TestVerifyModelFor is P2's lookup: internal/app.ResolveModelForBoot uses
+// this to find a wire id known to work for a fallback provider without
+// touching the network (§4.4). "gemini-direct" is the preset's own ID
+// field, not the "gemini"/"google" friendly names ResolveProviderPreset
+// also accepts — VerifyModelFor is keyed by presetByID, i.e. the same ID a
+// config.Provider.ID would actually carry.
+func TestVerifyModelFor(t *testing.T) {
+	wire, ok := config.VerifyModelFor("gemini-direct")
+	if !ok {
+		t.Fatal("VerifyModelFor(\"gemini-direct\") ok = false, want true")
+	}
+	if wire != "gemini-2.0-flash" {
+		t.Errorf("wire = %q, want %q", wire, "gemini-2.0-flash")
+	}
+}
+
+func TestVerifyModelForUnknownID(t *testing.T) {
+	if _, ok := config.VerifyModelFor("some-hand-rolled-provider"); ok {
+		t.Error("VerifyModelFor of an id with no matching preset: want ok = false")
+	}
+}
+
 func TestSaveCredentialRejectsUnknownProvider(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := config.SaveCredential("does-not-exist", "whatever"); err == nil {

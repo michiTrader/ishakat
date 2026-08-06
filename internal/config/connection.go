@@ -31,18 +31,9 @@ import (
 // different base_url, this refuses to overwrite it unless force is true —
 // see also mergeExistingConnection below for the exact rule.
 func SaveProviderConnection(preset ProviderPreset, force bool) (overwrote bool, err error) {
-	path := xdg.ConfigFile()
-	if err := xdg.EnsureDir(filepath.Dir(path)); err != nil {
-		return false, fmt.Errorf("create config directory: %w", err)
-	}
-
-	raw := map[string]any{"schema": 1}
-	if existing, err := os.ReadFile(path); err == nil {
-		if _, err := toml.Decode(string(existing), &raw); err != nil {
-			return false, fmt.Errorf("read config file: %w", err)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, fmt.Errorf("read config file: %w", err)
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return false, err
 	}
 
 	providers := toTables(raw["provider"])
@@ -80,20 +71,12 @@ func SaveProviderConnection(preset ProviderPreset, force bool) (overwrote bool, 
 		})
 	}
 	raw["provider"] = providers
-
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
-		return false, fmt.Errorf("encode config: %w", err)
-	}
 	// config.toml is not a secrets file: it does not need owner-only
 	// permissions, and forcing 0600 on it would fight a user who wants to
-	// share or version it. atomicWritePrivate is reused for its
-	// write-then-rename safety, and its mode is loosened right after.
-	if err := atomicWritePrivate(path, buf.Bytes()); err != nil {
+	// share or version it. writeRawConfigTOML already loosens the mode to
+	// 0644 after its own atomic write-then-rename.
+	if err := writeRawConfigTOML(raw); err != nil {
 		return false, err
-	}
-	if err := os.Chmod(path, 0o644); err != nil {
-		return false, fmt.Errorf("set config file permissions: %w", err)
 	}
 	return true, nil
 }
@@ -119,18 +102,9 @@ func SaveProviderConnection(preset ProviderPreset, force bool) (overwrote bool, 
 // the provider kept showing up (with a "no resolved credential" warning)
 // even after being explicitly removed.
 func disableProviderConnection(providerID string) error {
-	path := xdg.ConfigFile()
-	if err := xdg.EnsureDir(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-
-	raw := map[string]any{"schema": 1}
-	if existing, err := os.ReadFile(path); err == nil {
-		if _, err := toml.Decode(string(existing), &raw); err != nil {
-			return fmt.Errorf("read config file: %w", err)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("read config file: %w", err)
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
 	}
 
 	providers := toTables(raw["provider"])
@@ -150,7 +124,43 @@ func disableProviderConnection(providerID string) error {
 		})
 	}
 	raw["provider"] = providers
+	return writeRawConfigTOML(raw)
+}
 
+// readRawConfigTOML loads config.toml (xdg.ConfigFile()) as a raw
+// map[string]any, or {"schema": 1} if the file doesn't exist yet — the same
+// "start from a minimal skeleton" rule every mutator in this file already
+// followed on its own before this was extracted. Shared by every function
+// below that edits config.toml in place: SetDefaultModel/SetAppModel,
+// SaveProviderConnection, disableProviderConnection, SetAlias, RemoveAlias,
+// AddFavorite and RemoveFavorite all need the exact same read-decode-or-else
+// step, previously duplicated four times over.
+func readRawConfigTOML() (map[string]any, error) {
+	raw := map[string]any{"schema": 1}
+	path := xdg.ConfigFile()
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return raw, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	if _, err := toml.Decode(string(existing), &raw); err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	return raw, nil
+}
+
+// writeRawConfigTOML encodes raw and atomically installs it as config.toml,
+// world-readable (0644) like every other writer in this file: config.toml
+// is not a secrets file (see SaveProviderConnection's own comment) and a
+// user who wants to share or version it should not have to chmod it back
+// every time this program touches it.
+func writeRawConfigTOML(raw map[string]any) error {
+	path := xdg.ConfigFile()
+	if err := xdg.EnsureDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
 		return fmt.Errorf("encode config: %w", err)
@@ -161,6 +171,19 @@ func disableProviderConnection(providerID string) error {
 	return os.Chmod(path, 0o644)
 }
 
+// AppModelKey names one of the three model-selection fields in [app] that
+// `ishakat model set` (cmd/ishakat/model.go, P3c) can point at. These are
+// exactly config.App's own DefaultModel/CompactModel/FallbackModel fields —
+// declared here, not derived from reflection, so a typo in a call site is a
+// compile error instead of a silently-ignored string.
+type AppModelKey string
+
+const (
+	AppModelDefault  AppModelKey = "default_model"
+	AppModelCompact  AppModelKey = "compact_model"
+	AppModelFallback AppModelKey = "fallback_model"
+)
+
 // SetDefaultModel writes app.default_model into config.toml. `provider add`
 // offers this once discovery finds models, because leaving the stock
 // "omniroute/auto/coding" default in place — the single most common failure
@@ -168,38 +191,175 @@ func disableProviderConnection(providerID string) error {
 // actually used: every turn still dials the OmniRoute gateway on
 // 127.0.0.1:20128 and connection-refuses, and the user has no reason to
 // suspect the key they just entered has nothing to do with it.
+//
+// This is now a thin wrapper over SetAppModel(AppModelDefault, ref) —
+// kept as its own exported name because offerDefaultModel
+// (cmd/ishakat/provider.go) and its tests already call it by this name,
+// and "the default model" reads better there than the more general
+// three-key API SetAppModel exists for.
 func SetDefaultModel(ref string) error {
+	return SetAppModel(AppModelDefault, ref)
+}
+
+// SetAppModel writes one of [app]'s three model-selection keys
+// (default_model/compact_model/fallback_model) into config.toml. This is
+// P3c's own primitive: `ishakat model set <ref> [--default|--compact|
+// --fallback|--all]` (cmd/ishakat/model.go) is what turns the ergonomics
+// the original bug report asked for — "a command instead of hand-editing
+// TOML" — into config.toml writes, one key at a time.
+//
+// ref == "" is accepted on purpose for compact_model/fallback_model only
+// (SetDefaultModel above already rejects "" for default_model, and this
+// keeps that behaviour): ResolveModel's own empty-string rule treats an
+// empty compact_model as "same as default_model" (see modelref.go), so
+// `ishakat model set "" --compact` is the supported way to reset it back
+// to following the default rather than pointing at something specific.
+func SetAppModel(key AppModelKey, ref string) error {
 	ref = strings.TrimSpace(ref)
-	if ref == "" {
+	if key == AppModelDefault && ref == "" {
 		return errors.New("model reference is required")
 	}
-	path := xdg.ConfigFile()
-	if err := xdg.EnsureDir(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
 	}
-
-	raw := map[string]any{"schema": 1}
-	if existing, err := os.ReadFile(path); err == nil {
-		if _, err := toml.Decode(string(existing), &raw); err != nil {
-			return fmt.Errorf("read config file: %w", err)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("read config file: %w", err)
-	}
-
 	app, _ := raw["app"].(map[string]any)
 	if app == nil {
 		app = map[string]any{}
 	}
-	app["default_model"] = ref
+	app[string(key)] = ref
 	raw["app"] = app
+	return writeRawConfigTOML(raw)
+}
 
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
-		return fmt.Errorf("encode config: %w", err)
+// SetAlias writes (or overwrites) one [alias] entry in config.toml. name is
+// matched case-insensitively against every OTHER key already in the table
+// (mirroring lookupAlias's own case-insensitive lookup in
+// internal/app/modelref.go) so `ishakat model alias set Smart …` updates an
+// existing "smart" key instead of creating a second, differently-cased one
+// that would only ever shadow the first depending on map iteration order.
+// A brand new alias is stored exactly as the caller typed it.
+func SetAlias(name, ref string) error {
+	name = strings.TrimSpace(name)
+	ref = strings.TrimSpace(ref)
+	if name == "" {
+		return errors.New("alias name is required")
 	}
-	if err := atomicWritePrivate(path, buf.Bytes()); err != nil {
+	if ref == "" {
+		return errors.New("alias target (model reference) is required")
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o644)
+	alias, _ := raw["alias"].(map[string]any)
+	if alias == nil {
+		alias = map[string]any{}
+	}
+	key := name
+	for k := range alias {
+		if strings.EqualFold(k, name) {
+			key = k
+			break
+		}
+	}
+	alias[key] = ref
+	raw["alias"] = alias
+	return writeRawConfigTOML(raw)
+}
+
+// RemoveAlias deletes one [alias] entry from config.toml, matched
+// case-insensitively (see SetAlias's own comment on why). Removing an
+// alias that isn't there is not an error — same "idempotent, no-op on
+// absence" rule as disableProviderConnection's own removal path — since
+// the end state the caller wants ("this alias name no longer resolves to
+// anything") is already true.
+func RemoveAlias(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("alias name is required")
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
+	}
+	alias, _ := raw["alias"].(map[string]any)
+	for k := range alias {
+		if strings.EqualFold(k, name) {
+			delete(alias, k)
+		}
+	}
+	raw["alias"] = alias
+	return writeRawConfigTOML(raw)
+}
+
+// AddFavorite appends ref to [favorites].list in config.toml, unless it is
+// already there — favorites.List has no ordering guarantee worth
+// preserving duplicates for, and the picker (internal/tui) only ever needs
+// to know "is this ref a favorite", not "how many times was it added".
+func AddFavorite(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return errors.New("model reference is required")
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
+	}
+	list := stringList(raw["favorites"])
+	for _, existing := range list {
+		if existing == ref {
+			return writeRawConfigTOML(raw) // already a favorite; still normalize the file.
+		}
+	}
+	list = append(list, ref)
+	raw["favorites"] = map[string]any{"list": list}
+	return writeRawConfigTOML(raw)
+}
+
+// RemoveFavorite removes ref from [favorites].list in config.toml. Same
+// "no-op on absence" rule as RemoveAlias: removing something that was
+// never a favorite still leaves the caller's desired end state true.
+func RemoveFavorite(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return errors.New("model reference is required")
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
+	}
+	list := stringList(raw["favorites"])
+	out := make([]string, 0, len(list))
+	for _, existing := range list {
+		if existing != ref {
+			out = append(out, existing)
+		}
+	}
+	raw["favorites"] = map[string]any{"list": out}
+	return writeRawConfigTOML(raw)
+}
+
+// stringList reads a [favorites]-shaped raw value (a table with a "list"
+// key holding a TOML array) back into a []string. TOML decodes an array of
+// strings as []any under this package's raw-map representation (the same
+// shape mergeRoot/toTables already navigate elsewhere in this package), so
+// each element is asserted individually rather than type-switched as a
+// whole slice.
+func stringList(v any) []string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := m["list"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
