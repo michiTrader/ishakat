@@ -131,6 +131,31 @@ func presetByID(id string) (ProviderPreset, bool) {
 	return ProviderPreset{}, false
 }
 
+// VerifyModelFor returns the VerifyModel of the preset whose ID matches
+// providerID (see ProviderPreset.VerifyModel above) — the exact wire id
+// `provider add`'s own verification probe already proved answers for that
+// preset's credential (see offerDefaultModel in cmd/ishakat/provider.go,
+// the first caller to rely on this being a safe, working model id rather
+// than a guess).
+//
+// This is P2's boot-time fallback's own lookup (internal/app.ResolveModelForBoot):
+// when app.default_model points at a provider that turns out to be
+// disabled or missing its credential, and some *other* configured provider
+// is usable, the fallback needs a model id known to work for that other
+// provider without touching the network or the catalog (both out of the
+// critical path per §4.4). It only recognizes ids that came from a preset
+// (ProviderPresets()); a provider the user declared entirely by hand under
+// a different id/base_url has no entry here — on purpose: guessing a model
+// id for a service this package has never talked to would be worse than
+// admitting it doesn't know one.
+func VerifyModelFor(providerID string) (string, bool) {
+	p, ok := presetByID(providerID)
+	if !ok || strings.TrimSpace(p.VerifyModel) == "" {
+		return "", false
+	}
+	return p.VerifyModel, true
+}
+
 // SaveCredential atomically stores a provider's API key in the private
 // credentials file, and nothing else.
 //

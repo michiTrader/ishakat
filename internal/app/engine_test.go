@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,43 @@ func TestBuildEngineFailsWithoutAnEnabledProvider(t *testing.T) {
 	cfg := &config.Config{Schema: config.Schema}
 	if _, _, _, _, err := BuildEngine(cfg, "", "0.0.0-test"); err == nil {
 		t.Fatal("BuildEngine with no providers configured should return an error, not a usable engine")
+	}
+}
+
+// TestBuildEngineFallsBackAndWarnsWhenDefaultModelIsUnusable is P2's
+// integration test at BuildEngine's own level (as opposed to
+// ResolveModelForBoot's unit tests in modelref_test.go): app.default_model
+// names a disabled provider, a second provider is usable, and BuildEngine
+// must succeed by using it — with warn naming exactly what happened,
+// rather than returning err and leaving the caller with eng = nil the way
+// it did before P2.
+func TestBuildEngineFallsBackAndWarnsWhenDefaultModelIsUnusable(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{fake.SSEDone()}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	cfg.App.DefaultModel = "omniroute/auto/coding"
+	// omniroute is now disabled; gemini-direct (a real preset id, so
+	// config.VerifyModelFor has a wire id for it) points at the same fake
+	// server and is the one that must end up serving the turn.
+	cfg.Providers[0].Enabled = false
+	cfg.Providers = append(cfg.Providers, config.Provider{
+		ID: "gemini-direct", Kind: "openai", BaseURL: srv.URL,
+		APIKey: "test-key", Enabled: true, AuthOK: true,
+	})
+
+	eng, ref, _, warn, err := BuildEngine(cfg, "", "0.0.0-test")
+	if err != nil {
+		t.Fatalf("BuildEngine returned an error: %v", err)
+	}
+	if eng == nil {
+		t.Fatal("eng is nil: the whole point of P2 is that a fallback still produces a usable engine")
+	}
+	if ref.Provider != "gemini-direct" {
+		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "gemini-direct")
+	}
+	if warn == "" || !strings.Contains(warn, "gemini-direct") {
+		t.Errorf("warn = %q, want it to name the fallback provider", warn)
 	}
 }
 

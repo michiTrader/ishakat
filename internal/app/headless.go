@@ -132,11 +132,20 @@ func Headless(opts HeadlessOptions) int {
 		return ExitUsage
 	}
 
-	// 4. Model and provider.
-	ref, err := ResolveModel(cfg, opts.Model)
+	// 4. Model and provider. ResolveModelForBoot is P2: with opts.Model
+	// empty (no explicit -m/--model), an app.default_model that fails to
+	// resolve to a usable provider is routed to another configured,
+	// credentialed provider instead of failing outright — see its own doc
+	// comment. An explicit -m/--model always goes through ResolveModel's
+	// ordinary path unchanged (a typo must fail loudly, not land somewhere
+	// else silently).
+	ref, fb, err := ResolveModelForBoot(cfg, opts.Model)
 	if err != nil {
 		s.fail(err)
 		return ExitError
+	}
+	if fb != nil {
+		s.warn(fmt.Sprintf("app.default_model (%s) %s; using %s instead", fb.From, fb.Reason, fb.To))
 	}
 
 	// Startup warnings are printed only now that ref.Provider is known.
