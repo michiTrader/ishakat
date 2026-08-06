@@ -13,7 +13,29 @@ import (
 
 var varRe = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`)
 
-func expandVars(c *Config) []Warning {
+// expandVars expands every "$VAR"/"${VAR}" in c, including each provider's
+// api_key, and reports warnings for the ones a user would actually want to
+// hear about.
+//
+// embeddedOnly is the P1 set from load.go: provider ids declared ONLY by
+// the compiled-in defaults.toml, with no mention at all in anything the
+// user wrote to disk (config.toml, a project's .ishakat.toml, or
+// credentials.toml). For those — and only those — a missing credential
+// disables the provider outright (Enabled = false) instead of leaving it
+// enabled with a warning.
+//
+// The distinction matters because "enabled = true" in the *embedded*
+// defaults.toml is not a decision the user made; it is this binary's own
+// factory setting, offered so `provider list`/`provider add <id>` can see
+// the preset without the user having typed a single line of TOML. Treating
+// that shipped default as equivalent to a user's own `enabled = true` is
+// what produced the original bug report this fix responds to: a fresh
+// install warned on every single launch about $OMNIROUTE_API_KEY missing,
+// for a provider the user never asked to activate and had no config.toml
+// line to point at. A provider the user's own files *do* mention — even a
+// bare `[[provider]] id = "omniroute"` with no other field — is presumed
+// intentional and keeps the ordinary warn-don't-disable behaviour below.
+func expandVars(c *Config, embeddedOnly map[string]bool) []Warning {
 	var warns []Warning
 	for i := range c.Providers {
 		p := &c.Providers[i]
@@ -25,14 +47,23 @@ func expandVars(c *Config) []Warning {
 			p.AuthOK = true
 		case missing != "":
 			p.AuthOK, p.MissingEnv = false, missing
-			// El warning visible solo tiene sentido para un proveedor que el
-			// usuario efectivamente quiere usar. Con `enabled = false` (el
-			// valor por defecto de openai/anthropic en config.example.toml,
-			// pensado para quien solo usa OmniRoute) AuthOK/MissingEnv se
-			// siguen registrando igual —por si algo más adelante consulta
-			// ese estado— pero no se imprime ruido de arranque por una
-			// variable que el usuario nunca pidió configurar.
-			if p.Enabled {
+			switch {
+			case embeddedOnly[p.ID] && p.Enabled:
+				// P1: nothing the user wrote asked for this provider, and
+				// it has no working credential — there is nothing to warn
+				// about because there was never a user decision to
+				// second-guess. Silently disabling is the honest state:
+				// `provider list` still shows it (as declared, disabled),
+				// and `provider add <id>` still works exactly as before.
+				p.Enabled = false
+			case p.Enabled:
+				// El warning visible solo tiene sentido para un proveedor que el
+				// usuario efectivamente quiere usar. Con `enabled = false` (el
+				// valor por defecto de openai/anthropic en config.example.toml,
+				// pensado para quien solo usa OmniRoute) AuthOK/MissingEnv se
+				// siguen registrando igual —por si algo más adelante consulta
+				// ese estado— pero no se imprime ruido de arranque por una
+				// variable que el usuario nunca pidió configurar.
 				warns = append(warns, Warning{
 					Where: "provider[" + p.ID + "]",
 					Msg:   "missing $" + missing + "; the provider is left unauthenticated",

@@ -313,6 +313,117 @@ enabled = false
 	}
 }
 
+// TestEmbeddedOnlyProviderSelfDisablesOnMissingCredential is P1's regression
+// test: a provider declared only by the compiled-in defaults.toml (nothing
+// on disk mentions its id at all — a fresh install, matching P0's own
+// "omniroute ships disabled" change) must not merely stay silent about a
+// missing credential (that was P0's whole fix); if some *future* embedded
+// preset ever ships `enabled = true` again, expandVars must disable it
+// outright rather than leave it enabled with an unresolved $VAR. This is
+// exercised through config.Overrides rather than a second embedded preset,
+// since defaults.toml itself is the thing under test and must not be
+// duplicated here to test it.
+func TestEmbeddedOnlyProviderSelfDisablesOnMissingCredential(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// omniroute is declared only by defaults.toml on a fresh install: no
+	// config.toml, no .ishakat.toml, no credentials.toml exists yet.
+	// Overrides is applied via setPath (see load.go), which replaces the
+	// whole "provider" table wholesale rather than merging field-by-field —
+	// so the full set of fields is supplied here, with enabled forced back
+	// to true, simulating what a future embedded preset shipping
+	// enabled = true would look like. embeddedProviderIDs/userDeclaredIDs are
+	// computed from the on-disk layers only, before Overrides is applied, so
+	// this still exercises the "embedded-only" branch correctly: no file
+	// anywhere mentions "omniroute".
+	cfg, err := config.Load(config.Options{
+		SkipProject: true,
+		Overrides: map[string]any{
+			"provider": []map[string]any{{
+				"id": "omniroute", "kind": "openai",
+				"base_url": "http://localhost:20128/v1",
+				"api_key":  "$OMNIROUTE_API_KEY", "enabled": true,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	var omni *config.Provider
+	for i := range cfg.Providers {
+		if cfg.Providers[i].ID == "omniroute" {
+			omni = &cfg.Providers[i]
+		}
+	}
+	if omni == nil {
+		t.Fatal("omniroute not present; embedded defaults.toml changed?")
+	}
+	if omni.Enabled {
+		t.Error("an embedded-only provider with an unresolved credential must " +
+			"self-disable (Enabled = false), not stay enabled")
+	}
+	if omni.AuthOK {
+		t.Error("AuthOK must still be false: the credential genuinely never resolved")
+	}
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Where, "provider[omniroute]") {
+			t.Errorf("an embedded-only provider must self-disable silently, no warning expected: %+v", w)
+		}
+	}
+}
+
+// TestUserDeclaredProviderStillWarnsEvenIfIDMatchesAnEmbeddedPreset is the
+// other half of P1: a provider id that also happens to exist in the
+// embedded defaults.toml (omniroute) stops being "embedded-only" the moment
+// the user's own config.toml mentions that same id, even just to flip
+// enabled back to true. That is a real user decision to activate it, so a
+// missing credential must warn, exactly like any other provider the user
+// actually configured — self-disabling would hide a mistake the user asked
+// to be told about, silently reverting a choice they just made on disk.
+func TestUserDeclaredProviderStillWarnsEvenIfIDMatchesAnEmbeddedPreset(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "config.toml")
+	_ = os.WriteFile(p, []byte(`
+schema = 1
+[[provider]]
+id = "omniroute"
+enabled = true
+`), 0o600)
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	var omni *config.Provider
+	for i := range cfg.Providers {
+		if cfg.Providers[i].ID == "omniroute" {
+			omni = &cfg.Providers[i]
+		}
+	}
+	if omni == nil {
+		t.Fatal("omniroute not present")
+	}
+	if !omni.Enabled {
+		t.Fatal("config.toml explicitly set enabled = true; that must win over the embedded default")
+	}
+	if omni.AuthOK {
+		t.Fatal("$OMNIROUTE_API_KEY is not set in this test's environment; AuthOK should be false")
+	}
+
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Where, "provider[omniroute]") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a provider the user's own config.toml explicitly enabled must still warn " +
+			"about a missing credential, not self-disable — the id is no longer embedded-only")
+	}
+}
+
 // TestExampleTOMLInSync catches a bug this test was written in response to:
 // `ishakat config init` writes the *embedded* internal/config/example.toml,
 // while the file everyone reads and edits is config.example.toml at the repo
