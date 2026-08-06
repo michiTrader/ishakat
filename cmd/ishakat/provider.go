@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/MichiTrader/ishakat/internal/app"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
@@ -162,8 +163,88 @@ func cmdProviderAdd(args []string) int {
 		fmt.Printf("Note: %s\n", preset.Notes)
 	}
 	fmt.Println("The provider is enabled. Run `ishakat models --refresh` to update its model list.")
-	fmt.Printf("If you want this provider's models as your default, edit app.default_model in %s\n", xdg.ConfigFile())
+
+	// Offer to set app.default_model to the model this run just proved
+	// works, but only when the *current* default doesn't already resolve
+	// to a usable provider — see app.NeedsDefaultModel's own comment for
+	// why this predicate exists: leaving app.default_model pointed at a
+	// provider with no credential (the stock "omniroute/auto/coding" on a
+	// fresh install being the most common case) is the single most common
+	// failure mode the audit that added this found, and the fix documented
+	// there (SetDefaultModel) had never actually been wired to a caller.
+	//
+	// Skipped for --no-verify: that path has no proof the key is valid at
+	// all, so nudging the user toward making it the default would be
+	// promoting an unconfirmed credential instead of a confirmed one.
+	if !*noVerify {
+		offerDefaultModel(preset)
+	} else {
+		fmt.Printf("If you want this provider's models as your default, edit app.default_model in %s\n", xdg.ConfigFile())
+	}
 	return 0
+}
+
+// offerDefaultModel checks whether app.default_model currently resolves to
+// a usable provider and, if not, offers to point it at the provider that
+// was just verified and configured — using preset.VerifyModel, the exact
+// model id this run already proved answers with this key, rather than
+// guessing at one discovery hasn't found yet (`ishakat models --refresh`
+// runs separately, after this command returns).
+//
+// With no TTY on stdin, the offer degrades to the same "edit it yourself"
+// pointer `provider add` always printed, rather than blocking a
+// script/CI run waiting on input that will never arrive.
+func offerDefaultModel(preset config.ProviderPreset) {
+	cfg, err := config.Load(config.Options{})
+	if err != nil || !app.NeedsDefaultModel(cfg) {
+		// Either the config failed to reload (nothing more this command
+		// can safely act on) or the existing default already resolves —
+		// in both cases, silently proceed rather than second-guess a
+		// setup that isn't this provider's problem to fix.
+		return
+	}
+
+	ref := preset.ID + "/" + preset.VerifyModel
+	if !term.IsTerminal(os.Stdin.Fd()) {
+		fmt.Printf("app.default_model in %s does not resolve to a usable provider yet; "+
+			"set it to %q (or run `ishakat provider add` again with a terminal attached "+
+			"to be asked interactively).\n", xdg.ConfigFile(), ref)
+		return
+	}
+
+	fmt.Printf("Use %s as your default model? [Y/n] ", ref)
+	yes, err := readYesNo(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not read your answer, leaving app.default_model untouched: %v\n", err)
+		return
+	}
+	if !yes {
+		fmt.Printf("Not changed. Edit app.default_model in %s whenever you're ready.\n", xdg.ConfigFile())
+		return
+	}
+	if err := config.SetDefaultModel(ref); err != nil {
+		fmt.Fprintf(os.Stderr, "could not set app.default_model: %v\n", err)
+		return
+	}
+	fmt.Printf("app.default_model is now %s.\n", ref)
+}
+
+// readYesNo reads one line and interprets it the way a "[Y/n]" prompt
+// promises: empty input (a bare Enter) means yes, since Y is the
+// capitalized (default) option; anything starting with 'n' or 'N' means
+// no; everything else is treated as an affirmative answer rather than
+// silently doing nothing, since the prompt already told the user what
+// pressing Enter does.
+func readYesNo(r io.Reader) (bool, error) {
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	if line == "" {
+		return true, nil
+	}
+	return line[0] != 'n', nil
 }
 
 func readAPIKeyPrompt(provider string) (string, error) {
