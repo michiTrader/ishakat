@@ -85,9 +85,6 @@ func Run(version string, resume bool) int {
 	if warn != "" {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", warn)
 	}
-	for _, w := range cfg.Warnings {
-		fmt.Fprintf(os.Stderr, "⚠ [%s] %s\n", w.Where, w.Msg)
-	}
 
 	// compact_model gets its own Engine (§10, Step 12): it can name a
 	// different provider than the conversation's own model, and
@@ -107,6 +104,18 @@ func Run(version string, resume bool) int {
 	}
 	if compactWarn != "" {
 		fmt.Fprintf(os.Stderr, "⚠ %s\n", compactWarn)
+	}
+
+	// cfg.Warnings carries one entry per enabled provider missing its
+	// credential (expand.go). Printing all of it unconditionally used to
+	// warn on every launch about every declared-but-unused provider —
+	// noise for a configuration that only actually uses one or two of
+	// them. Only warnings about the two providers this session resolved
+	// to (the conversation's own model and, separately, compact_model)
+	// are shown here; `config check`/`doctor`/`provider list` still print
+	// cfg.Warnings unfiltered, on purpose. See warnings.go's doc comment.
+	for _, w := range FilterWarningsForProviders(cfg.Warnings, ref.Provider, compactRef.Provider) {
+		fmt.Fprintf(os.Stderr, "⚠ [%s] %s\n", w.Where, w.Msg)
 	}
 
 	// --resume / [session] resume_last (§13): load the previous conversation

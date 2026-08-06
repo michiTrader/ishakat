@@ -121,10 +121,6 @@ func Headless(opts HeadlessOptions) int {
 		}
 	}
 
-	for _, w := range cfg.Warnings {
-		s.warn(fmt.Sprintf("[%s] %s", w.Where, w.Msg))
-	}
-
 	// 3. Prompt: the flag's value plus whatever comes from stdin.
 	prompt, err := buildPrompt(opts.Prompt, in, stdinTTY)
 	if err != nil {
@@ -142,6 +138,19 @@ func Headless(opts HeadlessOptions) int {
 		s.fail(err)
 		return ExitError
 	}
+
+	// Startup warnings are printed only now that ref.Provider is known.
+	// cfg.Warnings carries one entry per enabled provider missing its
+	// credential (expand.go), and printing all of it unconditionally used
+	// to warn about every declared-but-unused provider on every single
+	// turn — noise about providers this run never touches.
+	// `config check`/`doctor`/`provider list` still read cfg.Warnings
+	// directly and print all of it, on purpose: those are audit commands,
+	// not a turn. See warnings.go's own doc comment.
+	for _, w := range FilterWarningsForProviders(cfg.Warnings, ref.Provider) {
+		s.warn(fmt.Sprintf("[%s] %s", w.Where, w.Msg))
+	}
+
 	pc, ok := FindProvider(cfg, ref.Provider)
 	if !ok {
 		s.fail(fmt.Errorf("provider %q for %q is not declared in %s",

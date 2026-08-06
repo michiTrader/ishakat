@@ -217,6 +217,57 @@ func TestHeadlessNoPromptIsUsageError(t *testing.T) {
 	}
 }
 
+// TestHeadlessSilencesWarningsForUnusedProviders is the regression test for
+// the "warnings by necessity" fix: a configuration that declares several
+// providers but resolves to only one of them for this turn must not print
+// a missing-credential warning about the other providers it never touches.
+// This is the fix for the noise that once sent a debugging session chasing
+// app.default_model/omniroute instead of the actual bug (see
+// docs/PLAN.md's 2026-08-06 audit entries).
+func TestHeadlessSilencesWarningsForUnusedProviders(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{
+		fake.SSEDelta("hi"),
+		fake.SSEDone(),
+	}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	cfg.Providers = append(cfg.Providers, config.Provider{
+		ID: "openai", Kind: "openai", BaseURL: "https://api.openai.com/v1",
+		Enabled: true, AuthOK: false, MissingEnv: "OPENAI_API_KEY",
+	})
+	cfg.Warnings = []config.Warning{
+		{Where: "provider[openai]", Msg: "falta $OPENAI_API_KEY; el proveedor queda sin autenticar"},
+	}
+
+	code, _, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "hi"})
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr: %s", code, errs)
+	}
+	if strings.Contains(errs, "OPENAI_API_KEY") {
+		t.Errorf("stderr must not mention a provider this turn never used, got: %q", errs)
+	}
+}
+
+// TestHeadlessKeepsWarningForTheProviderActuallyUsed is the other half of
+// the same fix: a missing-credential warning about the provider this turn
+// DOES resolve to must still be printed, not silenced along with the
+// unrelated ones.
+func TestHeadlessKeepsWarningForTheProviderActuallyUsed(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{fake.SSEDone()}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	cfg.Warnings = []config.Warning{
+		{Where: "provider[omniroute]", Msg: "falta $OMNIROUTE_API_KEY; el proveedor queda sin autenticar"},
+	}
+
+	_, _, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "hi"})
+	if !strings.Contains(errs, "OMNIROUTE_API_KEY") {
+		t.Errorf("stderr must keep the warning about the provider this turn used, got: %q", errs)
+	}
+}
+
 // A 401 must come out on stderr, with exit code 1 and nothing written to
 // stdout: a script that redirects the output should not end up with a file
 // that contains an error message.
