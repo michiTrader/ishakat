@@ -116,8 +116,29 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runStats()
 	case slash.KindResume:
 		return m.runResumeCommand()
+	case slash.KindModels:
+		return m.runModelsCommand()
 	default:
-		return m.slashNotice(m.lay.glyphs().warnMark + " " + cmd.Usage() + " todavia no esta implementado")
+		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
+	}
+}
+
+// unimplementedNotice is what a KindUnimplemented command reports. /config
+// and /debug already have a binary-side equivalent that answers the same
+// question today (ishakat config check, ishakat doctor); pointing at it is
+// an honest pending, not a silent no-op, until Step 18 gives them a real
+// in-session screen (§13, §17: "un pendiente marcado como hecho es una
+// funcion que nadie va a construir" applies just as much to a pending with
+// no remedy attached). Every other KindUnimplemented row (/theme, reserved
+// for Phase 3) keeps the generic message — it has no such stand-in.
+func unimplementedNotice(cmd slash.Command) string {
+	switch cmd.Name {
+	case "config":
+		return cmd.Usage() + " todavia no: usa `ishakat config check` desde la terminal"
+	case "debug":
+		return cmd.Usage() + " todavia no: usa `ishakat doctor` desde la terminal"
+	default:
+		return cmd.Usage() + " todavia no esta implementado"
 	}
 }
 
