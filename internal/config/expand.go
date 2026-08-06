@@ -35,7 +35,7 @@ func expandVars(c *Config) []Warning {
 			if p.Enabled {
 				warns = append(warns, Warning{
 					Where: "provider[" + p.ID + "]",
-					Msg:   "falta $" + missing + "; el proveedor queda sin autenticar",
+					Msg:   "missing $" + missing + "; the provider is left unauthenticated",
 				})
 			}
 		default:
@@ -157,7 +157,7 @@ func checkPerms(path string) []Warning {
 	if mode&0077 != 0 {
 		warns = append(warns, Warning{
 			Where: filepath.Base(path),
-			Msg:   fmt.Sprintf("permisos inseguros %#o (se recomienda 0600)", mode),
+			Msg:   fmt.Sprintf("insecure permissions %#o (0600 recommended)", mode),
 		})
 	}
 	return warns

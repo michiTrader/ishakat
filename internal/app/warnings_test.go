@@ -9,8 +9,8 @@ import (
 func TestFilterWarningsForProvidersKeepsUnscopedWarnings(t *testing.T) {
 	warns := []config.Warning{
 		{Where: "tools", Msg: "max_calls_per_turn = 0"},
-		{Where: "config", Msg: "clave ignorada: foo"},
-		{Where: "credentials.toml", Msg: "permisos inseguros"},
+		{Where: "config", Msg: "ignored key: foo"},
+		{Where: "credentials.toml", Msg: "insecure permissions"},
 		{Where: "provider[2]", Msg: `kind "weird" no soportado`},
 	}
 	got := FilterWarningsForProviders(warns, "gemini-direct")
@@ -22,9 +22,9 @@ func TestFilterWarningsForProvidersKeepsUnscopedWarnings(t *testing.T) {
 
 func TestFilterWarningsForProvidersDropsUnwantedProviderWarning(t *testing.T) {
 	warns := []config.Warning{
-		{Where: "provider[openai]", Msg: "falta $OPENAI_API_KEY; el proveedor queda sin autenticar"},
-		{Where: "provider[anthropic]", Msg: "falta $ANTHROPIC_API_KEY; el proveedor queda sin autenticar"},
-		{Where: "provider[gemini-direct]", Msg: "falta $GEMINI_API_KEY; el proveedor queda sin autenticar"},
+		{Where: "provider[openai]", Msg: "missing $OPENAI_API_KEY; the provider is left unauthenticated"},
+		{Where: "provider[anthropic]", Msg: "missing $ANTHROPIC_API_KEY; the provider is left unauthenticated"},
+		{Where: "provider[gemini-direct]", Msg: "missing $GEMINI_API_KEY; the provider is left unauthenticated"},
 	}
 	got := FilterWarningsForProviders(warns, "gemini-direct")
 	if len(got) != 1 {

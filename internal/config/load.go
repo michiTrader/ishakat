@@ -56,7 +56,7 @@ func Load(o Options) (*Config, error) {
 		}
 		var m map[string]any
 		if _, err := toml.Decode(string(b), &m); err != nil {
-			return nil, fmt.Errorf("%s: TOML inválido: %w", p, err)
+			return nil, fmt.Errorf("%s: invalid TOML: %w", p, err)
 		}
 		raw = mergeRoot(raw, m)
 		files = append(files, p)
@@ -83,7 +83,7 @@ func Load(o Options) (*Config, error) {
 
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
-		return nil, fmt.Errorf("no se pudo normalizar la configuración: %w", err)
+		return nil, fmt.Errorf("could not normalize the configuration: %w", err)
 	}
 	cfg := &Config{EnvUsed: map[string]string{}}
 	md, err := toml.Decode(buf.String(), cfg)
@@ -91,7 +91,7 @@ func Load(o Options) (*Config, error) {
 		return nil, err
 	}
 	for _, k := range md.Undecoded() {
-		warns = append(warns, Warning{Where: "config", Msg: "clave ignorada: " + k.String()})
+		warns = append(warns, Warning{Where: "config", Msg: "ignored key: " + k.String()})
 	}
 
 	cfg.Files = files

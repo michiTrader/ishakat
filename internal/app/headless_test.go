@@ -237,7 +237,7 @@ func TestHeadlessSilencesWarningsForUnusedProviders(t *testing.T) {
 		Enabled: true, AuthOK: false, MissingEnv: "OPENAI_API_KEY",
 	})
 	cfg.Warnings = []config.Warning{
-		{Where: "provider[openai]", Msg: "falta $OPENAI_API_KEY; el proveedor queda sin autenticar"},
+		{Where: "provider[openai]", Msg: "missing $OPENAI_API_KEY; the provider is left unauthenticated"},
 	}
 
 	code, _, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "hi"})
@@ -259,7 +259,7 @@ func TestHeadlessKeepsWarningForTheProviderActuallyUsed(t *testing.T) {
 
 	cfg := cfgFor(t, srv.URL)
 	cfg.Warnings = []config.Warning{
-		{Where: "provider[omniroute]", Msg: "falta $OMNIROUTE_API_KEY; el proveedor queda sin autenticar"},
+		{Where: "provider[omniroute]", Msg: "missing $OMNIROUTE_API_KEY; the provider is left unauthenticated"},
 	}
 
 	_, _, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "hi"})

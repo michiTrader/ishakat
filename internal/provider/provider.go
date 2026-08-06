@@ -256,8 +256,8 @@ var (
 	// usuario, que no produce error.
 	ErrStreamTruncated = errors.New("provider: el stream se cortó antes de terminar")
 
-	// ErrNoAPIKey es un proveedor que requiere clave y no la tiene.
-	ErrNoAPIKey = errors.New("provider: falta la clave de API")
+	// ErrNoAPIKey is a provider that requires a key and doesn't have one.
+	ErrNoAPIKey = errors.New("provider: missing API key")
 
 	// ErrUnknownKind es un kind que no tiene adaptador registrado.
 	ErrUnknownKind = errors.New("provider: kind desconocido")

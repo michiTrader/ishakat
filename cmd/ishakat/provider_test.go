@@ -9,6 +9,54 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 )
 
+// TestPickProviderInteractivelyByNumber and its siblings cover the short
+// picker `provider add` (no arguments) falls into on a TTY: this is P2's
+// "download and just add my key" flow the audit asked for, so `provider
+// add` alone completes without a second invocation naming a preset id.
+func TestPickProviderInteractivelyByNumber(t *testing.T) {
+	var out strings.Builder
+	got, ok := pickProviderInteractively(strings.NewReader("2\n"), &out)
+	if !ok {
+		t.Fatalf("pickProviderInteractively(\"2\") = not ok, output:\n%s", out.String())
+	}
+	want := config.ProviderPresets()[1].ID
+	if got != want {
+		t.Errorf("choice 2 = %q, want %q (the second preset)", got, want)
+	}
+	if !strings.Contains(out.String(), "Which provider?") {
+		t.Errorf("expected the list to be printed, got:\n%s", out.String())
+	}
+}
+
+func TestPickProviderInteractivelyByName(t *testing.T) {
+	var out strings.Builder
+	got, ok := pickProviderInteractively(strings.NewReader("gemini\n"), &out)
+	if !ok || got != "gemini" {
+		t.Errorf("pickProviderInteractively(\"gemini\") = %q, %v, want %q, true", got, ok, "gemini")
+	}
+}
+
+func TestPickProviderInteractivelyEmptyInput(t *testing.T) {
+	var out strings.Builder
+	if _, ok := pickProviderInteractively(strings.NewReader("\n"), &out); ok {
+		t.Error("empty input must not resolve to a provider")
+	}
+}
+
+func TestPickProviderInteractivelyOutOfRangeNumber(t *testing.T) {
+	var out strings.Builder
+	if _, ok := pickProviderInteractively(strings.NewReader("99\n"), &out); ok {
+		t.Error("an out-of-range number must not resolve to a provider")
+	}
+}
+
+func TestPickProviderInteractivelyUnknownName(t *testing.T) {
+	var out strings.Builder
+	if _, ok := pickProviderInteractively(strings.NewReader("not-a-real-provider\n"), &out); ok {
+		t.Error("an unknown provider name must not resolve to a provider")
+	}
+}
+
 // TestReadYesNo covers the "[Y/n]" convention offerDefaultModel relies on:
 // empty input (bare Enter) is yes because Y is the capitalised default,
 // anything starting with n/N is no, and anything else is treated as an

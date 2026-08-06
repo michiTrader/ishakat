@@ -26,8 +26,8 @@ import (
 // providerWarningPrefix is the "Where" shape used for a warning that names
 // one specific provider ("provider[omniroute]" or "provider[3]").
 // Warnings that don't have this shape (schema, tools, credentials
-// permissions, "clave ignorada") are not about any one provider and must
-// never be filtered out.
+// permissions, an ignored config key) are not about any one provider and
+// must never be filtered out.
 const providerWarningPrefix = "provider["
 
 // providerWarningID extracts the provider id from a Warning.Where string
