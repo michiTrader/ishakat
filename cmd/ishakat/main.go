@@ -35,9 +35,12 @@ SUBCOMMANDS
   config init [--full]     creates the configuration (minimal by default; --full for the annotated example)
   config path|check        locates or validates the configuration
   provider add|list|remove configure API credentials without editing TOML
+  model set|alias|favorite point default_model/compact_model/fallback_model,
+                           aliases and favorites without editing TOML
   doctor                   network, path and dialect diagnostics
   models [--json] [--refresh] [--all] [filter]   the model catalog
   models clean             delete the cached catalog (catalog.json) on disk
+  purge [--sessions] [--force]   delete ishakat's own config/cache/session files
   version                  prints the version
 
 FLAGS
@@ -63,7 +66,7 @@ EXIT CODES
 // reflection, because there's no cheap way to introspect a switch
 // statement). cmdUnknownSubcommand's "did you mean" suggestion walks this
 // list; keep it in sync with the switch below when a subcommand is added.
-var knownSubcommands = []string{"config", "provider", "doctor", "version", "models", "help"}
+var knownSubcommands = []string{"config", "provider", "doctor", "version", "models", "model", "purge", "help"}
 
 func main() {
 	_ = netfix.Install()
@@ -74,6 +77,10 @@ func main() {
 			os.Exit(cmdConfig(os.Args[2:]))
 		case "provider", "providers":
 			os.Exit(cmdProvider(os.Args[2:]))
+		case "model":
+			os.Exit(cmdModel(os.Args[2:]))
+		case "purge":
+			os.Exit(cmdPurge(os.Args[2:]))
 		case "doctor":
 			os.Exit(cmdDoctor())
 		case "version":
