@@ -208,19 +208,17 @@ func TestRemoveCredentialDeletesPrivateFileAndDisables(t *testing.T) {
 	}
 }
 
-// TestRemoveCredentialDisablesDefaultsOnlyProvider is the regression test
-// for the omniroute case reported in practice: `omniroute` never has a
-// config.toml entry of its own on a fresh install — it only exists via the
-// embedded defaults.toml (enabled = true there) — so RemoveCredential had
-// nothing to flip and silently did nothing, leaving the provider enabled
-// (and unauthenticated, warning on every run) even after being explicitly
-// removed. RemoveCredential must append an {id, enabled = false} override
-// to config.toml in this case, not just edit an existing entry.
-func TestRemoveCredentialDisablesDefaultsOnlyProvider(t *testing.T) {
+// TestOmniRouteDisabledByDefaultOnFreshInstall documents the P0 change: a
+// fresh install (embedded defaults.toml only, no config.toml at all) must
+// ship with zero active providers, omniroute included — see
+// internal/config/defaults.toml's own comment on why `enabled = false` is
+// the built-in default now. Before this change omniroute shipped
+// `enabled = true` with a $OMNIROUTE_API_KEY it almost never had, which is
+// what produced the two identical "missing API key" warnings a user with
+// no interest in OmniRoute saw on every single launch.
+func TestOmniRouteDisabledByDefaultOnFreshInstall(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	// No config.toml is written at all: omniroute is reachable only through
-	// the embedded default, exactly like a fresh clone with no config file.
 	if _, err := os.Stat(xdg.ConfigFile()); !os.IsNotExist(err) {
 		t.Fatalf("config.toml unexpectedly exists before the test runs")
 	}
@@ -233,22 +231,67 @@ func TestRemoveCredentialDisablesDefaultsOnlyProvider(t *testing.T) {
 	for _, p := range cfg.Providers {
 		if p.ID == "omniroute" {
 			found = true
-			if !p.Enabled {
-				t.Fatalf("omniroute enabled = false before RemoveCredential; " +
-					"the embedded default should start it enabled")
+			if p.Enabled {
+				t.Fatalf("omniroute enabled = true on a fresh install; " +
+					"the embedded default must ship disabled")
 			}
 		}
 	}
 	if !found {
-		t.Fatal("omniroute not present before RemoveCredential; embedded defaults.toml changed?")
+		t.Fatal("omniroute not present; embedded defaults.toml changed?")
+	}
+	if len(cfg.Warnings) > 0 {
+		t.Errorf("a fresh install with no providers enabled must produce zero warnings, got %+v", cfg.Warnings)
+	}
+}
+
+// TestRemoveCredentialAppendsDisableOverrideWithNoExistingEntry is the
+// regression test for the original bug report: a provider that has no
+// config.toml entry of its own — reachable only through some other layer,
+// which is exactly what the embedded defaults.toml is for omniroute — must
+// still end up with an explicit disable override written to config.toml
+// after RemoveCredential. disableProviderConnection must append an
+// {id, enabled = false} entry when there is no existing one to flip, not
+// silently do nothing — mergeProviders (merge.go) merges layers by id, so
+// this override then wins over whatever an earlier layer said about the
+// same id, on every subsequent config.Load.
+//
+// omniroute now ships `enabled = false` by default (P0: no active providers
+// out of the box), so this test activates it first through a real
+// config.toml entry with `enabled = true` — mirroring what `provider add`
+// would do — specifically so RemoveCredential's append path has something
+// non-trivial to flip, rather than asserting on a state that was already
+// disabled before the call.
+func TestRemoveCredentialAppendsDisableOverrideWithNoExistingEntry(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	preset, err := config.ResolveProviderPreset("omniroute")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.SaveProviderConnection(preset, false); err != nil {
+		t.Fatalf("SaveProviderConnection() error = %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	found := false
+	for _, p := range cfg.Providers {
+		if p.ID == "omniroute" {
+			found = true
+			if !p.Enabled {
+				t.Fatalf("omniroute enabled = false right after SaveProviderConnection; want true")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("omniroute not present after SaveProviderConnection")
 	}
 
 	if err := config.RemoveCredential("omniroute"); err != nil {
 		t.Fatalf("RemoveCredential() error = %v", err)
-	}
-
-	if _, err := os.Stat(xdg.ConfigFile()); err != nil {
-		t.Fatalf("config.toml was not created by RemoveCredential: %v", err)
 	}
 
 	cfg, err = config.Load(config.Options{SkipProject: true})
@@ -257,8 +300,7 @@ func TestRemoveCredentialDisablesDefaultsOnlyProvider(t *testing.T) {
 	}
 	for _, p := range cfg.Providers {
 		if p.ID == "omniroute" && p.Enabled {
-			t.Fatalf("omniroute still enabled after RemoveCredential; " +
-				"disableProviderConnection should have appended an override")
+			t.Fatalf("omniroute still enabled after RemoveCredential")
 		}
 	}
 }
