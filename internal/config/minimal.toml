@@ -1,0 +1,17 @@
+# Minimal ishakat configuration.
+#
+# This is everything a config.toml needs to be valid: a schema version.
+# Every other setting already has a sane built-in default (see
+# internal/config/defaults.toml in the source, or run `ishakat config check`
+# to see what's actually in effect for you right now).
+schema = 1
+
+[app]
+
+# To add a provider's credentials, run:
+#   ishakat provider add
+# That command edits this file for you — there's no need to hand-write a
+# [[provider]] block below.
+
+# For a fully annotated example with every option explained inline, run:
+#   ishakat config init --full

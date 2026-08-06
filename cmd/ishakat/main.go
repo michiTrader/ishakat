@@ -32,7 +32,8 @@ USAGE
   ishakat <subcommand>
 
 SUBCOMMANDS
-  config init|path|check   creates, locates or validates the configuration
+  config init [--full]     creates the configuration (minimal by default; --full for the annotated example)
+  config path|check        locates or validates the configuration
   provider add|list|remove configure API credentials without editing TOML
   doctor                   network, path and dialect diagnostics
   models [--json] [--refresh] [--all] [filter]   the model catalog
@@ -265,7 +266,7 @@ func firstNonEmpty(vals ...string) string {
 
 func cmdConfig(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "uso: ishakat config <init|path|check> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: ishakat config <init|path|check> [flags]")
 		return 2
 	}
 
@@ -276,31 +277,43 @@ func cmdConfig(args []string) int {
 
 	case "init":
 		fs := flag.NewFlagSet("config init", flag.ExitOnError)
-		force := fs.Bool("force", false, "sobrescribe la configuración si ya existe")
+		force := fs.Bool("force", false, "overwrite the configuration if it already exists")
+		full := fs.Bool("full", false, "write the fully annotated example instead of the minimal skeleton")
 		_ = fs.Parse(args[1:])
 
 		path := xdg.ConfigFile()
 		if err := xdg.EnsureDir(xdg.ConfigDir()); err != nil {
-			fmt.Fprintf(os.Stderr, "✗ Error creando directorio de configuración: %v\n", err)
+			fmt.Fprintf(os.Stderr, "✗ Error creating configuration directory: %v\n", err)
 			return 1
 		}
 
 		if _, err := os.Stat(path); err == nil && !*force {
-			fmt.Fprintf(os.Stderr, "✗ El archivo %s ya existe. Usa --force para sobrescribirlo.\n", path)
+			fmt.Fprintf(os.Stderr, "✗ File %s already exists. Use --force to overwrite it.\n", path)
 			return 1
 		}
 
-		content := config.ExampleTOML
+		// Default to a minimal skeleton — schema, an empty [app], and a
+		// comment pointing at `provider add` — rather than the fully
+		// annotated example: a brand-new user's first encounter with the
+		// file used to be ~200 lines documenting every knob, most of them
+		// already fine at their built-in default. --full opts back into
+		// that for anyone who wants to read every option inline.
+		content := config.MinimalTOML
+		kind := "minimal"
+		if *full {
+			content = config.ExampleTOML
+			kind = "full example"
+		}
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "✗ Error al escribir %s: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "✗ Error writing %s: %v\n", path, err)
 			return 1
 		}
-		fmt.Printf("✓ Configuración inicial creada en: %s (0600)\n", path)
+		fmt.Printf("✓ Initial configuration (%s) created at: %s (0600)\n", kind, path)
 		return 0
 
 	case "check":
 		fs := flag.NewFlagSet("config check", flag.ExitOnError)
-		strict := fs.Bool("strict", false, "trata las advertencias como errores")
+		strict := fs.Bool("strict", false, "treat warnings as errors")
 		_ = fs.Parse(args[1:])
 
 		path := xdg.ConfigFile()
