@@ -338,6 +338,19 @@ func applyModelsDev(m *Model, ix *Index) {
 		}
 	}
 	m.Caps = m.Caps.Merge(md.Caps())
+
+	// models.dev's own lifecycle field. This is what makes hide_deprecated
+	// (merge.go's HideDeprecated below) actually hide something: providers
+	// almost never send "deprecated": true on their own /models response
+	// (see applyRaw's TagDeprecated, which fires from the gateway payload
+	// instead), so without this models.dev is the only source that has the
+	// data at all. See docs/DESIGN-model-curation.md §1.1.
+	switch strings.ToLower(md.Status) {
+	case "deprecated":
+		m.addTag(TagDeprecated)
+	case "beta", "alpha":
+		m.addTag(TagBeta)
+	}
 }
 
 // applyDeclared is the last word: whatever the user wrote wins over both

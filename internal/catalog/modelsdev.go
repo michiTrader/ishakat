@@ -58,6 +58,21 @@ type MDModel struct {
 	Modalities  []string `json:"modalities,omitempty"`
 	OpenWeights bool     `json:"open_weights,omitempty"`
 	ReleaseDate string   `json:"release_date,omitempty"`
+
+	// Status is models.dev's own lifecycle field: "deprecated", "beta",
+	// "alpha", or absent. This is what lets `hide_deprecated` do anything at
+	// all — see applyModelsDev in merge.go, and the design note in
+	// docs/DESIGN-model-curation.md §1.1.
+	Status string `json:"status,omitempty"`
+
+	// Temperature is a pointer on purpose: absent must not collapse into
+	// false. A model that omits the field is simply undocumented on this
+	// axis, not evidence that it takes no temperature — conflating the two
+	// would violate the "unknown is never a reason to hide" rule
+	// (docs/DESIGN-model-curation.md §2, principle 10). Nothing reads this
+	// yet; it exists so a future non-conversational filter (§1.2 of that
+	// same design) has the field parsed and ready.
+	Temperature *bool `json:"temperature,omitempty"`
 }
 
 // Caps turns the models.dev flags into the catalog's own capability set.
@@ -148,7 +163,16 @@ type wireMDModelRaw struct {
 	StructuredOutput bool   `json:"structured_output"`
 	OpenWeights      bool   `json:"open_weights"`
 	ReleaseDate      string `json:"release_date"`
-	Modalities       struct {
+
+	// Status is the lifecycle field this whole change exists to read:
+	// "deprecated" | "beta" | "alpha" | "" (absent, the vast majority).
+	Status string `json:"status"`
+
+	// Temperature stays a pointer through digest() too — see the field
+	// comment on MDModel for why absent must not become false.
+	Temperature *bool `json:"temperature"`
+
+	Modalities struct {
 		Input  []string `json:"input"`
 		Output []string `json:"output"`
 	} `json:"modalities"`
@@ -185,6 +209,8 @@ func (w wireMDModelRaw) digest(id string) MDModel {
 		Modalities:  w.Modalities.Input,
 		OpenWeights: w.OpenWeights,
 		ReleaseDate: w.ReleaseDate,
+		Status:      w.Status,
+		Temperature: w.Temperature,
 	}
 }
 
