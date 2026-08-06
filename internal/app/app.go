@@ -70,6 +70,15 @@ func Run(version string, resume bool) int {
 	// concern, not this one's.
 	snap := LoadCatalog(cfg)
 
+	// warnp is P3's dedupe fix (warnings.go's own doc comment on
+	// WarningPrinter): app.default_model and compact_model both falling
+	// back to the exact same provider (P2's ResolveModelForBoot) — or,
+	// before P0/P1 existed, both simply naming the same uncredentialed
+	// provider — used to print the identical warning line twice. Every
+	// ⚠ print in this startup sequence goes through warnp.Warn from here
+	// on, so a repeat is silently absorbed instead of shown twice.
+	warnp := NewWarningPrinter()
+
 	// A model/provider that fails to resolve is not fatal here the way it
 	// is in Headless (headless.go's own step 4): there is no prompt on the
 	// command line that would otherwise have nothing to answer, only an
@@ -79,12 +88,10 @@ func Run(version string, resume bool) int {
 	eng, ref, system, warn, buildErr := BuildEngine(cfg, "", version)
 	model := ref.Ref
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "⚠ %v\n", buildErr)
+		warnp.Warn(os.Stderr, buildErr.Error())
 		eng = nil
 	}
-	if warn != "" {
-		fmt.Fprintf(os.Stderr, "⚠ %s\n", warn)
-	}
+	warnp.Warn(os.Stderr, warn)
 
 	// compact_model gets its own Engine (§10, Step 12): it can name a
 	// different provider than the conversation's own model, and
@@ -99,12 +106,10 @@ func Run(version string, resume bool) int {
 	// interface refuses to start.
 	compactEng, compactRef, _, compactWarn, compactErr := BuildEngine(cfg, cfg.App.CompactModel, version)
 	if compactErr != nil {
-		fmt.Fprintf(os.Stderr, "⚠ %v\n", compactErr)
+		warnp.Warn(os.Stderr, compactErr.Error())
 		compactEng = nil
 	}
-	if compactWarn != "" {
-		fmt.Fprintf(os.Stderr, "⚠ %s\n", compactWarn)
-	}
+	warnp.Warn(os.Stderr, compactWarn)
 
 	// cfg.Warnings carries one entry per enabled provider missing its
 	// credential (expand.go). Printing all of it unconditionally used to
@@ -115,7 +120,7 @@ func Run(version string, resume bool) int {
 	// are shown here; `config check`/`doctor`/`provider list` still print
 	// cfg.Warnings unfiltered, on purpose. See warnings.go's doc comment.
 	for _, w := range FilterWarningsForProviders(cfg.Warnings, ref.Provider, compactRef.Provider) {
-		fmt.Fprintf(os.Stderr, "⚠ [%s] %s\n", w.Where, w.Msg)
+		warnp.Warn(os.Stderr, fmt.Sprintf("[%s] %s", w.Where, w.Msg))
 	}
 
 	// --resume / [session] resume_last (§13): load the previous conversation
@@ -125,9 +130,7 @@ func Run(version string, resume bool) int {
 	// "nothing to resume" here is a warning at most, same rule as the
 	// recorder below: there is always a fresh session to fall back to.
 	resumedConv, resumeStore, resumeWarn := ResumeSession(cfg, resume)
-	if resumeWarn != "" {
-		fmt.Fprintf(os.Stderr, "⚠ %s\n", resumeWarn)
-	}
+	warnp.Warn(os.Stderr, resumeWarn)
 	var history []convo.Message
 	if resumedConv != nil {
 		history = resumedConv.Messages
@@ -150,18 +153,14 @@ func Run(version string, resume bool) int {
 	} else {
 		recorder, sessionWarn = NewSessionRecorder(cfg, model, nil)
 	}
-	if sessionWarn != "" {
-		fmt.Fprintf(os.Stderr, "⚠ %s\n", sessionWarn)
-	}
+	warnp.Warn(os.Stderr, sessionWarn)
 
 	// §13's third item: /resume's own read side. resumeStore is reused when
 	// this run itself already opened one (--resume, resume_last) — same
 	// reasoning as recorder above — otherwise NewSessionLister opens its
 	// own, honouring [session] save exactly like NewSessionRecorder does.
 	lister, listerWarn := NewSessionLister(cfg, resumeStore)
-	if listerWarn != "" {
-		fmt.Fprintf(os.Stderr, "⚠ %s\n", listerWarn)
-	}
+	warnp.Warn(os.Stderr, listerWarn)
 
 	root := tui.NewRoot(tui.Options{
 		Version: version,

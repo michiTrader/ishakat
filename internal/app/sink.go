@@ -62,6 +62,14 @@ type textSink struct {
 
 	lastByte byte
 	wrote    bool
+
+	// warnedSeen is P3's dedupe fix (see warnings.go's WarningPrinter,
+	// which app.go's own startup path uses for the exact same reason):
+	// headless.go's step 4 can call warn with the identical string more
+	// than once in a single run (P2's boot-fallback notice plus a
+	// provider-scoped cfg.Warnings entry sometimes overlap in wording), and
+	// printing the same sentence to stderr twice is never useful.
+	warnedSeen map[string]bool
 }
 
 func (t *textSink) meta(ModelRef, string, bool) {}
@@ -97,6 +105,13 @@ func (t *textSink) warn(s string) {
 	if t.quiet || s == "" {
 		return
 	}
+	if t.warnedSeen == nil {
+		t.warnedSeen = map[string]bool{}
+	}
+	if t.warnedSeen[s] {
+		return
+	}
+	t.warnedSeen[s] = true
 	fmt.Fprintf(t.err, "%s %s\n", t.paint(yellow, "⚠"), s)
 }
 
@@ -183,6 +198,13 @@ type jsonEvent struct {
 // something failed.
 type jsonSink struct {
 	enc *json.Encoder
+
+	// warnedSeen mirrors textSink's own field: the same run can call warn
+	// with an identical string more than once (see textSink.warn's doc
+	// comment), and a --json consumer piping into jq has just as little
+	// use for the same "warning" line encoded twice as a plain-text one
+	// does.
+	warnedSeen map[string]bool
 }
 
 func newJSONSink(w io.Writer) *jsonSink {
@@ -231,9 +253,17 @@ func (j *jsonSink) usage(u *convo.Usage) {
 }
 
 func (j *jsonSink) warn(s string) {
-	if s != "" {
-		j.emit(jsonEvent{Type: "warning", Text: s})
+	if s == "" {
+		return
 	}
+	if j.warnedSeen == nil {
+		j.warnedSeen = map[string]bool{}
+	}
+	if j.warnedSeen[s] {
+		return
+	}
+	j.warnedSeen[s] = true
+	j.emit(jsonEvent{Type: "warning", Text: s})
 }
 
 func (j *jsonSink) fail(err error) {
