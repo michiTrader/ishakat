@@ -142,6 +142,11 @@ func walkValue(val reflect.Value, fn func(string) string) {
 	}
 }
 
+// checkPerms warns if path is group/world accessible. Call only for the
+// credentials layer (xdg.CredentialsFile()); config.toml and .ishakat.toml
+// are shareable-by-design and always written at 0644, so running this
+// against them would contradict SaveProviderConnection's own choice — see
+// the call site comment in load.go.
 func checkPerms(path string) []Warning {
 	var warns []Warning
 	info, err := os.Stat(path)
