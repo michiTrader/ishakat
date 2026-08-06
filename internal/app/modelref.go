@@ -120,8 +120,14 @@ func lookupModelProvider(cfg *config.Config, text string) (pc config.Provider, w
 		// makes `-m gpt-4o-mini` work without writing "openai/" in front.
 		enabled := EnabledProviders(cfg)
 		if len(enabled) == 0 {
-			return config.Provider{}, "", "", fmt.Errorf("no provider is enabled: check the "+
-				"[[provider]] entries in %s", configOrigin(cfg))
+			// P3: a fresh install (P0/P1) ends up here with zero active
+			// providers — an honest, expected state, not a broken config —
+			// so the message names the actual fix (`provider add`) instead
+			// of sending the user to hand-edit TOML entries that likely
+			// don't even exist yet.
+			return config.Provider{}, "", "", fmt.Errorf("no provider is enabled yet: run "+
+				"`ishakat provider add <name>` (openai, anthropic, gemini, nvidia, omniroute) "+
+				"or check the [[provider]] entries in %s", configOrigin(cfg))
 		}
 		pc = enabled[0]
 		wire = q

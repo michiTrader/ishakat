@@ -87,11 +87,21 @@ func NewProvider(cfg *config.Config, p config.Provider, version string) (provide
 			"(available dialects: %s)", p.ID, p.Kind, strings.Join(provider.Kinds(), ", "))
 	}
 	if !p.AuthOK {
+		// P3: a provider reaching this branch was, by construction,
+		// explicitly declared by the user (P1's expandVars already
+		// auto-disables an embedded-only provider with an unresolved
+		// credential before Enabled/AuthOK ever get here — see
+		// internal/config/expand.go's own doc comment). So "set the
+		// variable" is genuinely the right first suggestion; what the
+		// original bug report actually needed was the second half: an
+		// escape hatch for "I don't want this provider at all", since
+		// `export VAR=… and try again` alone reads as mandatory.
 		hint := "set the environment variable and try again"
 		if p.MissingEnv != "" {
 			hint = fmt.Sprintf("export %s=… and try again", p.MissingEnv)
 		}
-		return nil, fmt.Errorf("%w for %q: %s", provider.ErrNoAPIKey, p.ID, hint)
+		return nil, fmt.Errorf("%w for %q: %s (or `ishakat provider remove %s` if you don't want this provider)",
+			provider.ErrNoAPIKey, p.ID, hint, p.ID)
 	}
 	return provider.New(Settings(cfg, p, version))
 }

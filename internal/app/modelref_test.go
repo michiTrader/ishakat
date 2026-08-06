@@ -167,6 +167,29 @@ func TestNewProviderMissingKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "OMNIROUTE_API_KEY") {
 		t.Errorf("the error must name the missing variable, it says: %v", err)
 	}
+	// P3: the message must also offer the escape hatch for a provider the
+	// user never wanted in the first place, not just "export the variable"
+	// as if activating it were the only option.
+	if !strings.Contains(err.Error(), "provider remove") {
+		t.Errorf("the error must suggest `ishakat provider remove`, it says: %v", err)
+	}
+}
+
+// TestResolveModelNoProviderEnabledSuggestsProviderAdd is P3: on a fresh
+// install (P0/P1) with zero active providers, "no provider is enabled" is
+// an expected, honest state, not a broken config — the error must point at
+// the actual fix (`provider add`) rather than only telling the user to go
+// hand-edit a config.toml that may not even exist yet.
+func TestResolveModelNoProviderEnabledSuggestsProviderAdd(t *testing.T) {
+	cfg := &config.Config{Schema: config.Schema}
+
+	_, err := ResolveModel(cfg, "gpt-4o-mini")
+	if err == nil {
+		t.Fatal("no provider is enabled: want an error")
+	}
+	if !strings.Contains(err.Error(), "provider add") {
+		t.Errorf("the error must suggest `ishakat provider add`, it says: %v", err)
+	}
 }
 
 // --- P2: ResolveModelForBoot ------------------------------------------
