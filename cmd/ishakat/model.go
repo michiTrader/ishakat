@@ -85,11 +85,22 @@ func cmdModelSet(args []string) int {
 	fallbackShort := fs.Bool("f", false, "same as --fallback")
 	all := fs.Bool("all", false, "set default_model, compact_model and fallback_model together")
 	allShort := fs.Bool("a", false, "same as --all")
-	if err := fs.Parse(args); err != nil {
+
+	// flag.Parse stops at the FIRST non-flag argument and treats
+	// everything after it (flags included) as positional — see Go's own
+	// FlagSet.Parse doc comment. Every usage example above puts <ref>
+	// BEFORE the role flag ("model set <ref> --compact"), which is
+	// exactly the ordering that trips this: fs.Parse([]string{ref,
+	// "--compact"}) would leave --compact unparsed in fs.Args() and this
+	// function would reject it as an "extra argument" instead of setting
+	// compact_model. positionals/flags are partitioned by hand here so
+	// role flags are recognized regardless of where they appear.
+	positionals, flags := splitFlagsFromPositionals(args)
+	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
 
-	rest := fs.Args()
+	rest := positionals
 	if len(rest) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: ishakat model set <ref> [--default|--compact|--fallback|--all]")
 		return 2
@@ -147,6 +158,26 @@ func cmdModelSet(args []string) int {
 		fmt.Printf("app.%s set to %s.\n", joinKeys(keys), ref)
 	}
 	return 0
+}
+
+// splitFlagsFromPositionals partitions args into positional arguments and
+// flag arguments, preserving each group's relative order. It exists solely
+// to work around flag.Parse's "stop at first positional" rule (see
+// cmdModelSet's own comment) for a flag set made entirely of boolean
+// switches (--default/-d, --compact/-c, --fallback/-f, --all/-a): none of
+// them take a value, so "does this token start with '-'" is a complete and
+// correct test here. It is not a general-purpose flag parser and must not
+// be reused for a flag set that has value-taking flags (e.g. "--foo bar"),
+// where the separate value token would be misclassified as positional.
+func splitFlagsFromPositionals(args []string) (positionals, flags []string) {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") && a != "-" {
+			flags = append(flags, a)
+		} else {
+			positionals = append(positionals, a)
+		}
+	}
+	return positionals, flags
 }
 
 func joinKeys(keys []config.AppModelKey) string {

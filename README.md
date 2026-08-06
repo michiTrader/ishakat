@@ -41,6 +41,9 @@ process.
 | Area | State |
 |------|-------|
 | `ishakat config init/path/check` | ✅ works |
+| `ishakat provider add/list/remove` | ✅ works (configures credentials without hand-editing TOML) |
+| `ishakat model set/alias/favorite` | ✅ works (points `default_model`/`compact_model`/`fallback_model`, aliases and favorites without hand-editing TOML) |
+| `ishakat purge [--sessions] [--force]` | ✅ works (deletes config/cache/session files across all four XDG base dirs) |
 | `ishakat doctor` | ✅ works (DNS, paths, dialects, Termux detection, terminal capability + glyph sample) |
 | `ishakat models [--json\|--refresh\|--all] [filter]` | ✅ works (discovery + cache + models.dev + embedded seed) |
 | Fuzzy/alias/suffix model resolution (§4.5) | ✅ implemented in `internal/catalog.Resolve`, unit-tested, and wired into both `/model` and the `ctrl+p` picker |
@@ -350,6 +353,49 @@ clear it, so a provider you removed can keep showing its old model list
 until either a fresh `ishakat models --refresh` overwrites it or you run
 `models clean`. Safe to run any time; the next `--refresh` rebuilds it from
 scratch for whichever providers are enabled at that point.
+
+### 7. Point default/compact/fallback models, aliases and favorites
+
+`ishakat model` edits the same three `[app]` keys, `[alias]` and
+`[favorites]` block that `nano $(ishakat config path)` would, without
+opening an editor:
+
+```sh
+ishakat model set gemini-direct/gemini-2.5-flash            # sets app.default_model
+ishakat model set gemini-direct/gemini-2.5-flash-lite -c     # sets app.compact_model (-c/--compact)
+ishakat model set openai/gpt-4o-mini -f                      # sets app.fallback_model (-f/--fallback)
+ishakat model set gemini-direct/gemini-2.5-pro -a             # sets all three at once (-a/--all)
+ishakat model set "" --compact                                # resets compact_model to "follow default_model"
+
+ishakat model alias set smart gemini-direct/gemini-2.5-pro
+ishakat model alias remove smart
+
+ishakat model favorite add gemini-direct/gemini-2.5-flash
+ishakat model favorite remove gemini-direct/gemini-2.5-flash
+```
+
+None of these subcommands verify the reference against a live provider —
+use `ishakat models` to see what discovery actually found, or `ishakat
+provider add` first if the provider itself isn't configured yet.
+
+### 8. Start over
+
+`ishakat purge` deletes every file ishakat has ever written on its own —
+config, credentials, the model catalog cache, and every saved session
+transcript — across all four separate XDG base directories this program
+uses (see [Which console](#which-console)), which reinstalling the binary
+never touches:
+
+```sh
+ishakat purge                # asks [y/N] before deleting anything
+ishakat purge --sessions     # deletes only saved conversations, leaves config/credentials/cache alone
+ishakat purge --force        # skip the confirmation (for scripts/CI, where nothing can answer the prompt)
+```
+
+The confirmation defaults to **No** on a bare Enter, since this is
+irreversible. With no terminal attached (a script or CI run) and no
+`--force`, purge refuses instead of either hanging on an answer that will
+never arrive or silently proceeding as if the answer were yes.
 
 ## Troubleshooting
 
