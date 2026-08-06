@@ -1,9 +1,16 @@
 schema = 1
 
 [app]
-default_model = "omniroute/auto/coding"
-compact_model = "omniroute/auto/cheap"
-fallback_model = "omniroute/auto"
+# Empty on purpose: this build ships with zero providers pre-authenticated
+# (see the [[provider]] block below), so there is nothing default_model
+# could safely point at out of the box. `ishakat provider add` sets this
+# for you once a real credential is verified (see offerDefaultModel in
+# cmd/ishakat/provider.go); `ishakat model set <ref>` does it by hand.
+# compact_model empty means "same as default_model" (ResolveModel's own
+# empty-string rule); fallback_model empty means "no separate fallback".
+default_model = ""
+compact_model = ""
+fallback_model = ""
 stream = true
 system_prompt = ""
 system_prompt_file = ""
@@ -150,13 +157,16 @@ allow = [
 allow_all = false
 
 [favorites]
-list = ["omniroute/auto/coding", "omniroute/auto/fast", "omniroute/auto/cheap"]
+list = []
 
 [alias]
-smart = "omniroute/auto/coding"
-fast = "omniroute/auto/fast"
-cheap = "omniroute/auto/cheap"
 
+# OmniRoute ships declared but disabled: a fresh install has zero active
+# providers and therefore zero startup noise about missing credentials.
+# `ishakat provider add omniroute` (or openai/anthropic/nvidia/gemini)
+# enables whichever one the user actually wants — see
+# internal/config/credentials.go's ProviderPresets for the full list this
+# entry mirrors.
 [[provider]]
 id = "omniroute"
 name = "OmniRoute"
@@ -164,5 +174,5 @@ kind = "openai"
 base_url = "http://localhost:20128/v1"
 api_key = "$OMNIROUTE_API_KEY"
 discover = true
-enabled = true
+enabled = false
 timeout_s = 180
