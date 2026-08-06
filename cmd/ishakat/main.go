@@ -57,6 +57,13 @@ EXIT CODES
   0 ok · 1 error · 2 bad usage · 130 cancelled with Ctrl+C
 `
 
+// knownSubcommands lists every first-word dispatch target the switch in
+// main() recognizes (mirrored here, rather than derived from the switch via
+// reflection, because there's no cheap way to introspect a switch
+// statement). cmdUnknownSubcommand's "did you mean" suggestion walks this
+// list; keep it in sync with the switch below when a subcommand is added.
+var knownSubcommands = []string{"config", "provider", "doctor", "version", "models", "help"}
+
 func main() {
 	_ = netfix.Install()
 
@@ -79,6 +86,22 @@ func main() {
 		case "help":
 			fmt.Print(usage)
 			return
+		default:
+			// A bare first word that isn't one of the subcommands above used
+			// to fall straight through to the flag.FlagSet below, whose
+			// "bare positionals join the prompt" rule (see the comment on
+			// `rest := fs.Args()` further down) then silently turned a
+			// mistyped subcommand into a chat prompt: `ishakat add provider
+			// nvidia --no-verify` (the words of `ishakat provider add
+			// nvidia --no-verify` reversed) parsed as prompt text "add
+			// provider nvidia --no-verify" sent to app.default_model, with
+			// no usage error at all — the flag package also stops parsing
+			// flags at the first non-flag argument, so --no-verify was never
+			// recognized either; it just became more prompt text. There is
+			// no supported way to send a prompt without -p/--prompt or a
+			// pipe, so a lone unrecognized word can never legitimately mean
+			// "answer this" — it is always a usage mistake now.
+			os.Exit(cmdUnknownSubcommand(os.Args[1]))
 		}
 	}
 
@@ -161,6 +184,74 @@ func main() {
 	}
 
 	os.Exit(app.Run(version, *resume))
+}
+
+// cmdUnknownSubcommand reports a mistyped subcommand as a usage error
+// (exit 2) instead of letting it silently become a chat prompt — see the
+// comment on the `default` case in main() for the bug this replaces.
+func cmdUnknownSubcommand(word string) int {
+	fmt.Fprintf(os.Stderr, "ishakat: unknown subcommand %q\n", word)
+	if guess := closestSubcommand(word); guess != "" {
+		fmt.Fprintf(os.Stderr, "did you mean %q?\n\n", guess)
+	} else {
+		fmt.Fprintln(os.Stderr)
+	}
+	fmt.Fprint(os.Stderr, usage)
+	return app.ExitUsage
+}
+
+// closestSubcommand returns the known subcommand closest to word by edit
+// distance, capped so an unrelated word ("frobnicate") gets no suggestion
+// rather than a misleading one. Ties keep the first (alphabetical) match.
+func closestSubcommand(word string) string {
+	word = strings.ToLower(word)
+	best := ""
+	bestDist := -1
+	for _, cand := range knownSubcommands {
+		d := levenshtein(word, cand)
+		if bestDist == -1 || d < bestDist {
+			bestDist, best = d, cand
+		}
+	}
+	// A distance larger than the candidate's own length means "no
+	// resemblance at all" (e.g. comparing against "help" is worthless once
+	// the edit count exceeds 4); 3 is a generous cap that still catches
+	// single-typo and transposed-word mistakes like "add provider".
+	if bestDist < 0 || bestDist > 3 {
+		return ""
+	}
+	return best
+}
+
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			del := prev[j] + 1
+			ins := curr[j-1] + 1
+			sub := prev[j-1] + cost
+			m := del
+			if ins < m {
+				m = ins
+			}
+			if sub < m {
+				m = sub
+			}
+			curr[j] = m
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rb)]
 }
 
 func firstNonEmpty(vals ...string) string {
