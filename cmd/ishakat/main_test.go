@@ -18,8 +18,8 @@ func TestClosestSubcommand(t *testing.T) {
 		{"confg", "config"},
 		{"modles", "models"},
 		{"versoin", "version"},
-		{"add", ""},          // the actual audit scenario: no close match
-		{"frobnicate", ""},   // unrelated word: no misleading suggestion
+		{"add", ""},        // the actual audit scenario: no close match
+		{"frobnicate", ""}, // unrelated word: no misleading suggestion
 		{"", ""},
 	}
 	for _, c := range cases {

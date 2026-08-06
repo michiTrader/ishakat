@@ -44,7 +44,8 @@ func Load(o Options) (*Config, error) {
 	}
 	// Credentials are a final user-owned layer: they override provider keys and
 	// activation without changing shareable project configuration.
-	layers = append(layers, xdg.CredentialsFile())
+	credentialsPath := xdg.CredentialsFile()
+	layers = append(layers, credentialsPath)
 	for _, p := range layers {
 		b, err := os.ReadFile(p)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -59,7 +60,20 @@ func Load(o Options) (*Config, error) {
 		}
 		raw = mergeRoot(raw, m)
 		files = append(files, p)
-		warns = append(warns, checkPerms(p)...)
+		// checkPerms only makes sense for the secrets file. config.toml (and
+		// a project's .ishakat.toml) is deliberately written at 0644 by
+		// SaveProviderConnection — "config.toml is not a secrets file" is
+		// that function's own comment — precisely so it can be shared or
+		// checked into version control without a permission fight. Warning
+		// about the very mode that layer is supposed to have contradicted
+		// itself: `provider add` wrote 0644, and the next `config check`
+		// scolded the user for it and suggested 0600, which the other
+		// subsystem had explicitly decided against. Only credentials.toml
+		// (api_key material, always written 0600 by atomicWritePrivate)
+		// gets checked here.
+		if p == credentialsPath {
+			warns = append(warns, checkPerms(p)...)
+		}
 	}
 
 	applyEnv(raw)

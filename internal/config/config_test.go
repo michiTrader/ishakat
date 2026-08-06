@@ -44,6 +44,69 @@ func TestLoadExampleNoWarnings(t *testing.T) {
 	}
 }
 
+// TestConfigTOMLMode0644DoesNotWarn is the regression test for the audit's
+// second P0 finding: `provider add` deliberately writes config.toml at
+// 0644 (SaveProviderConnection's own comment: "config.toml is not a secrets
+// file"), and checkPerms used to run against every loaded layer including
+// this one — so the very next `config check` (or any config.Load) warned
+// "permisos inseguros 0644 (se recomienda 0600)" about a mode the program
+// itself had just chosen on purpose, recommending a mode
+// (SaveProviderConnection) explicitly rejected. Only credentials.toml
+// should ever trigger this warning.
+func TestConfigTOMLMode0644DoesNotWarn(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("schema = 1\n"), 0o644); err != nil {
+		t.Fatalf("could not write fixture: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: cfgPath, SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Msg, "permisos inseguros") || strings.Contains(w.Msg, "insecure permissions") {
+			t.Errorf("config.toml at 0644 must not produce a permissions warning, got [%s] %s", w.Where, w.Msg)
+		}
+	}
+}
+
+// TestCredentialsTOMLMode0644DoesWarn is the other half: credentials.toml
+// (the actual secrets file, always written 0600 by atomicWritePrivate) must
+// still be flagged if something leaves it group/world readable — the fix
+// for the P0 above narrows checkPerms' scope, it does not remove the check.
+func TestCredentialsTOMLMode0644DoesWarn(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	credPath := filepath.Join(tmpDir, "ishakat", "credentials.toml")
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatalf("could not create credentials dir: %v", err)
+	}
+	if err := os.WriteFile(credPath, []byte("schema = 1\n"), 0o644); err != nil {
+		t.Fatalf("could not write fixture: %v", err)
+	}
+
+	cfgPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("schema = 1\n"), 0o600); err != nil {
+		t.Fatalf("could not write fixture: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: cfgPath, SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	found := false
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Where, "credentials.toml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a permissions warning for credentials.toml at 0644, got warnings: %+v", cfg.Warnings)
+	}
+}
+
 func TestMergeProvidersByID(t *testing.T) {
 	tmpDir := t.TempDir()
 	userCfgPath := filepath.Join(tmpDir, "user.toml")
