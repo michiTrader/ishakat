@@ -347,6 +347,43 @@ func TestExampleTOMLLoads(t *testing.T) {
 	}
 }
 
+// TestMinimalTOMLLoads is TestExampleTOMLLoads's counterpart for the
+// skeleton `config init` writes by default (P2 of the 2026-08-06 audit):
+// it has no [[provider]] blocks and an empty [app], and must still load
+// and validate cleanly on its own — a schema-only file with nothing else
+// declared is exactly what a first run looks like before `provider add`.
+func TestMinimalTOMLLoads(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(p, []byte(config.MinimalTOML), 0o600); err != nil {
+		t.Fatalf("could not write the temp config: %v", err)
+	}
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("the file `config init` writes by default does not load: %v", err)
+	}
+	// The omniroute default from defaults.toml is still expected to be
+	// present — the minimal file only skips *documenting* it, it never
+	// disables the built-in provider.
+	if len(cfg.Providers) == 0 {
+		t.Error("expected at least the built-in omniroute provider from defaults.toml, got none")
+	}
+}
+
+// TestMinimalTOMLIsActuallyMinimal guards the point of this file: it must
+// stay far shorter than the fully annotated example, or `--full` stops
+// being a meaningfully different choice. Not a byte-exact check (unlike
+// TestExampleTOMLInSync) — minimal.toml is free to gain a line or two —
+// just a guard against it silently regrowing into a second copy of the
+// annotated example.
+func TestMinimalTOMLIsActuallyMinimal(t *testing.T) {
+	minimalLines := strings.Count(config.MinimalTOML, "\n")
+	exampleLines := strings.Count(config.ExampleTOML, "\n")
+	if minimalLines >= exampleLines/4 {
+		t.Errorf("MinimalTOML has %d lines, ExampleTOML has %d; expected the minimal skeleton to stay well under a quarter of the full example's size", minimalLines, exampleLines)
+	}
+}
+
 // TestToolsDefaultsLoad guards against the failure mode where validateTools
 // exists but never actually sees the embedded defaults: if [tools] in
 // defaults.toml drifted out of sync with the schema, Load would emit
