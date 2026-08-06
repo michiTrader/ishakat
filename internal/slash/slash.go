@@ -60,6 +60,10 @@ const (
 	// full session until one is actually chosen — the same "list is cheap,
 	// load is deferred" split convo.Store.List/Load already draws.
 	KindResume
+	// KindModels lists the current catalog snapshot inside the session
+	// (§13, Step 13), grouped by provider — the read-only counterpart of
+	// KindModel's picker, for a quick scan without opening an overlay.
+	KindModels
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -100,7 +104,7 @@ func (c Command) Usage() string {
 var Commands = []Command{
 	{Name: "help", Describe: "esta pantalla", Kind: KindHelp},
 	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
-	{Name: "models", Describe: "explorar catalogo", Kind: KindUnimplemented},
+	{Name: "models", Describe: "explorar catalogo", Kind: KindModels},
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
