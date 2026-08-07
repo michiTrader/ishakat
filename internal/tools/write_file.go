@@ -8,6 +8,12 @@ import (
 	"path/filepath"
 )
 
+// defaultNewFilePerm is what a brand-new file gets when there is no
+// existing target to preserve permissions from. Deliberately more
+// restrictive than the umask-derived 0644 os.WriteFile would use — a tool a
+// model calls should not create world/group-readable files by default.
+const defaultNewFilePerm os.FileMode = 0o600
+
 // writeFileArgs is write_file's argument shape.
 type writeFileArgs struct {
 	Path    string `json:"path"`
@@ -20,13 +26,11 @@ type writeFileArgs struct {
 // §12bis's cancellation contract — "Never a half-written file: write_file/
 // edit_file write to a temp file and rename, so cancellation cannot leave a
 // truncated target" — is why Run below never calls os.WriteFile(args.Path,
-// ...) directly. It writes to a sibling temp file in the same directory
-// (so the rename stays on one filesystem and is atomic on every platform
-// this project targets — Linux, Darwin, Windows, Android/Termux) and only
+// ...) directly. It delegates the actual write to writeStringAtomic
+// (shared with EditFile), which writes to a sibling temp file and only
 // renames it into place after the write and its fsync-equivalent flush have
 // both succeeded. A ctx cancellation caught before the rename leaves the
-// original file, if any, completely untouched; the half-written data lives
-// only in the temp file, which Run removes before returning.
+// original file, if any, completely untouched.
 type WriteFile struct{}
 
 var _ Tool = WriteFile{}
@@ -69,53 +73,19 @@ func (WriteFile) Run(ctx context.Context, rawArgs json.RawMessage) (Result, erro
 		return ErrorResult(fmt.Sprintf("%s is not a directory", dir)), nil
 	}
 
-	// os.CreateTemp in the target's own directory, not the OS-wide tmp dir:
-	// os.Rename requires both paths on the same filesystem to be atomic, and
-	// a phone's /tmp can be a different mount than the app's data directory.
-	tmp, err := os.CreateTemp(dir, ".ishakat-write-*")
-	if err != nil {
-		return ErrorResult(fmt.Sprintf("could not create a temp file in %s: %v", dir, err)), nil
-	}
-	tmpPath := tmp.Name()
-	// If Run returns before the rename below (an error, or ctx cancelled),
-	// the temp file must not linger — os.Remove after a successful rename is
-	// a harmless no-op (ErrNotExist), which is exactly the shape a deferred
-	// cleanup that "might already have happened" should take.
-	defer os.Remove(tmpPath)
-
-	_, writeErr := tmp.WriteString(args.Content)
-	syncErr := tmp.Sync()
-	closeErr := tmp.Close()
-	if writeErr != nil {
-		return ErrorResult(fmt.Sprintf("could not write to %s: %v", args.Path, writeErr)), nil
-	}
-	if syncErr != nil {
-		return ErrorResult(fmt.Sprintf("could not flush %s to disk: %v", args.Path, syncErr)), nil
-	}
-	if closeErr != nil {
-		return ErrorResult(fmt.Sprintf("could not close temp file for %s: %v", args.Path, closeErr)), nil
-	}
-
-	// Preserve the target's existing permissions across the rename, if it
-	// already exists. os.CreateTemp creates its file at 0600; a new file's
-	// permissions default to that instead — deliberately restrictive rather
-	// than the umask-derived 0644 os.WriteFile would use, since a tool a
-	// model calls should not create world/group-readable files by default.
+	// Preserve an existing target's permissions across the rename; a brand
+	// new file gets defaultNewFilePerm instead of os.CreateTemp's own 0600
+	// or the umask-derived 0644 os.WriteFile would use.
+	perm := defaultNewFilePerm
 	if info, statErr := os.Stat(args.Path); statErr == nil {
-		if err := os.Chmod(tmpPath, info.Mode().Perm()); err != nil {
-			return ErrorResult(fmt.Sprintf("could not preserve permissions on %s: %v", args.Path, err)), nil
+		perm = info.Mode().Perm()
+	}
+
+	if err := writeStringAtomic(ctx, args.Path, args.Content, perm); err != nil {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
 		}
-	}
-
-	if err := ctx.Err(); err != nil {
-		// Cancelled after the write but before the rename: the temp file is
-		// cleaned up by the deferred os.Remove above, and the original
-		// target (if any) was never touched.
-		return Result{}, err
-	}
-
-	if err := os.Rename(tmpPath, args.Path); err != nil {
-		return ErrorResult(fmt.Sprintf("could not finalize write to %s: %v", args.Path, err)), nil
+		return ErrorResult(fmt.Sprintf("could not write to %s: %v", args.Path, err)), nil
 	}
 	return OKResult(fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path)), nil
 }
