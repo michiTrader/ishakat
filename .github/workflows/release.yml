@@ -201,12 +201,8 @@ jobs:
           script: |
             adb push /tmp/ishakat-doctor-probe /data/local/tmp/ishakat
             adb shell chmod +x /data/local/tmp/ishakat
-            OUTPUT=$(adb shell /data/local/tmp/ishakat doctor)
-            echo "$OUTPUT"
-            echo "$OUTPUT" | grep -q "probando DNS.*OK" \
-              || { echo "::error::doctor did not report a successful DNS lookup on-device"; exit 1; }
-            echo "$OUTPUT" | grep -q "probando HTTPS.*OK" \
-              || { echo "::error::doctor did not report a successful HTTPS round trip on-device — this is the §3 CGO/DNS bug the release job exists to catch"; exit 1; }
+            # The emulator runner executes each script line in a separate shell.
+            OUTPUT=$(adb shell /data/local/tmp/ishakat doctor); echo "$OUTPUT"; echo "$OUTPUT" | grep -q "probando DNS.*OK" && echo "$OUTPUT" | grep -q "probando HTTPS.*OK" || { echo "::error::doctor did not report both a successful DNS lookup and a successful HTTPS round trip on-device — this is the §3 CGO/DNS bug the release job exists to catch"; exit 1; }
 
   # ---------------------------------------------------------------------
   # Only reached if every build succeeded AND the android emulator proved
