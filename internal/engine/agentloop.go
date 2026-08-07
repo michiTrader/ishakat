@@ -110,6 +110,11 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 	}
 
 	var result AgentResult
+	// lastToolName/lastToolArgs deliberately live outside the per-iteration
+	// loop below: loop detection (Bug 4, §12bis) compares a batch's first
+	// call against the *previous iteration's last* call, so this state must
+	// survive across iterations, not reset each one — see the i == 0 check
+	// where it is read.
 	var lastToolName string
 	var lastToolArgs []byte
 	callsThisTurn := 0
@@ -259,10 +264,21 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			}
 
 			// Loop detection (§12bis): the same tool name with byte-identical
-			// arguments twice in a row stops the loop and asks the user. This
-			// is the cheap guard that catches the overwhelming majority of
-			// stuck loops before the cap does.
-			if tc.name == lastToolName && bytesEqual(tc.args, lastToolArgs) {
+			// arguments twice *in a row across iterations* stops the loop and
+			// asks the user. This is the cheap guard that catches the
+			// overwhelming majority of stuck loops before the cap does.
+			//
+			// Bug 4: this must only ever compare a batch's *first* call
+			// (i == 0) against the *previous iteration's last* call —
+			// lastToolName/lastToolArgs are updated on every call below, so
+			// by the time a batch finishes they hold that batch's last call,
+			// exactly what the next iteration's i==0 check needs. Checking
+			// at i > 0 would compare a call against its own batch-mate
+			// (updated one line below on the previous trip through this same
+			// for-loop), and a model asking for the same tool with the same
+			// arguments twice *in parallel, in one batch* is not a stuck
+			// loop — it is one decision, not a retry — so it must run.
+			if i == 0 && tc.name == lastToolName && bytesEqual(tc.args, lastToolArgs) {
 				result.Stopped = fmt.Sprintf(
 					"loop detected: tool %q called twice in a row with the same arguments. Stopping to ask the user.",
 					tc.name)

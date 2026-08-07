@@ -340,6 +340,88 @@ func TestRunAgentTurnLoopDetectionDifferentArgsDoesNotFire(t *testing.T) {
 	}
 }
 
+// TestRunAgentTurnLoopDetectionParallelSameCallDoesNotFire is the regression
+// test for Bug 4: two calls with the *same* tool name and byte-identical
+// arguments issued *in parallel, in the same batch* are a single decision by
+// the model, not a retry loop, and must both run. Before the fix, the loop
+// updated lastToolName/lastToolArgs after every call in the for-loop
+// (including calls within the same batch) and compared unconditionally, so
+// c2 here would be falsely flagged as repeating c1 even though they arrived
+// in the very same tool_calls batch. The fix restricts the comparison to a
+// batch's first call (i == 0) against the previous iteration's last call.
+func TestRunAgentTurnLoopDetectionParallelSameCallDoesNotFire(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			{
+				toolCallEvent("c1", "grep", `{"q":"foo"}`),
+				toolCallEvent("c2", "grep", `{"q":"foo"}`), // identical to c1, but same batch: legitimate parallel call
+				doneEvent(),
+			},
+			{deltaEvent("done"), doneEvent()},
+		},
+	}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("search in parallel"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools:  []ToolDef{{Name: "grep", Description: "d"}},
+		Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("identical calls within one parallel batch should not trigger loop detection, got Stopped=%q", res.Stopped)
+	}
+	if runner.callCount() != 2 {
+		t.Errorf("runner called %d times, want 2 (both c1 and c2 should run — they are parallel, not a retry)", runner.callCount())
+	}
+}
+
+// TestRunAgentTurnLoopDetectionAcrossIterationsFires is the companion
+// regression test for Bug 4's other half: the comparison must still fire
+// across iteration boundaries — a batch's first call repeating the *previous
+// iteration's last* call is exactly the stuck-loop shape loop detection
+// exists to catch, and the Bug 4 fix (restricting the check to i == 0) must
+// not have accidentally disabled it.
+func TestRunAgentTurnLoopDetectionAcrossIterationsFires(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			{toolCallEvent("c1", "grep", `{"q":"foo"}`), doneEvent()},
+			{toolCallEvent("c2", "grep", `{"q":"foo"}`), doneEvent()}, // repeats c1 across the iteration boundary
+		},
+	}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("search"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools:        []ToolDef{{Name: "grep", Description: "d"}},
+		Runner:       runner.run,
+		MaxToolCalls: 25,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("loop detection should still fire across iteration boundaries")
+	}
+	if runner.callCount() != 1 {
+		t.Errorf("runner called %d times, want 1 (c2 repeats c1 across iterations and must not run)", runner.callCount())
+	}
+}
+
 // TestRunAgentTurnToolErrorIsData proves that a tool returning an error becomes
 // a BlockToolResult with IsError in the history, and the model recovers on the
 // next iteration with a text answer.
@@ -562,17 +644,26 @@ func TestRunAgentTurnCapMidBatchLeavesNoOrphanedToolCall(t *testing.T) {
 }
 
 // TestRunAgentTurnLoopDetectionMidBatchLeavesNoOrphanedToolCall is the
-// regression test for Bug 2 (the loop-detection path): loop detection fires
-// on the second of three calls in the same batch (c2 repeats c1's name and
-// args); c1 already ran, c2 is the one that stops the loop before running,
-// and c3 must still be closed out even though it was never even considered.
+// regression test for Bug 2 (the loop-detection path), reshaped for the Bug 4
+// fix: loop detection now only ever compares a batch's *first* call against
+// the *previous iteration's last* call, never against an earlier call within
+// the same batch — see agentloop.go's i == 0 guard. So this scripts two
+// iterations: the first is a batch of two (c1, c2) that both run; the second
+// iteration's first call, c3, repeats c2's name+args exactly (c2 was the
+// previous iteration's last call) — that fires loop detection before c3
+// runs, and c4 (queued right after it in the same batch) must still be
+// closed out even though it was never even considered.
 func TestRunAgentTurnLoopDetectionMidBatchLeavesNoOrphanedToolCall(t *testing.T) {
 	ss := &scriptedStreamer{
 		scripts: [][]Event{
 			{
-				toolCallEvent("c1", "grep", `{"q":"foo"}`),
-				toolCallEvent("c2", "grep", `{"q":"foo"}`), // identical to c1: fires loop detection
-				toolCallEvent("c3", "grep", `{"q":"bar"}`), // never reached
+				toolCallEvent("c1", "grep", `{"q":"bar"}`),
+				toolCallEvent("c2", "grep", `{"q":"foo"}`),
+				doneEvent(),
+			},
+			{
+				toolCallEvent("c3", "grep", `{"q":"foo"}`), // repeats c2 (previous iteration's last call): fires loop detection
+				toolCallEvent("c4", "grep", `{"q":"baz"}`), // never reached
 				doneEvent(),
 			},
 		},
@@ -597,8 +688,8 @@ func TestRunAgentTurnLoopDetectionMidBatchLeavesNoOrphanedToolCall(t *testing.T)
 	if res.Stopped == "" {
 		t.Fatal("loop detection should produce a non-empty Stopped reason")
 	}
-	if runner.callCount() != 1 {
-		t.Errorf("runner called %d times, want 1 (only c1 should have run)", runner.callCount())
+	if runner.callCount() != 2 {
+		t.Errorf("runner called %d times, want 2 (c1 and c2 should have run; c3 is caught by loop detection, c4 never considered)", runner.callCount())
 	}
 
 	announced := map[string]bool{}
