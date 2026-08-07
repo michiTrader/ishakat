@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -21,17 +22,27 @@ import (
 // FromConvo traduce el historial al dialecto OpenAI de chat, aplanando los
 // bloques a texto y reportando qué se degradó.
 //
-// El dialecto de este paso solo entiende texto: las imágenes se anuncian pero
-// no se envían, las llamadas a herramientas se aplanan a texto legible, y el
-// razonamiento se omite porque reenviarlo confunde al modelo y se paga dos
-// veces. Cuando el Paso 6 traiga las capacidades reales del catálogo, esta
-// misma función decide con datos en vez de por defecto.
+// El camino de las herramientas depende de Caps.Tools (§4.6): cuando es
+// true, un BlockToolCall se serializa como el campo `tool_calls` de un
+// mensaje assistant (con el id que el servicio asignó, para que el
+// BlockToolResult correspondiente pueda correlacionarlo vía
+// `tool_call_id`), y un BlockToolResult se serializa como un mensaje
+// role:"tool". Cuando Caps.Tools es false, ambos se aplanan a texto
+// descriptivo y se cuentan en Degradation.ToolsFlattened — el modelo
+// sigue viendo qué pasó, pero no puede pedir más herramientas.
+//
+// El razonamiento se omite siempre: reenviarlo confunde al modelo y se
+// paga dos veces. Las imágenes se anuncian pero no se envían hasta la
+// Fase 3.
 func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provider.Degradation) {
 	out := make([]ChatMessage, 0, len(msgs))
 	var deg provider.Degradation
 
 	for _, m := range msgs {
 		var b strings.Builder
+		var toolCalls []wireToolCall
+		var toolResults []ChatMessage
+
 		for _, blk := range m.Blocks {
 			switch blk.Kind {
 			case convo.BlockText:
@@ -58,19 +69,41 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 				appendPara(&b, "[imagen adjunta no soportada por este modelo: "+nameOr(blk.Name, blk.Mime)+"]")
 
 			case convo.BlockToolCall:
-				deg.ToolsFlattened++
-				appendPara(&b, "[llamada a herramienta "+blk.Name+"]\n"+string(blk.Args))
+				if caps.Tools {
+					toolCalls = append(toolCalls, wireToolCall{
+						ID:   blk.ToolCallID,
+						Type: "function",
+						Function: struct {
+							Name      string `json:"name,omitempty"`
+							Arguments string `json:"arguments,omitempty"`
+						}{
+							Name:      blk.Name,
+							Arguments: string(blk.Args),
+						},
+					})
+				} else {
+					deg.ToolsFlattened++
+					appendPara(&b, "[llamada a herramienta "+blk.Name+"]\n"+string(blk.Args))
+				}
 
 			case convo.BlockToolResult:
-				deg.ToolsFlattened++
-				// Un fallo se marca como fallo. Aplanarlo igual que una salida
-				// normal deja al modelo adivinando si "permission denied" es lo
-				// que el comando imprimió o lo que le pasó al comando, y de esa
-				// distinción depende que reaccione (§3: el error es dato).
-				if blk.IsError {
-					appendPara(&b, "[error de "+blk.Name+"]\n"+blk.Text)
+				if caps.Tools {
+					toolResults = append(toolResults, ChatMessage{
+						Role:       "tool",
+						ToolCallID: blk.ToolCallID,
+						Content:    blk.Text,
+					})
 				} else {
-					appendPara(&b, "[resultado de "+blk.Name+"]\n"+blk.Text)
+					deg.ToolsFlattened++
+					// Un fallo se marca como fallo. Aplanarlo igual que una salida
+					// normal deja al modelo adivinando si "permission denied" es lo
+					// que el comando imprimió o lo que le pasó al comando, y de esa
+					// distinción depende que reaccione (§3: el error es dato).
+					if blk.IsError {
+						appendPara(&b, "[error de "+blk.Name+"]\n"+blk.Text)
+					} else {
+						appendPara(&b, "[resultado de "+blk.Name+"]\n"+blk.Text)
+					}
 				}
 			}
 		}
@@ -82,12 +115,60 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 			appendPara(&b, "(respuesta interrumpida por el usuario)")
 			text = b.String()
 		}
-		if strings.TrimSpace(text) == "" {
-			continue
+
+		// Un mensaje assistant con tool_calls puede tener content vacío:
+		// algunos servicios exigen content:"" y otros lo rechazan si está
+		// ausente. TrimSpace distingue "no hay texto" de "solo espacios".
+		if strings.TrimSpace(text) != "" || len(toolCalls) > 0 {
+			role := string(m.Role)
+			// When Caps.Tools is false, a role:"tool" message has been
+			// flattened to descriptive text. Sending role:"tool" without a
+			// tool_call_id is invalid in the OpenAI dialect (the service
+			// rejects it), so remap it to role:"user" — the flattened result
+			// is information the model needs to see, and user is the only
+			// role that carries free-form text without a correlation id.
+			if role == string(convo.RoleTool) && !caps.Tools {
+				role = string(convo.RoleUser)
+			}
+			out = append(out, ChatMessage{
+				Role:      role,
+				Content:   text,
+				ToolCalls: toolCalls,
+			})
 		}
-		out = append(out, ChatMessage{Role: string(m.Role), Content: text})
+		// Los resultados de herramientas son mensajes propios role:"tool",
+		// uno por llamada, no bloques del mensaje que los originó.
+		out = append(out, toolResults...)
 	}
 	return out, deg
+}
+
+// MarshalTools serializa una lista de provider.ToolDef al array `tools` del
+// dialecto (§12bis #5). Devuelve nil para una lista vacía, lo que permite al
+// llamador distinguir "sin herramientas" de "una herramienta sin
+// parámetros": el primero omite el campo del cuerpo, el segundo lo incluye.
+func MarshalTools(defs []provider.ToolDef) []wireToolDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	out := make([]wireToolDef, 0, len(defs))
+	for _, d := range defs {
+		params := d.Parameters
+		if len(params) == 0 {
+			// Un schema vacío explícito es más compatible que ausente:
+			// algunos servicios rechazan una tool sin `parameters`.
+			params = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		out = append(out, wireToolDef{
+			Type: "function",
+			Function: wireToolFunc{
+				Name:        d.Name,
+				Description: d.Description,
+				Parameters:  params,
+			},
+		})
+	}
+	return out
 }
 
 func appendPara(b *strings.Builder, s string) {

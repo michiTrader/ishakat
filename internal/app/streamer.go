@@ -17,14 +17,29 @@ import (
 // construction, because it is the model's own capabilities from the
 // catalog (§5.4) — not something a running turn ever changes — which is
 // exactly why engine.Request has no room for it (see types.go's comment).
+//
+// engine.ToolDef and provider.ToolDef are the same struct with different
+// import graphs: engine's is the net/http-free copy, provider's is the one
+// the dialect serializes. They share the same fields by design (§12bis #2),
+// so the copy is field-by-field, the same way Model/Messages/System already
+// cross this boundary.
 func NewStreamer(prov provider.Provider, caps provider.Caps) engine.Streamer {
 	return func(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
+		tools := make([]provider.ToolDef, len(req.Tools))
+		for i, t := range req.Tools {
+			tools[i] = provider.ToolDef{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			}
+		}
 		pch, err := prov.Stream(ctx, provider.Request{
 			Model:    req.Model,
 			Messages: req.Messages,
 			System:   req.System,
 			Caps:     caps,
 			Stream:   true,
+			Tools:    tools,
 		})
 		if err != nil {
 			// Returned as-is, not wrapped: retryAfter (internal/engine)
@@ -47,13 +62,10 @@ func NewStreamer(prov provider.Provider, caps provider.Caps) engine.Streamer {
 // exactly once, EventError (if any) immediately before it, channel closed
 // right after.
 //
-// EventToolCall is deliberately dropped here: Step 8's scope is text
-// streaming, and there is no tool-call rendering in the TUI yet (headless
-// mode's own textSink doesn't render one specially either — see sink.go).
-// Wiring tool calls through is future work once the TUI has somewhere to
-// show them; dropping the event here costs nothing today because no
-// provider this build ships (openai, fake) emits one outside a test that
-// inspects provider.Event directly.
+// EventToolCall is wired through as of Step 14 (§12bis): the agent loop in
+// internal/engine drains it, runs the tool, appends a BlockToolResult, and
+// iterates. ID carries the tool_call_id the service assigned so the
+// dialect can correlate the result on the next turn.
 func translate(in <-chan provider.Event, out chan<- engine.Event) {
 	defer close(out)
 	for ev := range in {
@@ -62,6 +74,13 @@ func translate(in <-chan provider.Event, out chan<- engine.Event) {
 			out <- engine.Event{Kind: engine.EventDelta, Text: ev.Text}
 		case provider.EventReasoning:
 			out <- engine.Event{Kind: engine.EventReasoning, Text: ev.Text}
+		case provider.EventToolCall:
+			out <- engine.Event{
+				Kind: engine.EventToolCall,
+				ID:   ev.ID,
+				Name: ev.Name,
+				Args: ev.Args,
+			}
 		case provider.EventUsage:
 			out <- engine.Event{Kind: engine.EventUsage, Usage: ev.Usage}
 		case provider.EventWarning:

@@ -154,6 +154,14 @@ func (p *Provider) buildBody(req provider.Request, msgs []ChatMessage) ([]byte, 
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 
+	// El array `tools` del dialecto (§12bis #5). Vacío significa sin
+	// herramientas: se omite el campo en vez de mandar [], porque algunos
+	// gateways rechazan un array vacío. Va antes de los overrides para que
+	// [provider.params] pueda reemplazarlo o quitarlo sin recompilar.
+	if tools := MarshalTools(req.Tools); tools != nil {
+		body["tools"] = tools
+	}
+
 	for k, v := range p.set.Params {
 		applyParam(body, k, v)
 	}
