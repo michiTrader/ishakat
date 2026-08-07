@@ -20,6 +20,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -33,6 +34,7 @@ type EventKind int
 const (
 	EventDelta EventKind = iota
 	EventReasoning
+	EventToolCall
 	EventUsage
 	EventWarning
 	EventDone
@@ -43,9 +45,11 @@ const (
 // provider.Event by the Streamer adapter internal/app builds.
 type Event struct {
 	Kind  EventKind
-	Text  string       // delta (EventDelta/EventReasoning) or message (EventWarning)
-	Usage *convo.Usage // set on EventUsage, and optionally again on EventDone
-	Err   error        // set on EventError
+	Text  string
+	Name  string
+	Args  json.RawMessage
+	Usage *convo.Usage
+	Err   error
 }
 
 // Request is what a Streamer needs to open one turn. Model is the wire ID
@@ -64,7 +68,24 @@ type Request struct {
 	Model    string
 	Messages []convo.Message
 	System   string
+	Tools    []ToolDef
 }
+
+// ToolDef describes one callable tool without coupling engine to its implementation.
+type ToolDef struct {
+	Name        string
+	Description string
+	Parameters  json.RawMessage
+}
+
+// ToolResult is the model-visible outcome of a tool invocation.
+type ToolResult struct {
+	Text    string
+	IsError bool
+}
+
+// ToolRunner executes one tool call. Implementations live outside engine.
+type ToolRunner func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error)
 
 // Streamer opens one turn against a provider and returns the event channel,
 // exactly like provider.Provider.Stream but without naming that type. A
