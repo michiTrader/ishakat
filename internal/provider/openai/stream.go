@@ -368,6 +368,7 @@ type toolAccumulator struct {
 }
 
 type toolAcc struct {
+	id   string
 	name string
 	args strings.Builder
 }
@@ -381,6 +382,12 @@ func (t *toolAccumulator) add(tc wireToolCall) {
 	if !ok {
 		acc = &toolAcc{}
 		t.byIndex[tc.Index] = acc
+	}
+	// El id llega una sola vez en el primer chunk de la llamada; conservarlo
+	// tal cual para que el BlockToolResult pueda round-trip el tool_call_id
+	// que el servicio exige (§12bis #5).
+	if tc.ID != "" {
+		acc.id = tc.ID
 	}
 	if tc.Function.Name != "" {
 		acc.name = tc.Function.Name
@@ -406,6 +413,7 @@ func (t *toolAccumulator) flush(ctx context.Context, ch chan<- provider.Event) {
 		}
 		if !emit(ctx, ch, provider.Event{
 			Kind: provider.EventToolCall,
+			ID:   acc.id,
 			Name: acc.name,
 			Args: json.RawMessage(args),
 		}) {
