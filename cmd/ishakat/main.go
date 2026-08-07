@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 
@@ -477,5 +480,51 @@ func cmdDoctor() int {
 		fmt.Printf("OK (%s)\n", strings.Join(ips, ", "))
 	}
 
+	// DNS succeeding is necessary but not sufficient: it is exactly the part
+	// that a resolv.conf fallback or a stub /etc/hosts entry can satisfy
+	// while TLS or the actual HTTP round trip still fails. Step 13bis's
+	// closing criterion is explicit that doctor must report a real HTTPS
+	// request to a remote host, not a DNS lookup wearing its name — this is
+	// the check that would have caught the android/arm64 CGO bug (§3) at
+	// install time instead of on the first real chat message.
+	fmt.Print("  probando HTTPS (https://models.dev/api.json)... ")
+	fmt.Println(httpsProbe(doctorProbeURL))
+
 	return 0
+}
+
+// doctorProbeURL is the remote endpoint httpsProbe checks against. It is a
+// var rather than a literal inline so a test can point it at an
+// httptest.Server instead of the real network — doctor's own test suite
+// should not depend on models.dev being reachable from wherever `go test`
+// happens to run.
+var doctorProbeURL = "https://models.dev/api.json"
+
+// httpsProbe performs a real HTTPS (or, in tests, plain HTTP against a local
+// server) HEAD request and reports what happened in one line. It
+// deliberately does not reuse any client that might carry a mocked transport
+// (e.g. from provider tests): doctor's whole job here is to prove the
+// binary's actual network stack — DNS, TLS, HTTP — works, not that some
+// abstraction over it does.
+func httpsProbe(url string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return fmt.Sprintf("FALLÓ: %v", err)
+	}
+	req.Header.Set("User-Agent", "ishakat-doctor/"+version)
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Sprintf("FALLÓ: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Sprintf("FALLÓ: HTTP %d", resp.StatusCode)
+	}
+	return fmt.Sprintf("OK (HTTP %d, %s)", resp.StatusCode, time.Since(start).Round(time.Millisecond))
 }
