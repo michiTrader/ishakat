@@ -44,10 +44,16 @@ const (
 // Event is engine's view of a single item off the wire, translated 1:1 from
 // provider.Event by the Streamer adapter internal/app builds.
 type Event struct {
-	Kind  EventKind
-	Text  string
+	Kind EventKind
+	Text string
+	// Name, Args and ID describe an EventToolCall. ID is the tool_call_id
+	// the service assigned; agentloop.go copies it into the BlockToolCall so
+	// the eventual BlockToolResult can round-trip the correlation the
+	// OpenAI dialect requires (§12bis #5). Empty when the service does not
+	// assign ids.
 	Name  string
 	Args  json.RawMessage
+	ID    string
 	Usage *convo.Usage
 	Err   error
 }
