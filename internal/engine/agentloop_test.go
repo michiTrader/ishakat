@@ -426,6 +426,284 @@ func (r *errorRunner) run(ctx context.Context, name string, args json.RawMessage
 	return ToolResult{}, r.err
 }
 
+// TestRunAgentTurnNilRunnerHallucinatedToolCallDoesNotPanic is the regression
+// test for Bug 1: AgentOptions.Runner's own doc comment promises that a
+// model producing a tool call with no runner bound "reports it as a tool
+// error in the context rather than crashing". hasTools clears opts.Tools
+// when Runner is nil, but a real model can still hallucinate a tool_call it
+// was never offered — this is exactly the scripted case: the streamer emits
+// one anyway. Before the fix, opts.Runner(ctx, ...) was called unconditionally
+// and this test panicked with a nil pointer dereference.
+func TestRunAgentTurnNilRunnerHallucinatedToolCallDoesNotPanic(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			// The model calls a tool despite Tools/Runner both being unset —
+			// req.Tools was empty, so this is a hallucination, not a legitimate
+			// request the loop offered.
+			{toolCallEvent("c1", "ghost", `{}`), doneEvent()},
+			{deltaEvent("sorry, I made that up"), doneEvent()},
+		},
+	}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("hi"))
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("RunAgentTurn panicked: %v", r)
+		}
+	}()
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{ /* zero value: no Tools, no Runner */ }, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: unexpected error: %v", err)
+	}
+	if !strings.Contains(res.Text, "made that up") {
+		t.Errorf("model should recover after the synthetic tool error, got %q", res.Text)
+	}
+
+	// The hallucinated call must still get a BlockToolResult (IsError), so
+	// the history stays valid to re-serialize.
+	var sawErrorResult bool
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolResult && b.IsError && b.ToolCallID == "c1" {
+				sawErrorResult = true
+			}
+		}
+	}
+	if !sawErrorResult {
+		t.Error("history should contain a BlockToolResult(IsError) for the hallucinated call c1")
+	}
+}
+
+// TestRunAgentTurnCapMidBatchLeavesNoOrphanedToolCall is the regression test
+// for Bug 2 (the cap path): when the cap fires partway through a parallel
+// batch of tool calls, every tool_calls entry on the assistant message
+// already persisted must get a matching role:"tool" reply — including the
+// ones that never ran — or the next request built from this history is
+// invalid in the OpenAI dialect (a tool_calls entry with no corresponding
+// tool message 400s the service).
+func TestRunAgentTurnCapMidBatchLeavesNoOrphanedToolCall(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			// One iteration, three parallel tool calls in the same batch.
+			{
+				toolCallEvent("c1", "repeat", `{"i":1}`),
+				toolCallEvent("c2", "repeat", `{"i":2}`),
+				toolCallEvent("c3", "repeat", `{"i":3}`),
+				doneEvent(),
+			},
+		},
+	}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("batch"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools:        []ToolDef{{Name: "repeat", Description: "d"}},
+		Runner:       runner.run,
+		MaxToolCalls: 1,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("cap should produce a non-empty Stopped reason")
+	}
+
+	// The assistant message must carry all three tool_calls (c1, c2, c3):
+	// find it and collect every ToolCallID it announced.
+	var announced []string
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleAssistant {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolCall {
+				announced = append(announced, b.ToolCallID)
+			}
+		}
+	}
+	if len(announced) != 3 {
+		t.Fatalf("assistant message should announce 3 tool_calls, got %v", announced)
+	}
+
+	// Every announced id must have a matching role:"tool" reply somewhere in
+	// history — this is the invariant Bug 2 broke.
+	replied := map[string]bool{}
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolResult {
+				replied[b.ToolCallID] = true
+			}
+		}
+	}
+	for _, id := range announced {
+		if !replied[id] {
+			t.Errorf("tool_call %q has no matching role:tool reply — this orphans the next request", id)
+		}
+	}
+}
+
+// TestRunAgentTurnLoopDetectionMidBatchLeavesNoOrphanedToolCall is the
+// regression test for Bug 2 (the loop-detection path): loop detection fires
+// on the second of three calls in the same batch (c2 repeats c1's name and
+// args); c1 already ran, c2 is the one that stops the loop before running,
+// and c3 must still be closed out even though it was never even considered.
+func TestRunAgentTurnLoopDetectionMidBatchLeavesNoOrphanedToolCall(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			{
+				toolCallEvent("c1", "grep", `{"q":"foo"}`),
+				toolCallEvent("c2", "grep", `{"q":"foo"}`), // identical to c1: fires loop detection
+				toolCallEvent("c3", "grep", `{"q":"bar"}`), // never reached
+				doneEvent(),
+			},
+		},
+	}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("batch search"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools:        []ToolDef{{Name: "grep", Description: "d"}},
+		Runner:       runner.run,
+		MaxToolCalls: 25,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("loop detection should produce a non-empty Stopped reason")
+	}
+	if runner.callCount() != 1 {
+		t.Errorf("runner called %d times, want 1 (only c1 should have run)", runner.callCount())
+	}
+
+	announced := map[string]bool{}
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleAssistant {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolCall {
+				announced[b.ToolCallID] = true
+			}
+		}
+	}
+	replied := map[string]bool{}
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolResult {
+				replied[b.ToolCallID] = true
+			}
+		}
+	}
+	for id := range announced {
+		if !replied[id] {
+			t.Errorf("tool_call %q has no matching role:tool reply — this orphans the next request", id)
+		}
+	}
+}
+
+// TestRunAgentTurnCancellationMidBatchLeavesNoOrphanedToolCall is the
+// regression test for Bug 2 (the cancellation path): the batch has two
+// calls; the runner blocks on the first, and cancelling while it is running
+// must close out both — the one that was cancelled in flight and the one
+// that never got a chance to start.
+func TestRunAgentTurnCancellationMidBatchLeavesNoOrphanedToolCall(t *testing.T) {
+	scripts := [][]Event{
+		{
+			toolCallEvent("c1", "slow", `{}`),
+			toolCallEvent("c2", "slow", `{"other":true}`),
+			doneEvent(),
+		},
+	}
+	ss := &scriptedStreamer{scripts: scripts}
+	runner := &blockingRunner{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("run slow batch"))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = eng.RunAgentTurn(ctx, Request{
+			Model:    "fake/pro",
+			Messages: hist.Active(),
+		}, AgentOptions{
+			Tools:  []ToolDef{{Name: "slow", Description: "d"}},
+			Runner: runner.run,
+		}, hist)
+	}()
+
+	runner.waitEntered(time.Second)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunAgentTurn did not return after cancellation")
+	}
+
+	announced := map[string]bool{}
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleAssistant {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolCall {
+				announced[b.ToolCallID] = true
+			}
+		}
+	}
+	replied := map[string]bool{}
+	for _, m := range hist.Messages {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolResult {
+				replied[b.ToolCallID] = true
+			}
+		}
+	}
+	if len(announced) != 2 {
+		t.Fatalf("assistant message should announce 2 tool_calls, got %v", announced)
+	}
+	for id := range announced {
+		if !replied[id] {
+			t.Errorf("tool_call %q has no matching role:tool reply — this orphans the next request", id)
+		}
+	}
+}
+
 // TestRunAgentTurnCancellationMidTool proves that cancelling ctx while a tool
 // is running aborts the turn, marks the result Aborted, and persists a tool
 // error in the history — never leaving the loop hanging.

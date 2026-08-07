@@ -302,6 +302,7 @@ func TestBuildBodyIncludesToolsArray(t *testing.T) {
 
 	p := newProvider(t, srv.URL)
 	req := hola()
+	req.Caps.Tools = true
 	req.Tools = []provider.ToolDef{
 		{Name: "list", Description: "list files", Parameters: json.RawMessage(`{"type":"object"}`)},
 	}
@@ -326,6 +327,66 @@ func TestBuildBodyIncludesToolsArray(t *testing.T) {
 	fn, _ := first["function"].(map[string]any)
 	if fn == nil || fn["name"] != "list" {
 		t.Errorf("tools[0].function.name should be list: %+v", fn)
+	}
+}
+
+// TestBuildBodyOmitsToolsWhenCapsToolsFalse is the regression test for Bug 3:
+// req.Tools non-empty but req.Caps.Tools false (the model's declared
+// capability, per the catalog) must NOT put a `tools` field on the wire.
+// provider.Request.Tools's own doc comment says "cuando Caps.Tools es
+// false, el adaptador lo deja vacío" — before the fix, buildBody called
+// MarshalTools(req.Tools) unconditionally, so a tools-incapable model still
+// received the array and the service rejected the request with a 400.
+func TestBuildBodyOmitsToolsWhenCapsToolsFalse(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{"data: [DONE]\n\n"}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+	defer srv.Close()
+
+	p := newProvider(t, srv.URL)
+	req := hola()
+	req.Tools = []provider.ToolDef{
+		{Name: "list", Description: "list files"},
+	}
+	// req.Caps.Tools is the zero value: false. This is the exact
+	// misconfiguration that reaches the provider whenever a caller builds
+	// Request.Tools without having first checked the model's capability.
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	if _, ok := gotBody["tools"]; ok {
+		t.Error("body should not include a `tools` field when Caps.Tools is false, even if req.Tools is non-empty")
+	}
+}
+
+// TestBuildBodyIncludesToolsWhenCapsToolsTrue is the positive counterpart:
+// with Caps.Tools true and req.Tools non-empty, the array must still reach
+// the wire — this pins the case the fix for Bug 3 must not break.
+func TestBuildBodyIncludesToolsWhenCapsToolsTrue(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{"data: [DONE]\n\n"}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+	defer srv.Close()
+
+	p := newProvider(t, srv.URL)
+	req := hola()
+	req.Caps.Tools = true
+	req.Tools = []provider.ToolDef{
+		{Name: "list", Description: "list files"},
+	}
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	if _, ok := gotBody["tools"]; !ok {
+		t.Error("body should include a `tools` field when Caps.Tools is true and req.Tools is non-empty")
 	}
 }
 

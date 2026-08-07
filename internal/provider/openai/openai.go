@@ -154,12 +154,19 @@ func (p *Provider) buildBody(req provider.Request, msgs []ChatMessage) ([]byte, 
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 
-	// El array `tools` del dialecto (§12bis #5). Vacío significa sin
-	// herramientas: se omite el campo en vez de mandar [], porque algunos
-	// gateways rechazan un array vacío. Va antes de los overrides para que
-	// [provider.params] pueda reemplazarlo o quitarlo sin recompilar.
-	if tools := MarshalTools(req.Tools); tools != nil {
-		body["tools"] = tools
+	// El array `tools` del dialecto (§12bis #5). Se manda solo cuando el
+	// modelo de destino declara soporte (Caps.Tools) — provider.Request.Tools
+	// documenta exactamente esto: "cuando Caps.Tools es falso, el adaptador
+	// lo deja vacío". Sin esta comprobación, un modelo sin soporte de tools
+	// recibía el array igual y el servicio respondía 400. Vacío/omitido
+	// significa sin herramientas: se omite el campo en vez de mandar [],
+	// porque algunos gateways rechazan un array vacío. Va antes de los
+	// overrides para que [provider.params] pueda reemplazarlo o quitarlo sin
+	// recompilar.
+	if req.Caps.Tools {
+		if tools := MarshalTools(req.Tools); tools != nil {
+			body["tools"] = tools
+		}
 	}
 
 	for k, v := range p.set.Params {
