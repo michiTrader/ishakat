@@ -120,8 +120,18 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 		// algunos servicios exigen content:"" y otros lo rechazan si está
 		// ausente. TrimSpace distingue "no hay texto" de "solo espacios".
 		if strings.TrimSpace(text) != "" || len(toolCalls) > 0 {
+			role := string(m.Role)
+			// When Caps.Tools is false, a role:"tool" message has been
+			// flattened to descriptive text. Sending role:"tool" without a
+			// tool_call_id is invalid in the OpenAI dialect (the service
+			// rejects it), so remap it to role:"user" — the flattened result
+			// is information the model needs to see, and user is the only
+			// role that carries free-form text without a correlation id.
+			if role == string(convo.RoleTool) && !caps.Tools {
+				role = string(convo.RoleUser)
+			}
 			out = append(out, ChatMessage{
-				Role:      string(m.Role),
+				Role:      role,
 				Content:   text,
 				ToolCalls: toolCalls,
 			})
