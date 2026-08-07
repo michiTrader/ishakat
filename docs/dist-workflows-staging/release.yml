@@ -1,0 +1,234 @@
+name: Release
+
+# Runs only on a version tag (v0.1.0, v0.1.1, ...). Nothing here fires on a
+# normal push — release.yml builds and publishes the artifacts install.sh
+# downloads, and a tag is the one signal that means "this commit is meant to
+# be installed by a stranger", not "this commit passed CI".
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  GO_VERSION: "1.26.5"
+  # r27d is the NDK release the Makefile's own `android:` target was written
+  # against (aarch64-linux-android24-clang — API level 24, Android 7.0,
+  # chosen because it is the oldest level Termux still supports on arm64).
+  NDK_VERSION: "r27d"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # The four CGO_ENABLED=0 targets. None of these can hit the §3 DNS bug —
+  # only android needs CGO — so they get the fast path: build, checksum,
+  # upload. No emulator needed to trust these.
+  # ---------------------------------------------------------------------
+  build-desktop:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            asset: ishakat-linux-amd64
+          - goos: linux
+            goarch: arm64
+            asset: ishakat-linux-arm64
+          - goos: darwin
+            goarch: arm64
+            asset: ishakat-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset: ishakat-windows-amd64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "dist/${{ matrix.asset }}" \
+            ./cmd/ishakat
+
+      - name: checksum
+        run: |
+          cd dist
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # The android/arm64 release artifact itself. NDK + CGO is mandatory
+  # (§3): a CGO_ENABLED=0 android build starts, prints --version, and dies
+  # on the first real DNS lookup, because Go's pure resolver reads
+  # /etc/resolv.conf and Android does not have that file. This job proves
+  # the artifact is *actually* built with CGO (readelf, not just "the flag
+  # was set") — the DNS/HTTPS behaviour itself is proven end-to-end by the
+  # verify-android-doctor job below, on an emulator running the same code
+  # path at a different architecture (see that job's own comment for why).
+  # ---------------------------------------------------------------------
+  build-android:
+    name: build (android/arm64, NDK+CGO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+
+      - name: build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: android
+          GOARCH: arm64
+          CC: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o dist/ishakat-android-arm64 \
+            ./cmd/ishakat
+
+      - name: verify the binary is actually CGO-linked, not a plain static Go build
+        run: |
+          file dist/ishakat-android-arm64
+          # A CGO_ENABLED=0 build is a static ELF with no dynamic section at
+          # all; a CGO_ENABLED=1 NDK build against bionic must show one, and
+          # specifically must need libc.so — that dependency is what makes
+          # DNS resolution go through Bionic's getaddrinfo instead of Go's
+          # /etc/resolv.conf-reading pure resolver. If this grep finds
+          # nothing, CGO silently did not take effect and the artifact has
+          # the exact bug §3 describes, however the build flags looked.
+          readelf -d dist/ishakat-android-arm64 | tee /dev/stderr | grep -q 'NEEDED.*libc\.so' \
+            || { echo "::error::android/arm64 artifact has no libc.so NEEDED entry — CGO did not link, this build has the §3 DNS bug"; exit 1; }
+
+      - name: checksum
+        run: |
+          cd dist
+          sha256sum ishakat-android-arm64 > ishakat-android-arm64.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ishakat-android-arm64
+          path: |
+            dist/ishakat-android-arm64
+            dist/ishakat-android-arm64.sha256
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # The actual end-to-end proof §13bis demands: "the release job must
+  # verify a real remote DNS resolution on the android artifact, not just
+  # that it compiled" — since extended to a real HTTPS round trip
+  # (cmd/ishakat/main.go's httpsProbe, PR #65).
+  #
+  # Why android/amd64 and not the arm64 release artifact directly: GitHub's
+  # hosted runners only have hardware-accelerated virtualization for
+  # x86_64 Android emulators (see github.blog/changelog "Hardware
+  # accelerated Android virtualization", 2024-04-02); an arm64-v8a AVD on
+  # an x86_64 host runs under pure software translation and is known to be
+  # unreliable in CI to the point of the emulator never finishing boot
+  # (adb reports "no devices found" indefinitely — a widely reported
+  # failure mode, not a corner case). android/amd64 is a real GOARCH Go
+  # supports precisely for this: testing on an x86_64 Android emulator.
+  # The code path being verified here — netfix's CGO/bionic resolver
+  # decision and the doctor DNS+HTTPS probes — does not depend on CPU
+  # architecture; it depends on GOOS=android and CGO_ENABLED=1, both of
+  # which this job reproduces exactly. The arm64 artifact's CGO linkage
+  # is separately confirmed by build-android's readelf check above.
+  # ---------------------------------------------------------------------
+  verify-android-doctor:
+    name: verify android doctor (DNS + HTTPS, emulator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+
+      - name: build a test-only android/amd64 binary (not a release asset)
+        env:
+          CGO_ENABLED: "1"
+          GOOS: android
+          GOARCH: amd64
+          CC: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang
+        run: |
+          go build -trimpath -o /tmp/ishakat-doctor-probe ./cmd/ishakat
+
+      - name: enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: run doctor inside an Android emulator and assert DNS + HTTPS both succeed
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          # No GUI needed for a CLI probe; -no-window is the only flag that
+          # meaningfully speeds this up on a headless runner.
+          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb push /tmp/ishakat-doctor-probe /data/local/tmp/ishakat
+            adb shell chmod +x /data/local/tmp/ishakat
+            OUTPUT=$(adb shell /data/local/tmp/ishakat doctor)
+            echo "$OUTPUT"
+            echo "$OUTPUT" | grep -q "probando DNS.*OK" \
+              || { echo "::error::doctor did not report a successful DNS lookup on-device"; exit 1; }
+            echo "$OUTPUT" | grep -q "probando HTTPS.*OK" \
+              || { echo "::error::doctor did not report a successful HTTPS round trip on-device — this is the §3 CGO/DNS bug the release job exists to catch"; exit 1; }
+
+  # ---------------------------------------------------------------------
+  # Only reached if every build succeeded AND the android emulator proved
+  # DNS+HTTPS actually work on-device. Publishes all five assets plus their
+  # .sha256 files — the exact filenames install.sh already expects.
+  # ---------------------------------------------------------------------
+  release:
+    name: publish GitHub Release
+    needs: [build-desktop, build-android, verify-android-doctor]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: list what will be published
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
