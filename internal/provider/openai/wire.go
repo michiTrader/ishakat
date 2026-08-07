@@ -22,19 +22,19 @@ import "encoding/json"
 // servicios exigen content:"" y otros lo rechazan; marshalTools se encarga
 // de eso).
 type ChatMessage struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
-	Name       string          `json:"name,omitempty"`
-	ToolCalls  []wireToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	Name       string         `json:"name,omitempty"`
+	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 // wireToolDef es una entrada del array `tools` del cuerpo del request
 // (§12bis #5). Parameters es un JSON Schema; se manda crudo porque su forma
 // la define la herramienta, no el dialecto.
 type wireToolDef struct {
-	Type     string          `json:"type"`
-	Function wireToolFunc    `json:"function"`
+	Type     string       `json:"type"`
+	Function wireToolFunc `json:"function"`
 }
 
 // wireToolFunc es la mitad function de una tool definition.
