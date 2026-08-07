@@ -238,13 +238,23 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		// with IsError and enters the context for the model to react to —
 		// this is the entire mechanism by which the reactive loop handles the
 		// unforeseen (§3), and the reason no Planner is needed.
-		for _, tc := range toolCalls {
+		//
+		// Every exit from this loop that leaves calls in toolCalls unexecuted
+		// (the cap, loop detection, or a cancellation mid-batch) MUST close
+		// out the remaining ones with a synthetic BlockToolResult before
+		// returning. The OpenAI dialect requires that every tool_calls entry
+		// on the assistant message it just persisted (above) have a matching
+		// role:"tool" reply; an assistant message with an orphaned tool_call
+		// makes the *next* request 400 at the provider, poisoning the session
+		// for good (not just this turn) — see notExecuted below.
+		for i, tc := range toolCalls {
 			callsThisTurn++
 			if maxCalls >= 0 && callsThisTurn > maxCalls {
 				result.Stopped = fmt.Sprintf(
 					"tool cap reached: %d calls this turn (limit %d). The model was still asking for tools; the last was %s.",
 					callsThisTurn-1, maxCalls, tc.name)
 				result.Text = text.String()
+				notExecuted(history, toolCalls[i:], "tool cap reached before this call ran")
 				return result, nil
 			}
 
@@ -257,6 +267,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					"loop detected: tool %q called twice in a row with the same arguments. Stopping to ask the user.",
 					tc.name)
 				result.Text = text.String()
+				notExecuted(history, toolCalls[i:], "loop detected before this call ran")
 				return result, nil
 			}
 			lastToolName = tc.name
@@ -267,12 +278,34 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			var isError bool
 			if runErr != nil {
 				// Cancelled before the tool started: record a tool error so the
-				// history is faithful, then bail.
+				// history is faithful, then bail — and close out every call
+				// still left in this batch, not just this one, or the calls
+				// after it orphan the assistant message (Bug 2).
 				outText = "tool run cancelled by the user"
 				isError = true
 				result.Aborted = true
 				history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+				notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 				return result, runErr
+			}
+
+			// A nil Runner reaching here means the model emitted a tool call
+			// even though hasTools (above) had already decided "no tools" and
+			// cleared opts.Tools from the request — i.e. the model hallucinated
+			// a call to something it was never offered, which real models do
+			// often enough that AgentOptions.Runner's own doc comment promises
+			// exactly this is handled without crashing. Without this check,
+			// opts.Runner(ctx, ...) below is a nil function value and calling
+			// it panics with a nil pointer dereference, taking the whole
+			// process down mid-turn (Bug 1). Guarding here turns that into
+			// ordinary tool-error data instead: the model sees the error and
+			// can react on the next iteration, same as any other tool failure.
+			if opts.Runner == nil {
+				outText = truncateOutput(fmt.Sprintf("tool %q could not run: no tool runner is bound", tc.name), maxOut)
+				isError = true
+				result.Calls++
+				history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+				continue
 			}
 
 			res, rerr := opts.Runner(ctx, tc.name, tc.args)
@@ -288,6 +321,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					isError = true
 					result.Aborted = true
 					history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+					notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 					return result, ctx.Err()
 				}
 				outText = rerr.Error()
@@ -310,6 +344,20 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		}
 
 		// Loop: the next iteration reopens with the grown history.
+	}
+}
+
+// notExecuted closes out every tool call in calls with a synthetic
+// BlockToolResult (IsError) naming why it never ran. It exists so the loop
+// can stop mid-batch (the cap, loop detection, or a cancellation) without
+// ever leaving a tool_calls entry on the just-persisted assistant message
+// without a matching role:"tool" reply — an orphaned tool_call is invalid in
+// the OpenAI dialect and 400s the *next* request built from this history,
+// which is a session-poisoning bug (Bug 2), not merely a cosmetic one.
+func notExecuted(history *convo.Conversation, calls []toolCallOut, reason string) {
+	for _, tc := range calls {
+		history.Add(convo.NewMessage(convo.RoleTool,
+			convo.ToolErrorBlock(tc.id, tc.name, "not executed: "+reason)))
 	}
 }
 
