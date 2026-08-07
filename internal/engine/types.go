@@ -45,11 +45,11 @@ const (
 // provider.Event by the Streamer adapter internal/app builds.
 type Event struct {
 	Kind  EventKind
-	Text  string       // delta (EventDelta/EventReasoning) or message (EventWarning)
-	Name  string       // tool name for EventToolCall
+	Text  string          // delta (EventDelta/EventReasoning) or message (EventWarning)
+	Name  string          // tool name for EventToolCall
 	Args  json.RawMessage // tool arguments for EventToolCall
-	Usage *convo.Usage // set on EventUsage, and optionally again on EventDone
-	Err   error        // set on EventError
+	Usage *convo.Usage    // set on EventUsage, and optionally again on EventDone
+	Err   error            // set on EventError
 }
 
 // Request is what a Streamer needs to open one turn. Model is the wire ID
