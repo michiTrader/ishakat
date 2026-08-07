@@ -13,10 +13,35 @@ import "encoding/json"
 // porque este paso solo manda texto; cuando entren las imágenes de verdad
 // (Fase 3) pasará a ser una lista de partes y este es el único tipo que
 // cambia.
+//
+// ToolCalls y ToolCallID cubren el bucle de herramientas del Paso 14
+// (§12bis #5): un mensaje assistant lleva ToolCalls cuando pidió invocar
+// herramientas, y un mensaje role:"tool" lleva ToolCallID para que el
+// servicio pueda correlacionar el resultado con la llamada que lo originó.
+// Content puede ir vacío en un assistant que solo hizo tool_calls (algunos
+// servicios exigen content:"" y otros lo rechazan; marshalTools se encarga
+// de eso).
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	Name       string          `json:"name,omitempty"`
+	ToolCalls  []wireToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+}
+
+// wireToolDef es una entrada del array `tools` del cuerpo del request
+// (§12bis #5). Parameters es un JSON Schema; se manda crudo porque su forma
+// la define la herramienta, no el dialecto.
+type wireToolDef struct {
+	Type     string          `json:"type"`
+	Function wireToolFunc    `json:"function"`
+}
+
+// wireToolFunc es la mitad function de una tool definition.
+type wireToolFunc struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 // wireUsage es el bloque de consumo. Los campos anidados son la forma en que
