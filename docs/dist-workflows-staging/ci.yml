@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  check:
+    name: build · vet · fmt · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: go build ./...
+        run: go build ./...
+
+      - name: go vet ./...
+        run: go vet ./...
+
+      - name: gofmt -l cmd internal
+        run: |
+          out="$(gofmt -l cmd internal)"
+          if [ -n "$out" ]; then
+            echo "unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go test ./...
+        run: go test ./...
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: go test -race ./...
+        run: go test -race ./...
