@@ -106,12 +106,33 @@ type Event struct {
 	Name string
 	Args json.RawMessage
 
+	// ID es el identificador que el servicio asigna a una llamada a
+	// herramienta (EventToolCall). El dialecto de OpenAI lo exige: cada
+	// BlockToolResult que se serialice de vuelta tiene que llevar el
+	// tool_call_id del BlockToolCall que lo originó, y sin este campo no
+	// hay forma de propagarlo desde el stream hasta convo (§12bis paso 5).
+	// Vacío cuando el evento no es una llamada a herramienta o cuando el
+	// servicio no asigna id (algunos endpoints locales no lo hacen).
+	ID string
+
 	// Usage viene en EventUsage y, si el servicio lo manda tarde, también
 	// puede venir adosado a EventDone.
 	Usage *convo.Usage
 
 	// Err solo se rellena en EventError.
 	Err error
+}
+
+// ToolDef describe una herramienta invocable por el modelo, en la forma
+// neutra que el dialecto concreta al serializar (§12bis paso 5). Vive en
+// provider —no en engine— porque es el adaptador quien la traduce al
+// array `tools` del cable; engine.ToolDef es la copia sin net/http que
+// internal/app pasa de uno a otro campo por campo, igual que ya hace con
+// Model/Messages/System.
+type ToolDef struct {
+	Name        string
+	Description string
+	Parameters  json.RawMessage
 }
 
 // Request es un turno a punto de enviarse. Messages es el historial completo
@@ -146,6 +167,14 @@ type Request struct {
 	// es la vía para hablar con un servicio que pide un campo que ishakat no
 	// conoce, sin tocar código (§5.2).
 	Params map[string]any
+
+	// Tools es la lista de herramientas invocables que se ofrece al modelo
+	// este turno (§12bis). Vacío significa "sin herramientas": el adaptador
+	// no incluye el array `tools` en el cuerpo. Cuando Caps.Tools es falso,
+	// el adaptador lo deja vacío y los BlockToolCall del historial se
+	// aplanan a texto descriptivo, contado en Degradation.ToolsFlattened
+	// (§4.6).
+	Tools []ToolDef
 }
 
 // RawModel es lo que un servicio dice de un modelo, antes de que el catálogo
