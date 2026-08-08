@@ -81,7 +81,7 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if mode == "deny" {
 		return fmt.Errorf("%w: %s is disabled by configuration", ErrDenied, req.Name)
 	}
-	if g.yolo && req.Tier == Medium {
+	if g.yolo && (req.Name == "write_file" || req.Name == "edit_file" || req.Name == "bash") {
 		return nil
 	}
 	if mode == "allow" || req.Tier == Low {
@@ -115,8 +115,10 @@ func tierFor(name string) Tier {
 	switch name {
 	case "read_file", "glob", "grep":
 		return Low
-	case "write_file", "edit_file", "bash":
+	case "write_file", "edit_file":
 		return Medium
+	case "bash":
+		return High
 	default:
 		// Unknown and future tools must be reviewed rather than accidentally
 		// inheriting a low-risk default.
