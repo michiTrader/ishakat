@@ -176,11 +176,11 @@ type Usage struct {
 	Out        int `json:"out,omitempty"`
 	CacheRead  int `json:"cache_read,omitempty"`
 	CacheWrite int `json:"cache_write,omitempty"`
-	Reasoning  int     `json:"reasoning,omitempty"`
+	Reasoning  int `json:"reasoning,omitempty"`
 	// CostUSD is the estimated provider spend for this usage record. It is
 	// persisted with the message so a resumed session can enforce a budget
 	// without reconstructing prices from a potentially changed catalog.
-	CostUSD    float64 `json:"cost_usd,omitempty"`
+	CostUSD float64 `json:"cost_usd,omitempty"`
 }
 
 // Total suma todos los componentes del uso, para mostrar en el footer y en

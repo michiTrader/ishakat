@@ -3,6 +3,7 @@ package convo_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -414,13 +415,18 @@ func TestUsageCostPersistsAndAccumulates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Usage().CostUSD != 0.0035 {
-		t.Fatalf("coste total = %.4f, want 0.0035", got.Usage().CostUSD)
+	// CostUSD es float64: comparar con != contra un literal decimal es
+	// frágil porque 0.0012+0.0023 no cae exacto en binario (da
+	// 0.0034999999999999996, no 0.0035). Se compara con una tolerancia
+	// pequeña en vez de igualdad exacta.
+	const epsilon = 1e-9
+	if diff := math.Abs(got.Usage().CostUSD - 0.0035); diff > epsilon {
+		t.Fatalf("coste total = %.10f, want 0.0035 (diff %.2e)", got.Usage().CostUSD, diff)
 	}
 	var total convo.Usage
 	total.Add(got.Messages[0].Usage)
 	total.Add(got.Messages[1].Usage)
-	if total.CostUSD != got.Usage().CostUSD {
-		t.Fatalf("Add no conserva el coste: %.4f != %.4f", total.CostUSD, got.Usage().CostUSD)
+	if diff := math.Abs(total.CostUSD - got.Usage().CostUSD); diff > epsilon {
+		t.Fatalf("Add no conserva el coste: %.10f != %.10f", total.CostUSD, got.Usage().CostUSD)
 	}
 }

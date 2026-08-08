@@ -247,9 +247,9 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			asst := convo.NewMessage(convo.RoleAssistant, asstBlocks...)
 			asst.Model = req.Model
 			if iterUsage != nil {
-					u := *iterUsage
-					u.CostUSD = estimateCost(iterUsage, opts)
-					asst.Usage = &u
+				u := *iterUsage
+				u.CostUSD = estimateCost(iterUsage, opts)
+				asst.Usage = &u
 			}
 			history.Add(asst)
 		}
