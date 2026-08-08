@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 
 	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/tools"
 )
 
@@ -41,11 +42,22 @@ func ToolDefsFrom(reg *tools.Registry) []engine.ToolDef {
 }
 
 // ToolRunnerFrom adapts reg.Run into the engine.ToolRunner function type
-// the agent loop calls. The two signatures already match field-for-field
-// (tools.Result mirrors engine.ToolResult on purpose, per tools.Result's own
-// doc comment), so this is a direct call, not a translation.
+// the agent loop calls without a permission gate. Production callers should use
+// ToolRunnerWithGuard; this helper remains useful for focused adapter tests.
 func ToolRunnerFrom(reg *tools.Registry) engine.ToolRunner {
+	return ToolRunnerWithGuard(reg, nil)
+}
+
+// ToolRunnerWithGuard checks a tool request before dispatching it. A denied
+// request is normal tool-error data, not an engine failure: the model receives
+// the reason and can choose a non-destructive alternative on its next turn.
+func ToolRunnerWithGuard(reg *tools.Registry, guard *permissions.Guard) engine.ToolRunner {
 	return func(ctx context.Context, name string, args json.RawMessage) (engine.ToolResult, error) {
+		if guard != nil {
+			if err := guard.Authorize(ctx, name, args); err != nil {
+				return engine.ToolResult{Text: err.Error(), IsError: true}, nil
+			}
+		}
 		res, err := reg.Run(ctx, name, args)
 		if err != nil {
 			return engine.ToolResult{}, err

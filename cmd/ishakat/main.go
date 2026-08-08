@@ -55,6 +55,7 @@ FLAGS
       --no-stream        request the full response at once
       --no-save          do not write the session file
       --resume           reopen the last saved conversation (interactive mode only)
+      --yolo             approve file writes and shell commands without prompts
   -q, --quiet            no warnings on stderr
       --config <path>    use a different config.toml
   -h, --help             this help text
@@ -133,6 +134,7 @@ func main() {
 		resume     = fs.Bool("resume", false, "reopen the last saved conversation (interactive mode only)")
 		quiet      = fs.Bool("q", false, "no warnings on stderr")
 		quietLong  = fs.Bool("quiet", false, "same as -q")
+		yolo       = fs.Bool("yolo", false, "approve file writes and shell commands without prompts")
 		cfgPath    = fs.String("config", "", "alternate config.toml path")
 		showVer    = fs.Bool("v", false, "version")
 		showVerL   = fs.Bool("version", false, "version")
@@ -190,6 +192,7 @@ func main() {
 			Stream:     streamPtr,
 			Save:       savePtr,
 			Quiet:      *quiet || *quietLong,
+			Yolo:       *yolo,
 			ConfigPath: *cfgPath,
 		}))
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
@@ -55,6 +56,7 @@ type HeadlessOptions struct {
 	Stream *bool // --stream / --no-stream; nil = app.stream
 	Save   *bool // --no-save; nil = session.save
 	Quiet  bool  // --quiet: no warnings on stderr
+	Yolo   bool  // --yolo: approve write and shell tools without prompting
 
 	// ConfigPath points at a different config.toml (--config).
 	ConfigPath string
@@ -257,7 +259,8 @@ func Headless(opts HeadlessOptions) int {
 		if hist == nil {
 			hist = &convo.Conversation{}
 		}
-		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, cfg.App.MaxRetries, req, user, s, store, conv, hist)
+		guard := permissions.New(cfg.Tools.Permissions, opts.Yolo, nil)
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, cfg.App.MaxRetries, req, user, s, store, conv, hist)
 	} else {
 		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
 	}
