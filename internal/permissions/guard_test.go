@@ -102,6 +102,14 @@ func TestGuardYoloAllowsAskButNotConfiguredDeny(t *testing.T) {
 	}
 }
 
+func TestGuardYoloDoesNotAllowHighRiskTools(t *testing.T) {
+	guard := New(testPermissions(), true, nil)
+	err := guard.Authorize(context.Background(), "tool_create", json.RawMessage(`{}`))
+	if !errors.Is(err, ErrDenied) {
+		t.Fatalf("Authorize() error = %v, want ErrDenied", err)
+	}
+}
+
 func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)

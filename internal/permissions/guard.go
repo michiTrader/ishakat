@@ -81,7 +81,7 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if mode == "deny" {
 		return fmt.Errorf("%w: %s is disabled by configuration", ErrDenied, req.Name)
 	}
-	if g.yolo && (req.Tier == Medium || req.Tier == High) {
+	if g.yolo && req.Tier == Medium {
 		return nil
 	}
 	if mode == "allow" || req.Tier == Low {
