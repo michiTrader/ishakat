@@ -390,3 +390,37 @@ func TestAppendTextCoalesce(t *testing.T) {
 		t.Errorf("Text() no debe incluir razonamiento: %q", m.Text())
 	}
 }
+
+func TestUsageCostPersistsAndAccumulates(t *testing.T) {
+	st, err := convo.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.New("costes", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := convo.Assistant("uno", "provider/model")
+	first.Usage = &convo.Usage{In: 10, Out: 5, CostUSD: 0.0012}
+	second := convo.Assistant("dos", "provider/model")
+	second.Usage = &convo.Usage{In: 20, Out: 7, CostUSD: 0.0023}
+	if err := st.Append(c.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(c.ID, second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Load(c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage().CostUSD != 0.0035 {
+		t.Fatalf("coste total = %.4f, want 0.0035", got.Usage().CostUSD)
+	}
+	var total convo.Usage
+	total.Add(got.Messages[0].Usage)
+	total.Add(got.Messages[1].Usage)
+	if total.CostUSD != got.Usage().CostUSD {
+		t.Fatalf("Add no conserva el coste: %.4f != %.4f", total.CostUSD, got.Usage().CostUSD)
+	}
+}
