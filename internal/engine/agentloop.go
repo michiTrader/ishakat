@@ -201,6 +201,12 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			}
 			result.Usage.Add(iterUsage)
 		}
+		// CostUSD on Usage is the current turn's durable accounting record;
+		// result.CostUSD additionally includes prior-session spend for the
+		// budget decision.
+		if result.Usage != nil {
+			result.Usage.CostUSD = estimateCost(result.Usage, opts)
+		}
 		result.CostUSD = opts.SpentUSD + estimateCost(result.Usage, opts)
 
 		// Cancellation wins over any in-flight error, exactly as run() does for
@@ -241,7 +247,9 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			asst := convo.NewMessage(convo.RoleAssistant, asstBlocks...)
 			asst.Model = req.Model
 			if iterUsage != nil {
-				asst.Usage = iterUsage
+				u := *iterUsage
+				u.CostUSD = estimateCost(iterUsage, opts)
+				asst.Usage = &u
 			}
 			history.Add(asst)
 		}

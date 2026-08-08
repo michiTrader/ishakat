@@ -3,6 +3,7 @@ package convo_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -388,5 +389,44 @@ func TestAppendTextCoalesce(t *testing.T) {
 	}
 	if !strings.Contains(m.Text(), "y sigo") || strings.Contains(m.Text(), "pensando") {
 		t.Errorf("Text() no debe incluir razonamiento: %q", m.Text())
+	}
+}
+
+func TestUsageCostPersistsAndAccumulates(t *testing.T) {
+	st, err := convo.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.New("costes", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := convo.Assistant("uno", "provider/model")
+	first.Usage = &convo.Usage{In: 10, Out: 5, CostUSD: 0.0012}
+	second := convo.Assistant("dos", "provider/model")
+	second.Usage = &convo.Usage{In: 20, Out: 7, CostUSD: 0.0023}
+	if err := st.Append(c.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(c.ID, second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Load(c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CostUSD es float64: comparar con != contra un literal decimal es
+	// frágil porque 0.0012+0.0023 no cae exacto en binario (da
+	// 0.0034999999999999996, no 0.0035). Se compara con una tolerancia
+	// pequeña en vez de igualdad exacta.
+	const epsilon = 1e-9
+	if diff := math.Abs(got.Usage().CostUSD - 0.0035); diff > epsilon {
+		t.Fatalf("coste total = %.10f, want 0.0035 (diff %.2e)", got.Usage().CostUSD, diff)
+	}
+	var total convo.Usage
+	total.Add(got.Messages[0].Usage)
+	total.Add(got.Messages[1].Usage)
+	if diff := math.Abs(total.CostUSD - got.Usage().CostUSD); diff > epsilon {
+		t.Fatalf("Add no conserva el coste: %.10f != %.10f", total.CostUSD, got.Usage().CostUSD)
 	}
 }
