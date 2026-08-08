@@ -108,6 +108,37 @@ func toolCallEvent(id, name string, args string) Event {
 func deltaEvent(s string) Event { return Event{Kind: EventDelta, Text: s} }
 func doneEvent() Event          { return Event{Kind: EventDone} }
 
+func TestRunAgentTurnStopsAtCostBudgetBeforeTool(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{{Kind: EventUsage, Usage: &convo.Usage{In: 1000, Out: 1000}}, toolCallEvent("c1", "list", `{}`), doneEvent()},
+	}}
+	runner := newFakeRunner()
+	history := convo.Conversation{}
+	result, err := (&Engine{stream: ss.stream}).RunAgentTurn(context.Background(), Request{Model: "model"}, AgentOptions{
+		Tools:          []ToolDef{{Name: "list"}},
+		Runner:         runner.run,
+		BudgetUSD:      0.01,
+		InputCostUSD:   5,
+		OutputCostUSD:  5,
+		MaxOutputBytes: -1,
+	}, &history)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if result.CostUSD != 0.01 {
+		t.Fatalf("CostUSD = %f, want 0.01", result.CostUSD)
+	}
+	if result.Stopped == "" || !strings.Contains(result.Stopped, "cost budget reached") {
+		t.Fatalf("Stopped = %q, want cost-budget explanation", result.Stopped)
+	}
+	if runner.callCount() != 0 {
+		t.Fatalf("tool calls = %d, want budget to stop before execution", runner.callCount())
+	}
+	if len(history.Messages) != 2 {
+		t.Fatalf("history messages = %d, want assistant plus synthetic result", len(history.Messages))
+	}
+}
+
 // TestRunAgentTurnToolCallThenAnswer is the closing-criterion case: a fake
 // provider that emits a tool call, then (after the result is fed back) a text
 // answer. The loop has to run the tool, append the result, iterate, and return

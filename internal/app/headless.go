@@ -24,6 +24,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/permissions"
@@ -149,6 +150,12 @@ func Headless(opts HeadlessOptions) int {
 	if fb != nil {
 		s.warn(fmt.Sprintf("app.default_model (%s) %s; using %s instead", fb.From, fb.Reason, fb.To))
 	}
+	// Read pricing from the local catalog only; unknown prices remain unknown.
+	var modelCost *catalog.Cost
+	catalogSnapshot := LoadCatalog(cfg)
+	if model, found := catalogSnapshot.Catalog.Get(ref.Ref); found {
+		modelCost = model.Cost
+	}
 
 	// Startup warnings are printed only now that ref.Provider is known.
 	// cfg.Warnings carries one entry per enabled provider missing its
@@ -260,7 +267,7 @@ func Headless(opts HeadlessOptions) int {
 			hist = &convo.Conversation{}
 		}
 		guard := permissions.New(cfg.Tools.Permissions, opts.Yolo, nil)
-		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, cfg.App.MaxRetries, req, user, s, store, conv, hist)
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, cfg.App.MaxRetries, req, user, s, store, conv, hist)
 	} else {
 		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
 	}

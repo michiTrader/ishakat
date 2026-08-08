@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
@@ -35,14 +36,22 @@ import (
 // defaults.toml's own values (25, 32768) equal RunAgentTurn's built-in
 // defaults exactly, a stock configuration and a caller that skipped config
 // entirely (a zero config.Tools) both mean the same thing.
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard) engine.AgentOptions {
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost) engine.AgentOptions {
 	reg := tools.Core()
-	return engine.AgentOptions{
+	opts := engine.AgentOptions{
 		Tools:          ToolDefsFrom(reg),
 		Runner:         ToolRunnerWithGuard(reg, guard),
 		MaxToolCalls:   cfgTools.MaxCallsPerTurn,
 		MaxOutputBytes: cfgTools.MaxOutputBytes,
+		BudgetUSD:      cfgTools.BudgetUSD,
 	}
+	if cost != nil {
+		opts.InputCostUSD = cost.In
+		opts.OutputCostUSD = cost.Out
+		opts.CacheReadCostUSD = cost.CacheRead
+		opts.CacheWriteCostUSD = cost.CacheWrite
+	}
+	return opts
 }
 
 // runAgentTurnHeadless runs one turn through RunAgentTurn instead of
@@ -73,6 +82,7 @@ func runAgentTurnHeadless(
 	prov provider.Provider,
 	cfgTools config.Tools,
 	guard *permissions.Guard,
+	cost *catalog.Cost,
 	maxRetries int,
 	req provider.Request,
 	user convo.Message,
@@ -83,7 +93,7 @@ func runAgentTurnHeadless(
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
-	opts := buildAgentOptions(cfgTools, guard)
+	opts := buildAgentOptions(cfgTools, guard, cost)
 
 	engReq := engine.Request{
 		Model:  req.Model,

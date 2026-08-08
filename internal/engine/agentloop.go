@@ -56,6 +56,18 @@ type AgentOptions struct {
 	// that names how much was dropped (§12bis). Zero means the default (32 KiB).
 	// A negative value disables truncation — intended only for tests.
 	MaxOutputBytes int
+
+	// BudgetUSD is the maximum estimated provider spend for this session. Zero
+	// disables the budget. Prices are USD per million tokens; unknown prices are
+	// represented by all-zero rates and do not consume the budget.
+	BudgetUSD float64
+	// SpentUSD is the amount already consumed before this turn. Callers that
+	// persist sessions can initialize it from prior conversation usage.
+	SpentUSD          float64
+	InputCostUSD      float64
+	OutputCostUSD     float64
+	CacheReadCostUSD  float64
+	CacheWriteCostUSD float64
 }
 
 // AgentResult is the outcome of RunAgentTurn: the final assistant text, the
@@ -67,10 +79,12 @@ type AgentResult struct {
 	Calls int
 
 	// Stopped is empty when the model ended on a text turn (the natural
-	// termination). It carries a short reason when the cap or loop detection
-	// ended the turn early, so the caller can surface it honestly instead of
-	// pretending the answer is complete.
+	// termination). It carries a short reason when the cap, budget, or loop
+	// detection ended the turn early, so the caller can surface it honestly.
 	Stopped string
+	// CostUSD is the estimated spend accumulated by this turn, including
+	// SpentUSD supplied in AgentOptions.
+	CostUSD float64
 
 	// Aborted is true when ctx was cancelled mid-loop. The partial assistant
 	// message is still in Messages and in Text; a tool already running got its
@@ -187,6 +201,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			}
 			result.Usage.Add(iterUsage)
 		}
+		result.CostUSD = opts.SpentUSD + estimateCost(result.Usage, opts)
 
 		// Cancellation wins over any in-flight error, exactly as run() does for
 		// a text turn (§7.4): the user hit esc, that is not a failure.
@@ -235,6 +250,17 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		// This is the only path that yields a "complete" answer.
 		if len(toolCalls) == 0 {
 			result.Text = text.String()
+			return result, nil
+		}
+
+		// The model asked for tools. Run each one, append its result, and
+		// loop. A budget stop happens before another tool can trigger another
+		// provider request. Close every call in this batch so the saved history
+		// remains valid for the next turn.
+		if opts.BudgetUSD > 0 && result.CostUSD >= opts.BudgetUSD {
+			result.Stopped = fmt.Sprintf("cost budget reached: estimated spend $%.4f (limit $%.4f)", result.CostUSD, opts.BudgetUSD)
+			result.Text = text.String()
+			notExecuted(history, toolCalls, "cost budget reached before this call ran")
 			return result, nil
 		}
 
@@ -361,6 +387,20 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 
 		// Loop: the next iteration reopens with the grown history.
 	}
+}
+
+// estimateCost converts provider-reported token usage into USD using the
+// catalog rates supplied by the caller. Unknown prices remain zero rather than
+// pretending a model is free; callers can choose a conservative policy before
+// invoking the loop when rates are unavailable.
+func estimateCost(u *convo.Usage, opts AgentOptions) float64 {
+	if u == nil {
+		return 0
+	}
+	return float64(u.In)*opts.InputCostUSD/1e6 +
+		float64(u.Out+u.Reasoning)*opts.OutputCostUSD/1e6 +
+		float64(u.CacheRead)*opts.CacheReadCostUSD/1e6 +
+		float64(u.CacheWrite)*opts.CacheWriteCostUSD/1e6
 }
 
 // notExecuted closes out every tool call in calls with a synthetic
