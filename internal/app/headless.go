@@ -156,6 +156,27 @@ func Headless(opts HeadlessOptions) int {
 	if model, found := catalogSnapshot.Catalog.Get(ref.Ref); found {
 		modelCost = model.Cost
 	}
+	// [tools].budget_usd only works when the catalog actually knows this
+	// model's price: buildAgentOptions leaves every *CostUSD field at zero
+	// when cost is nil, so engine.estimateCost prices every token at zero
+	// and the accumulated CostUSD can never reach a positive budget no
+	// matter how many tool calls run. That silently disables the one guard
+	// §15/§16 exist for — the runaway-cost stop — on exactly the models
+	// most likely to need it (new/undiscovered models, or a stale local
+	// catalog, are the ones without a price yet). Warn once, loudly,
+	// instead of letting the user believe a ceiling is still in effect.
+	//
+	// modelCost == nil is checked explicitly rather than relying on
+	// Cost.Zero() alone: Zero() has a nil-safe receiver that returns false
+	// for a nil *Cost on purpose (nil means "unknown", a distinct case from
+	// the genuinely-free model Zero() documents), so this condition would
+	// silently miss the nil case if it only called modelCost.Zero().
+	if cfg.Tools.Enabled && cfg.Tools.BudgetUSD > 0 && (modelCost == nil || modelCost.Zero()) {
+		s.warn(fmt.Sprintf(
+			"[tools] budget_usd = %.4f is set, but the catalog has no price for %q; "+
+				"the cost budget cannot be enforced for this model and will not stop the turn",
+			cfg.Tools.BudgetUSD, ref.Ref))
+	}
 
 	// Startup warnings are printed only now that ref.Provider is known.
 	// cfg.Warnings carries one entry per enabled provider missing its
