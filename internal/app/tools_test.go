@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/tools"
 )
 
@@ -76,6 +78,23 @@ func TestToolRunnerFromUnknownNameIsGoError(t *testing.T) {
 
 	if _, err := run(context.Background(), "no_such_tool", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("expected an error for an unregistered tool name")
+	}
+}
+
+func TestToolRunnerWithGuardReturnsDeniedRequestAsToolError(t *testing.T) {
+	reg := tools.NewRegistry(fakeAppTool{name: "write_file", text: "must not run"})
+	guard := permissions.New(config.Permissions{Write: "deny"}, false, nil)
+	run := ToolRunnerWithGuard(reg, guard)
+
+	res, err := run(context.Background(), "write_file", json.RawMessage(`{"path":"note.txt","content":"x"}`))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("permission denial must be model-visible tool error data")
+	}
+	if res.Text == "must not run" {
+		t.Fatal("runner executed a denied tool")
 	}
 }
 
