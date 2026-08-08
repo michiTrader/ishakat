@@ -94,6 +94,12 @@ func runAgentTurnHeadless(
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
 	opts := buildAgentOptions(cfgTools, guard, cost)
+	// Usage.CostUSD is persisted on assistant messages. Reusing that durable
+	// total means a resumed conversation starts at the amount already spent,
+	// rather than resetting the budget at every process launch.
+	if prior := hist.Usage(); prior != nil {
+		opts.SpentUSD = prior.CostUSD
+	}
 
 	engReq := engine.Request{
 		Model:  req.Model,
