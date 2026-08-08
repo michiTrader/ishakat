@@ -536,6 +536,36 @@ func TestHeadlessReasoningStaysOffStdout(t *testing.T) {
 	}
 }
 
+// TestHeadlessWarnsWhenBudgetCannotBePriced is the regression for a bug
+// found reviewing PR #82's cost-budget entry: buildAgentOptions
+// (agentturn.go) leaves every *CostUSD field at zero when the catalog has
+// no Cost for the active model (nil, not the distinct "genuinely free" case
+// catalog.Cost.Zero documents), so engine.estimateCost can never reach a
+// positive budget_usd no matter how many tool calls run — the ceiling
+// silently stops doing anything on exactly the models (new, undiscovered,
+// stale local catalog) most likely to need it. This pins the fix: Headless
+// must warn once when budget_usd > 0 and the model's price is unknown, so
+// the user is not left believing a guard is active when it cannot fire.
+func TestHeadlessWarnsWhenBudgetCannotBePriced(t *testing.T) {
+	srv := fake.SSEServer(fake.SSEOptions{Chunks: []string{
+		fake.SSEDelta("hi"), fake.SSEDone(),
+	}})
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	cfg.Tools.Enabled = true
+	cfg.Tools.BudgetUSD = 0.01
+	cfg.Tools.MaxCallsPerTurn = 5
+
+	code, _, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "hi"})
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr: %s", code, errs)
+	}
+	if !strings.Contains(errs, "budget_usd") || !strings.Contains(errs, "cannot be enforced") {
+		t.Errorf("stderr must warn that the budget cannot be enforced for an unpriced model, got: %q", errs)
+	}
+}
+
 func TestBuildPrompt(t *testing.T) {
 	cases := []struct {
 		name     string
