@@ -240,7 +240,27 @@ func Headless(opts HeadlessOptions) int {
 	defer stop()
 
 	started := time.Now()
-	msg, turnErr := runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
+	var msg convo.Message
+	var turnErr error
+	if cfg.Tools.Enabled {
+		// The agent-loop path (Step 14/§12bis): RunAgentTurn owns history
+		// itself, appending every message it produces (tool calls, tool
+		// results, the final answer) to hist as it goes and — via
+		// runAgentTurnHeadless — persisting each one individually as soon
+		// as it lands, exactly the same one-message-at-a-time contract
+		// convo's own doc comment describes for Append (§10). hist is conv
+		// when the turn is being saved, or a throwaway Conversation when
+		// it isn't (save=false, or the session file failed to open above):
+		// either way the model still needs *some* history object to append
+		// tool calls and results to across iterations.
+		hist := conv
+		if hist == nil {
+			hist = &convo.Conversation{}
+		}
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, cfg.App.MaxRetries, req, user, s, store, conv, hist)
+	} else {
+		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
+	}
 	msg.Model = ref.Ref
 	elapsed := time.Since(started)
 
@@ -250,10 +270,18 @@ func Headless(opts HeadlessOptions) int {
 
 	// 8. Persisting the turn. Saved even if it failed or was cancelled: a
 	// marked partial is worth more than a gap in the history.
-	if store != nil && (len(msg.Blocks) > 0 || msg.Aborted) {
+	//
+	// The tools path skips this: runAgentTurnHeadless already persisted
+	// every message the loop produced as it produced it, message by
+	// message. Persisting msg here too — a summary built from
+	// engine.AgentResult, not one of those real messages — would duplicate
+	// the final answer in the session file.
+	if !cfg.Tools.Enabled && store != nil && (len(msg.Blocks) > 0 || msg.Aborted) {
 		if err := store.Append(conv.ID, msg); err != nil {
 			s.warn(fmt.Sprintf("could not save the response: %v", err))
 		}
+	}
+	if store != nil {
 		if n := cfg.Session.KeepLast; n > 0 {
 			_, _ = store.Rotate(n)
 		}
