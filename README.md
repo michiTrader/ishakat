@@ -16,10 +16,11 @@ live on disk as text files you can read, edit and delete — which is how
 ishakat extends itself without ever loading model-written code into its own
 process.
 
-> **Status: Phase 2 (prototype), step 12 of 13 closed. The agent layer
-> (Phase 2.5, steps 14–25) is designed and configured but not yet
-> implemented** — `[tools]` parses and validates today, and nothing executes
-> it yet. See [Roadmap](#roadmap).
+> **Status: Phase 2.5 (agent runtime), Step 16's initial delivery is closed.**
+> The tool-calling loop, six built-in tools, permission guard, and per-session
+> cost-budget enforcement are implemented for the headless pipeline. The TUI
+> still uses the original streaming path and is the next integration surface.
+> See [Roadmap](#roadmap).
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
 > fuzzy/partial model names (`son45`, `haiku`, aliases) per §4.5, `/model`
@@ -31,7 +32,7 @@ process.
 > by hand, from the confirmation dialog's remedy, or automatically once
 > `[compact].trigger_pct` is crossed — with a `drop-oldest` fallback if the
 > summary call fails. See [What works today](#what-works-today) before
-> filing a bug — `--resume` remains scheduled work.
+> filing a bug.
 >
 > The single source of truth for the design and the step order is
 > [`docs/PLAN.md`](docs/PLAN.md).
