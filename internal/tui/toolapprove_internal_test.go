@@ -51,7 +51,7 @@ func TestToolApproveDialogSelectionWrapsAndCancelDenies(t *testing.T) {
 		t.Fatalf("selection after wrapping through all rows = %d, want 0", got)
 	}
 
-	root := Root{mode: ModeToolApprove, toolApprove: dialog}
+	root := Root{mode: ModeToolApprove, keys: Map{Cancel: "esc", Submit: "enter"}, toolApprove: dialog}
 	model, _ := root.updateToolApprove(tea.KeyPressMsg{Code: tea.KeyEsc})
 	got := model.(Root)
 	if got.mode != ModeBusy {
