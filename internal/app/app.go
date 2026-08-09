@@ -12,8 +12,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tui"
 	"github.com/MichiTrader/ishakat/internal/xdg"
@@ -111,6 +114,31 @@ func Run(version string, resume bool) int {
 	}
 	warnp.Warn(os.Stderr, compactWarn)
 
+	// Step 16's tool layer, interactive side: when cfg.Tools.Enabled, every
+	// turn runs through engine.RunAgentTurn (tui.Root.startAgentTurn)
+	// instead of eng.Start's plain stream drain, and any tool call that
+	// lands past Low tier pauses on ModeToolApprove until reviewer.Review
+	// answers it. reviewer is built now — buildAgentOptions needs a
+	// *permissions.Guard before tui.Options exists at all — but it cannot
+	// actually reach the interface until reviewer.SetProgram runs, right
+	// after tea.NewProgram below produces the *tea.Program to reach it
+	// with; see toolreview.go's own comment for why that two-step
+	// construction is unavoidable. Unlike Headless (headless.go's own
+	// step 7), there is no --yolo plumbed through to the TUI: an
+	// interactive session already has somewhere to ask, so silently
+	// skipping the ask would remove the one thing this whole step adds.
+	var agentOpts engine.AgentOptions
+	var reviewer *toolReviewer
+	if cfg.Tools.Enabled {
+		reviewer = newToolReviewer()
+		var modelCost *catalog.Cost
+		if m, found := snap.Catalog.Get(ref.Ref); found {
+			modelCost = m.Cost
+		}
+		guard := permissions.New(cfg.Tools.Permissions, false, reviewer)
+		agentOpts = buildAgentOptions(cfg.Tools, guard, modelCost)
+	}
+
 	// cfg.Warnings carries one entry per enabled provider missing its
 	// credential (expand.go). Printing all of it unconditionally used to
 	// warn on every launch about every declared-but-unused provider —
@@ -195,9 +223,21 @@ func Run(version string, resume bool) int {
 		Recorder:      recorder,
 		History:       history,
 		SessionLister: lister,
+
+		ToolsEnabled: cfg.Tools.Enabled,
+		AgentOptions: agentOpts,
 	})
 
 	p := tea.NewProgram(root)
+
+	// reviewer (nil unless cfg.Tools.Enabled) has been waiting since it was
+	// built above for the one thing it could not have any earlier: a
+	// running *tea.Program to send tui.ToolApproveRequestMsg to. See
+	// toolreview.go's own comment on why this has to be a second step
+	// rather than a constructor argument.
+	if reviewer != nil {
+		reviewer.SetProgram(p)
+	}
 
 	// §4.4/§11's background refresh: only worth doing when the cache
 	// LoadCatalog already read was expired (or missing) — a fresh cache
