@@ -41,6 +41,12 @@ const (
 	// does — so it follows confirmDialog's simpler shape rather than
 	// Picker's.
 	ModeResume
+	// ModeToolApprove: Step 16's tool-approval overlay (toolapprove.go).
+	// Opens mid-turn — while the agent loop started by startEngineTurn's
+	// tools-enabled branch is blocked waiting for a permissions.Decision —
+	// so, unlike every other overlay mode, closing it returns to ModeBusy
+	// rather than ModeChat: the turn itself is not over, only the pause is.
+	ModeToolApprove
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -274,6 +280,38 @@ type Root struct {
 	// resume is the §13 /resume overlay's own state, live only while
 	// mode == ModeResume.
 	resume resumeMenu
+
+	// toolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false is
+	// the pre-Step-16 behaviour: startEngineTurn always takes the plain
+	// m.eng.Start streaming path, exactly as it always has, and no turn
+	// can ever open ModeToolApprove — matching Options.Tools' own
+	// zero-value contract (see its comment).
+	toolsEnabled bool
+
+	// agentOpts is engine.AgentOptions, already built by internal/app
+	// (buildAgentOptions) with Tools/Runner/the configured caps bound —
+	// this package never touches internal/tools directly (§6.1: importing
+	// it from here would need internal/tools to stay ignorant of the TUI,
+	// which TestToolsNoImportaTUI already guards, but there is simply no
+	// reason for tui to know what a tool *is* when engine.AgentOptions
+	// already names everything a turn needs). Runner is expected to be
+	// built over a *permissions.Guard whose Reviewer is bridge (below);
+	// binding that Guard is internal/app's job, done once at construction,
+	// the same division agentturn.go's buildAgentOptions already draws for
+	// the headless path.
+	agentOpts engine.AgentOptions
+
+	// toolApprove is Step 16's overlay state (toolapprove.go), live only
+	// while mode == ModeToolApprove.
+	toolApprove toolApproveDialog
+
+	// agentTurn is startAgentTurn's own bookkeeping (agentturn.go) for
+	// whichever tools-enabled turn is currently running through
+	// engine.RunAgentTurn, live only between startAgentTurn and
+	// finishAgentTurn. m.cancel (shared with the plain streaming path)
+	// carries that turn's cancellation, so there is no separate
+	// agentCancel field — cancelAgentTurn closes the very same m.cancel.
+	agentTurn agentTurnState
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -396,6 +434,21 @@ type Options struct {
 	// reason: a store that never opened, or [session] save = false, must
 	// not be a reason to refuse to start.
 	SessionLister SessionLister
+
+	// ToolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false —
+	// the zero value, and every caller before Step 16 — keeps
+	// startEngineTurn on the exact plain-streaming path it always took;
+	// AgentOptions is then never even read.
+	ToolsEnabled bool
+
+	// AgentOptions is engine.AgentOptions, already built by
+	// internal/app.buildAgentOptions (the same call runAgentTurnHeadless
+	// uses) with the six core tools, a *permissions.Guard whose Reviewer
+	// is bound to this Root's own approval bridge, and [tools]'
+	// configured caps/budget. tui builds none of this itself: it has no
+	// business knowing what a tool is (§6.1's TestToolsNoImportaTUI), only
+	// that engine.AgentOptions is the shape RunAgentTurn needs.
+	AgentOptions engine.AgentOptions
 }
 
 // NewRoot construye el modelo inicial.
@@ -494,6 +547,13 @@ func NewRoot(o Options) Root {
 		// this line exists to satisfy.
 		sessionLister: o.SessionLister,
 
+		// toolsEnabled/agentOpts are Step 16's fork in startEngineTurn
+		// (root.go) — see Options.ToolsEnabled's own comment for why a
+		// bare Options (every test in this package predating this step)
+		// keeps taking the plain-streaming path unchanged.
+		toolsEnabled: o.ToolsEnabled,
+		agentOpts:    o.AgentOptions,
+
 		// History (--resume, resume_last, /resume — §13) has to land in two
 		// places, not one: m.conv, because it is what the *next* request's
 		// Active() call sends to the provider, and m.transcript, because
@@ -589,7 +649,15 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case animTickMsg:
-		if m.mode != ModeBusy && m.mode != ModeCompact {
+		// ModeToolApprove is included alongside ModeBusy/ModeCompact so the
+		// spinner's clock keeps running (silently — renderToolApprove draws
+		// no CrushFrame of its own) rather than breaking the re-arm chain:
+		// tickAnim is never re-issued once this case falls through to the
+		// stop branch below, and nothing else restarts it when
+		// resolveToolApprove returns to ModeBusy, which would otherwise
+		// leave the rest of that same turn's spinner frozen after the
+		// first approval dialog closes.
+		if m.mode != ModeBusy && m.mode != ModeCompact && m.mode != ModeToolApprove {
 			return m, nil
 		}
 		m.animOffset++
@@ -625,6 +693,32 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.finishCompact(msg.summary, msg.err)
 
+	case ToolApproveRequestMsg:
+		// A tools-enabled turn can pause more than once (one dialog per
+		// ask-tier tool call), so unlike compactDoneMsg's own stale-result
+		// guard there is no "this can only ever be stale" check here: any
+		// agent turn currently in ModeBusy is a legitimate turn that may
+		// legitimately ask again.
+		if m.mode != ModeBusy {
+			return m, nil
+		}
+		return m.openToolApprove(msg)
+
+	case agentTurnDoneMsg:
+		// Same "outlived its turn" reasoning as compactDoneMsg's own
+		// guard: cancelAgentTurn already moved mode back to ModeBusy (or
+		// this could be a message from an entirely unrelated bare
+		// engine.Start turn that happens to be running instead), and the
+		// only mode a genuine agentTurnCmd result can still usefully land
+		// in is ModeBusy — never ModeToolApprove, since that would mean
+		// RunAgentTurn returned *and* a dialog it should have been
+		// blocked behind is still open, which cancelAgentTurn's own
+		// contract does not allow.
+		if m.mode != ModeBusy {
+			return m, nil
+		}
+		return m.finishAgentTurn(msg.result, msg.err)
+
 	case tea.KeyPressMsg:
 		if handled, next, cmd := m.handleGlobalKey(msg); handled {
 			return next, cmd
@@ -645,6 +739,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCompact(msg)
 	case ModeResume:
 		return m.updateResumeMenu(msg)
+	case ModeToolApprove:
+		return m.updateToolApprove(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -670,6 +766,17 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			// model call in flight, and a lone ctrl+c should cancel it
 			// rather than risk closing the whole program by reflex.
 			next, cmd := m.cancelCompact()
+			return true, next, cmd
+		}
+		if m.mode == ModeToolApprove {
+			// Same reasoning again: the agent loop's goroutine is parked
+			// behind this exact dialog (see toolapprove.go's own comment
+			// on updateToolApprove's esc/Cancel case), so a lone ctrl+c
+			// must resolve it — with an explicit deny, never leaving the
+			// bridge's channel with no answer coming — rather than risk
+			// quitting the whole program while a goroutine is still
+			// blocked waiting on it.
+			next, cmd := m.cancelAgentTurn()
 			return true, next, cmd
 		}
 		if m.pendingQuit {
@@ -920,6 +1027,15 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if keyPressString(key) == m.keys.Cancel {
+			// agentTurn.hist is only non-nil between startAgentTurn and
+			// finishAgentTurn (see its own comment) — the same "is a
+			// tools-enabled turn actually the one running" test
+			// handleGlobalKey's own ModeToolApprove branch relies on
+			// indirectly, since that mode can only ever be entered from
+			// one of these turns.
+			if m.agentTurn.hist != nil {
+				return m.cancelAgentTurn()
+			}
 			return m.cancelTurn()
 		}
 		return m, nil
@@ -1014,7 +1130,19 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 // transcript was still empty a few lines up); runRetry never draws a
 // banner, since retrying only happens once the transcript already has
 // something in it, so it always passes "".
+//
+// toolsEnabled ([tools].enabled) is the fork Step 16 adds: with tools off
+// (the default, and every path before this step existed) this is exactly
+// the plain m.eng.Start streaming below, unchanged. With tools on, there is
+// something for a mid-turn tool call to run and — the actual point of this
+// step — for an ask-tier one to pause on, so the turn instead runs through
+// startAgentTurn's engine.RunAgentTurn path (agentturn.go), which is what
+// can open ModeToolApprove at all.
 func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
+	if m.toolsEnabled {
+		return m.startAgentTurn(bannerText)
+	}
+
 	m.mode = ModeBusy
 	m.live.start(m.footer.Model)
 
@@ -1139,14 +1267,20 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 	m.mode = ModeChat
 	m.animOffset = 0
 
-	// The §10 auto-trigger: once this turn's own answer lands, check
-	// whether the conversation just crossed [compact].trigger_pct of the
-	// active model's window and, if so, compact before the next prompt
-	// rather than waiting for the user to notice and type /compact
-	// themselves. m.cat.Get can fail (no catalog, or a model the catalog
-	// does not know) — same as applyModelChosen's own CheckSwap guard,
-	// that leaves nothing trustworthy to compare against, so the trigger
-	// simply does not fire rather than guessing a window.
+	return m.checkAutoCompact()
+}
+
+// checkAutoCompact is finishTurn's and finishAgentTurn's shared tail: the
+// §10 auto-trigger. Once a turn's own answer has landed (streamed one
+// chunk at a time, or produced in full by RunAgentTurn — this check does
+// not care which), see whether the conversation just crossed
+// [compact].trigger_pct of the active model's window and, if so, compact
+// before the next prompt rather than waiting for the user to notice and
+// type /compact themselves. m.cat.Get can fail (no catalog, or a model the
+// catalog does not know) — same as applyModelChosen's own CheckSwap guard,
+// that leaves nothing trustworthy to compare against, so the trigger simply
+// does not fire rather than guessing a window.
+func (m Root) checkAutoCompact() (tea.Model, tea.Cmd) {
 	if m.compactAuto {
 		if model, ok := m.cat.Get(m.model); ok {
 			window := model.EffectiveContext()

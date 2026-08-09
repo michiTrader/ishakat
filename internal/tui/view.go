@@ -57,6 +57,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeResume {
 		return m.renderResumeMenu()
 	}
+	if m.mode == ModeToolApprove {
+		return m.renderToolApprove()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())
