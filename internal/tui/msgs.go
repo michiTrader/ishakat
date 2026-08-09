@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
+	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 )
 
 // msgs.go concentra TODOS los tea.Msg propios de este paquete (§6.2): si hay
@@ -66,6 +68,30 @@ type compactDoneMsg struct {
 // already produced (see app.BackgroundRefresh) — applyCatalogRefreshed
 // treats that as a no-op rather than replacing a good catalog with nothing.
 type CatalogRefreshedMsg struct{ Catalog *catalog.Catalog }
+
+// toolApproveRequestMsg is how a permissions.Reviewer bridge running inside
+// RunAgentTurn's goroutine (started by agentTurnCmd, a tea.Cmd — see
+// toolreview.go) asks Update to open the ModeToolApprove overlay: the
+// bridge's Review call is blocked, deep inside the agent loop, on reply —
+// the channel Update's eventual decision travels back on — and this
+// message is the only way that goroutine can reach Root at all, the same
+// role compactDoneMsg plays for summarizeCmd's own goroutine. It is not a
+// one-shot *result* the way compactDoneMsg is: nothing here ends the
+// turn, it only pauses it until updateToolApprove sends a permissions.Decision
+// down reply.
+type toolApproveRequestMsg struct {
+	req   permissions.Request
+	reply chan<- permissions.Decision
+}
+
+// agentTurnDoneMsg is agentTurnCmd's result (see toolreview.go/root.go's
+// startEngineTurn tools-enabled branch): engine.RunAgentTurn blocks with no
+// per-token callback, so — like summarizeCmd — it is wrapped in a tea.Cmd
+// and its one finished AgentResult reaches Update as this message.
+type agentTurnDoneMsg struct {
+	result engine.AgentResult
+	err    error
+}
 
 // There is deliberately no blink message here.
 //
