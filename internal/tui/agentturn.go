@@ -175,6 +175,22 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 		text += m.lay.glyphs().warnMark + " " + result.Stopped
 	}
 
+	// Tool activity is prepended to the answer instead of being left
+	// invisible. Without this the interface is indistinguishable from a
+	// model that simply chose not to use tools: the user asked for a file,
+	// the transcript showed only prose, and there was no way to tell
+	// "wrote the file" from "explained how to write the file" — which is
+	// precisely the confusion the original Step 16 report described
+	// (`ls` showed no file, and nothing on screen said whether a tool had
+	// even run). A turn that touched the filesystem has to say so.
+	if summary := toolActivityLines(m.lay.glyphs(), hist, before); summary != "" {
+		if text == "" {
+			text = summary
+		} else {
+			text = summary + "\n" + text
+		}
+	}
+
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
 	})
