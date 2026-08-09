@@ -80,6 +80,9 @@ func translate(in <-chan provider.Event, out chan<- engine.Event) {
 				ID:   ev.ID,
 				Name: ev.Name,
 				Args: ev.Args,
+				// Carried through untouched: dropping it here is what made
+				// every Gemini 3 turn after a tool call fail with HTTP 400.
+				Signature: ev.Signature,
 			}
 		case provider.EventUsage:
 			out <- engine.Event{Kind: engine.EventUsage, Usage: ev.Usage}

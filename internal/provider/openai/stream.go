@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -270,8 +269,13 @@ func (p *Provider) pumpWhole(ctx context.Context, body io.Reader, ch chan<- prov
 		}
 		if !emit(ctx, ch, provider.Event{
 			Kind: provider.EventToolCall,
-			Name: tc.Function.Name,
-			Args: json.RawMessage(args),
+			// El id no se propagaba en este camino, y sin él el
+			// BlockToolResult del turno siguiente no puede correlacionarse:
+			// el mismo requisito que el camino de streaming ya cumplía.
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Args:      json.RawMessage(args),
+			Signature: tc.Extra.signature(),
 		}) {
 			return ctx.Err()
 		}
@@ -363,62 +367,134 @@ func errorMessage(data []byte) string {
 // Las herramientas son post-1.0 (§18), pero acumularlas cuesta treinta líneas y
 // evita que un modelo que decide llamar a una herramienta produzca un turno
 // vacío sin ninguna pista de lo que pasó.
+// El acumulador guarda las llamadas en orden de llegada, no en un mapa por
+// índice, y esa forma la impuso la API real de Gemini.
+//
+// La versión anterior indexaba por `tc.Index` con un int a secas. Contra
+// OpenAI funciona porque OpenAI siempre manda `index`. Gemini no lo manda
+// nunca —comprobado contra el endpoint real, también con llamadas en
+// paralelo—, así que todas las llamadas caían en la ranura 0: dos llamadas
+// paralelas se fusionaban en una sola y sus argumentos se concatenaban en un
+// JSON inválido del tipo {"city":"Paris"}{"city":"London"}. Un slice más una
+// tabla de búsqueda soporta las dos convenciones: se agrupa por índice cuando
+// viene, por id cuando no, y si no viene ninguno de los dos cada chunk que
+// trae nombre de función abre una llamada nueva.
 type toolAccumulator struct {
-	byIndex map[int]*toolAcc
+	calls []*toolAcc
+	byIdx map[int]*toolAcc
+	byID  map[string]*toolAcc
 }
 
 type toolAcc struct {
 	id   string
 	name string
 	args strings.Builder
+
+	// signature es el token opaco de continuación que el servicio adjuntó a
+	// esta llamada (extra_content.google.thought_signature en Gemini). Se
+	// conserva porque Gemini 3 lo exige de vuelta idéntico en la petición
+	// siguiente: sin él responde HTTP 400 y el bucle de herramientas no
+	// puede avanzar más de un paso. Vacío para el resto de proveedores.
+	signature string
 }
 
 func newToolAccumulator() *toolAccumulator {
-	return &toolAccumulator{byIndex: map[int]*toolAcc{}}
+	return &toolAccumulator{
+		byIdx: map[int]*toolAcc{},
+		byID:  map[string]*toolAcc{},
+	}
+}
+
+// slot decide a qué llamada pertenece un chunk, tolerando las dos
+// convenciones que existen en la práctica.
+func (t *toolAccumulator) slot(tc wireToolCall) *toolAcc {
+	// Con índice: es la señal más fiable y la que usa OpenAI. Los fragmentos
+	// siguientes de una misma llamada llegan solo con índice y argumentos.
+	if tc.Index != nil {
+		if acc, ok := t.byIdx[*tc.Index]; ok {
+			return acc
+		}
+		acc := t.newCall()
+		t.byIdx[*tc.Index] = acc
+		return acc
+	}
+	// Sin índice pero con id: así llega Gemini. El id identifica la llamada
+	// igual de bien, y es lo que evita que dos llamadas en paralelo se
+	// fundan en una.
+	if tc.ID != "" {
+		if acc, ok := t.byID[tc.ID]; ok {
+			return acc
+		}
+		acc := t.newCall()
+		t.byID[tc.ID] = acc
+		return acc
+	}
+	// Sin índice y sin id: un chunk con nombre de función solo puede ser el
+	// arranque de una llamada nueva; uno sin nombre continúa la última
+	// abierta, que es la única interpretación posible de un fragmento
+	// anónimo.
+	if tc.Function.Name != "" || len(t.calls) == 0 {
+		return t.newCall()
+	}
+	return t.calls[len(t.calls)-1]
+}
+
+func (t *toolAccumulator) newCall() *toolAcc {
+	acc := &toolAcc{}
+	t.calls = append(t.calls, acc)
+	return acc
 }
 
 func (t *toolAccumulator) add(tc wireToolCall) {
-	acc, ok := t.byIndex[tc.Index]
-	if !ok {
-		acc = &toolAcc{}
-		t.byIndex[tc.Index] = acc
-	}
+	acc := t.slot(tc)
 	// El id llega una sola vez en el primer chunk de la llamada; conservarlo
 	// tal cual para que el BlockToolResult pueda round-trip el tool_call_id
 	// que el servicio exige (§12bis #5).
 	if tc.ID != "" {
 		acc.id = tc.ID
+		t.byID[tc.ID] = acc
 	}
 	if tc.Function.Name != "" {
 		acc.name = tc.Function.Name
 	}
+	// La firma también llega una sola vez, en el primer chunk. No se
+	// sobrescribe con vacío: los fragmentos posteriores de argumentos no la
+	// traen y perderla aquí sería exactamente el fallo que este código
+	// arregla.
+	if sig := tc.Extra.signature(); sig != "" {
+		acc.signature = sig
+	}
 	acc.args.WriteString(tc.Function.Arguments)
 }
 
+// flush emite las llamadas acumuladas en el orden en que llegaron.
+//
+// Ya no hace falta ordenar por índice: el slice conserva el orden de llegada,
+// que con índices coincide con el orden numérico (los servicios los mandan en
+// orden) y sin índices es la única noción de orden que existe. Y el orden
+// importa más de lo que parece con Gemini: la firma va solo en la primera
+// llamada de un grupo paralelo, así que reordenarlas movería la firma a un
+// sitio donde la API la rechaza.
 func (t *toolAccumulator) flush(ctx context.Context, ch chan<- provider.Event) {
-	if len(t.byIndex) == 0 {
+	if len(t.calls) == 0 {
 		return
 	}
-	idx := make([]int, 0, len(t.byIndex))
-	for i := range t.byIndex {
-		idx = append(idx, i)
-	}
-	sort.Ints(idx)
-
-	for _, i := range idx {
-		acc := t.byIndex[i]
+	for _, acc := range t.calls {
 		args := strings.TrimSpace(acc.args.String())
 		if args == "" {
 			args = "{}"
 		}
 		if !emit(ctx, ch, provider.Event{
-			Kind: provider.EventToolCall,
-			ID:   acc.id,
-			Name: acc.name,
-			Args: json.RawMessage(args),
+			Kind:      provider.EventToolCall,
+			ID:        acc.id,
+			Name:      acc.name,
+			Args:      json.RawMessage(args),
+			Signature: acc.signature,
 		}) {
 			return
 		}
 	}
-	t.byIndex = map[int]*toolAcc{}
+	t.calls = nil
+	t.byIdx = map[int]*toolAcc{}
+	t.byID = map[string]*toolAcc{}
 }

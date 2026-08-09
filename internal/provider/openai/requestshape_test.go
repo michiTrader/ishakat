@@ -160,7 +160,12 @@ func TestRequestMessagesCarryNoUnknownKeys(t *testing.T) {
 		"role": true, "content": true, "name": true,
 		"tool_calls": true, "tool_call_id": true,
 	}
-	allowedCall := map[string]bool{"id": true, "type": true, "function": true}
+	// extra_content is allowed on a tool call, and only there: it is the one
+	// field Google requires to travel back, and Gemini 3 answers 400 without
+	// it. It is absent unless the call actually carried a signature, which the
+	// history below does not — so this test still proves no stray key appears
+	// for a provider that signs nothing.
+	allowedCall := map[string]bool{"id": true, "type": true, "function": true, "extra_content": true}
 	allowedFunc := map[string]bool{"name": true, "arguments": true}
 
 	msgs, _ := FromConvo(toolRoundTripHistory(), provider.Caps{Tools: true})

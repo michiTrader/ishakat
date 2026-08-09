@@ -73,18 +73,67 @@ type wireToolFuncCall struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+// wireExtraContent es el sobre por el que Google transporta datos propios
+// dentro de una respuesta que por lo demás es del dialecto OpenAI. Va anidado
+// bajo la clave del proveedor ("google") para que cada uno pueda añadir lo
+// suyo sin colisionar.
+//
+// Se modela con tipos en vez de con json.RawMessage porque el campo se lee y
+// se vuelve a escribir: un RawMessage haría que la firma viajara pegada a la
+// forma exacta que mandó el servicio, y el punto de este arreglo es
+// justamente separar el dato opaco (la firma) de la forma del cable.
+type wireExtraContent struct {
+	Google *wireGoogleExtra `json:"google,omitempty"`
+}
+
+// wireGoogleExtra lleva la firma de pensamiento de Gemini: una instantánea
+// cifrada del razonamiento interno del modelo. Es opaca por diseño —no se
+// puede leer, decodificar ni generar— y su único propósito es volver tal cual
+// en la petición siguiente.
+type wireGoogleExtra struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+// signature saca la firma sin obligar a quien pregunta a comprobar dos
+// punteros. Devuelve "" cuando no hay ninguna, que es el caso de todos los
+// proveedores salvo Gemini.
+func (e *wireExtraContent) signature() string {
+	if e == nil || e.Google == nil {
+		return ""
+	}
+	return e.Google.ThoughtSignature
+}
+
+// googleExtra construye el sobre para una firma, o nil si no hay firma que
+// mandar. Devolver nil importa: con `omitempty` es lo que hace que la clave
+// `extra_content` no aparezca en el cuerpo cuando el proveedor no firma nada,
+// y así el request que se manda a OpenAI o a OmniRoute no cambia ni un byte.
+func googleExtra(sig string) *wireExtraContent {
+	if sig == "" {
+		return nil
+	}
+	return &wireExtraContent{Google: &wireGoogleExtra{ThoughtSignature: sig}}
+}
+
 // wireToolCall es una llamada a herramienta tal como *llega* en streaming,
-// troceada. Index es obligatorio en esa dirección: los fragmentos de una
-// misma llamada se reensamblan por él (ver toolAccumulator.add), y dos
-// llamadas en paralelo solo se distinguen así.
+// troceada. Index se reensambla por él (ver toolAccumulator.add) cuando el
+// servicio lo manda.
+//
+// Index es un puntero, y eso es una decisión medida contra la API real: Gemini
+// NO manda `index` en streaming, ni siquiera con llamadas en paralelo. Con un
+// int a secas, ausente e índice 0 son indistinguibles, así que dos llamadas
+// paralelas de Gemini caían las dos en la ranura 0 del acumulador y sus
+// argumentos se concatenaban en un JSON inválido. Un puntero distingue "no
+// vino" de "vino 0" y permite al acumulador recurrir al id cuando falta.
 //
 // Deliberadamente NO se reutiliza para construir un request: ver
 // wireToolCallOut y el comentario que lo acompaña.
 type wireToolCall struct {
-	Index    int              `json:"index"`
-	ID       string           `json:"id,omitempty"`
-	Type     string           `json:"type,omitempty"`
-	Function wireToolFuncCall `json:"function"`
+	Index    *int              `json:"index,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function wireToolFuncCall  `json:"function"`
+	Extra    *wireExtraContent `json:"extra_content,omitempty"`
 }
 
 // wireToolCallOut es una llamada a herramienta tal como se *envía* dentro de
@@ -102,10 +151,16 @@ type wireToolCall struct {
 // desarrollo; la capa de compatibilidad de Gemini los valida y devuelve 400.
 // El formato de entrada y el de salida son dos contratos distintos que
 // coinciden en parte, así que se modelan por separado.
+//
+// Extra es la excepción que confirma la regla: es el único campo que sí viaja
+// en las dos direcciones, porque Google exige que vuelva idéntico. Lleva
+// `omitempty` y se rellena solo si la llamada trajo firma, así que para
+// cualquier otro proveedor el cuerpo sale exactamente igual que antes.
 type wireToolCallOut struct {
-	ID       string           `json:"id,omitempty"`
-	Type     string           `json:"type,omitempty"`
-	Function wireToolFuncCall `json:"function"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function wireToolFuncCall  `json:"function"`
+	Extra    *wireExtraContent `json:"extra_content,omitempty"`
 }
 
 // wireDelta es el incremento de un chunk de streaming.
@@ -121,6 +176,13 @@ type wireDelta struct {
 	Reasoning        json.RawMessage `json:"reasoning,omitempty"`
 	ToolCalls        []wireToolCall  `json:"tool_calls,omitempty"`
 	Refusal          string          `json:"refusal,omitempty"`
+
+	// Extra es el mismo sobre de wireToolCall, aquí en el nivel del mensaje:
+	// cuando la respuesta NO trae llamadas a herramientas, Gemini pone la
+	// firma en el propio delta. Se acepta para no perderla, aunque devolverla
+	// en ese caso es recomendado y no obligatorio: Google solo valida de forma
+	// estricta las firmas de las llamadas a herramientas.
+	Extra *wireExtraContent `json:"extra_content,omitempty"`
 }
 
 // wireChoice es una alternativa de la respuesta. ishakat siempre pide una

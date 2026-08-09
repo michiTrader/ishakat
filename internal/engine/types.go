@@ -51,9 +51,17 @@ type Event struct {
 	// the eventual BlockToolResult can round-trip the correlation the
 	// OpenAI dialect requires (§12bis #5). Empty when the service does not
 	// assign ids.
-	Name  string
-	Args  json.RawMessage
-	ID    string
+	Name string
+	Args json.RawMessage
+	ID   string
+
+	// Signature is the opaque continuation token the provider attached to an
+	// EventToolCall and requires back verbatim on the next request; the agent
+	// loop copies it into the BlockToolCall it records so the dialect can
+	// reattach it (convo.Block.Signature documents why). Empty for providers
+	// that sign nothing.
+	Signature string
+
 	Usage *convo.Usage
 	Err   error
 }
