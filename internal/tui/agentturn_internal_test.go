@@ -75,7 +75,18 @@ func TestAgentTurnCmdRunsToolCallsBeforeReturningFinalAnswer(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("stream opened %d times, want 2 iterations", requests)
 	}
-	if len(history.Messages) != 2 {
-		t.Fatalf("history has %d messages, want assistant tool call and tool result", len(history.Messages))
+	// RunAgentTurn (internal/engine/agentloop.go) appends one message per
+	// iteration step: the first iteration's assistant tool-call message,
+	// its tool result, and the second (final) iteration's assistant text
+	// message — the natural-termination text is recorded in history too,
+	// not just returned in AgentResult.Text.
+	if len(history.Messages) != 3 {
+		t.Fatalf("history has %d messages, want assistant tool call, tool result, and final assistant text", len(history.Messages))
+	}
+	wantRoles := []convo.Role{convo.RoleAssistant, convo.RoleTool, convo.RoleAssistant}
+	for i, want := range wantRoles {
+		if got := history.Messages[i].Role; got != want {
+			t.Errorf("history.Messages[%d].Role = %v, want %v", i, got, want)
+		}
 	}
 }

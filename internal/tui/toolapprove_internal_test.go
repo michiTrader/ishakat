@@ -19,23 +19,36 @@ func approvalRequest(tier permissions.Tier) permissions.Request {
 
 func TestNewToolApproveDialogOffersSessionGrantOnlyForMediumRisk(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		tier      permissions.Tier
-		wantRows  int
-		wantGrant bool
+		name        string
+		tier        permissions.Tier
+		wantRows    int
+		wantSession bool // whether any row offers AllowSession = true
 	}{
-		{name: "medium", tier: permissions.Medium, wantRows: 3, wantGrant: true},
-		{name: "high", tier: permissions.High, wantRows: 2, wantGrant: false},
+		{name: "medium", tier: permissions.Medium, wantRows: 3, wantSession: true},
+		{name: "high", tier: permissions.High, wantRows: 2, wantSession: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dialog := newToolApproveDialog(approvalRequest(tc.tier), make(chan permissions.Decision, 1))
 			if len(dialog.options) != tc.wantRows {
 				t.Fatalf("options = %d, want %d", len(dialog.options), tc.wantRows)
 			}
+			gotSession := false
 			for _, option := range dialog.options {
-				if option.decision.AllowSession != tc.wantGrant {
-					t.Errorf("option %+v has AllowSession = %v, want %v", option, option.decision.AllowSession, tc.wantGrant)
+				if option.decision.AllowSession {
+					gotSession = true
 				}
+			}
+			if gotSession != tc.wantSession {
+				t.Errorf("dialog offers AllowSession row = %v, want %v (options: %+v)", gotSession, tc.wantSession, dialog.options)
+			}
+			// The first row is always "allow once" and the last is always
+			// "deny" — neither must ever carry AllowSession, regardless of
+			// tier; only the middle Medium-only row does.
+			if first := dialog.options[0]; first.decision.AllowSession {
+				t.Errorf("first option %+v must not offer AllowSession", first)
+			}
+			if last := dialog.options[len(dialog.options)-1]; last.decision.AllowSession || last.decision.Allow {
+				t.Errorf("last option %+v must be an explicit deny", last)
 			}
 		})
 	}
@@ -73,7 +86,7 @@ func TestToolApproveDialogSelectionWrapsAndCancelDenies(t *testing.T) {
 func TestToolApproveDialogSubmitSendsSelectedDecision(t *testing.T) {
 	reply := make(chan permissions.Decision, 1)
 	dialog := newToolApproveDialog(approvalRequest(permissions.Medium), reply).moveSel(1)
-	root := Root{mode: ModeToolApprove, toolApprove: dialog}
+	root := Root{mode: ModeToolApprove, keys: Map{Cancel: "esc", Submit: "enter"}, toolApprove: dialog}
 
 	model, _ := root.updateToolApprove(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := model.(Root)
