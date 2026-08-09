@@ -115,8 +115,8 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 // still leaves the dialog open rather than silently dropping the request:
 // dropping it would leave the goroutine (and its channel) blocked forever
 // with nothing on screen ever able to answer it, which is strictly worse.
-func (m Root) openToolApprove(msg toolApproveRequestMsg) (tea.Model, tea.Cmd) {
-	m.toolApprove = newToolApproveDialog(msg.req, msg.reply)
+func (m Root) openToolApprove(msg ToolApproveRequestMsg) (tea.Model, tea.Cmd) {
+	m.toolApprove = newToolApproveDialog(msg.Req, msg.Reply)
 	m.mode = ModeToolApprove
 	return m, nil
 }

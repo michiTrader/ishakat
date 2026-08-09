@@ -69,22 +69,31 @@ type compactDoneMsg struct {
 // treats that as a no-op rather than replacing a good catalog with nothing.
 type CatalogRefreshedMsg struct{ Catalog *catalog.Catalog }
 
-// toolApproveRequestMsg is how a permissions.Reviewer bridge running inside
+// ToolApproveRequestMsg is how a permissions.Reviewer bridge running inside
 // RunAgentTurn's goroutine (started by agentTurnCmd, a tea.Cmd — see
-// toolreview.go) asks Update to open the ModeToolApprove overlay: the
-// bridge's Review call is blocked, deep inside the agent loop, on reply —
+// agentturn.go) asks Update to open the ModeToolApprove overlay: the
+// bridge's Review call is blocked, deep inside the agent loop, on Reply —
 // the channel Update's eventual decision travels back on — and this
 // message is the only way that goroutine can reach Root at all, the same
 // role compactDoneMsg plays for summarizeCmd's own goroutine. It is not a
 // one-shot *result* the way compactDoneMsg is: nothing here ends the
-// turn, it only pauses it until updateToolApprove sends a permissions.Decision
-// down reply.
-type toolApproveRequestMsg struct {
-	req   permissions.Request
-	reply chan<- permissions.Decision
+// turn, it only pauses it until resolveToolApproveWith sends a
+// permissions.Decision down Reply.
+//
+// It is exported (unlike every other message in this file, but exactly
+// like CatalogRefreshedMsg above and for the same reason) because the
+// permissions.Reviewer implementation that produces it lives in
+// internal/app, on the far side of the import boundary §6.1 draws: the
+// Reviewer holds the *tea.Program app.Run built and calls p.Send with a
+// value of this exact type from inside Guard.Authorize's call to Review,
+// which only internal/app can construct since toolapprove.go/agentturn.go
+// (internal/tui) never import a concrete Reviewer.
+type ToolApproveRequestMsg struct {
+	Req   permissions.Request
+	Reply chan<- permissions.Decision
 }
 
-// agentTurnDoneMsg is agentTurnCmd's result (see toolreview.go/root.go's
+// agentTurnDoneMsg is agentTurnCmd's result (see agentturn.go/root.go's
 // startEngineTurn tools-enabled branch): engine.RunAgentTurn blocks with no
 // per-token callback, so — like summarizeCmd — it is wrapped in a tea.Cmd
 // and its one finished AgentResult reaches Update as this message.

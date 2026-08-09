@@ -5,7 +5,7 @@
 // every method takes a toolApproveDialog and returns the next one — and it
 // never talks to the Guard itself: toolreview.go's bridge is what receives
 // the permissions.Request from inside RunAgentTurn's goroutine and hands it
-// here (via toolApproveRequestMsg) to render and to walk with the keyboard;
+// here (via ToolApproveRequestMsg) to render and to walk with the keyboard;
 // this file only ever produces a permissions.Decision, sent back down the
 // reply channel the bridge is blocked on.
 package tui
@@ -123,7 +123,7 @@ func (m Root) resolveToolApprove() (tea.Model, tea.Cmd) {
 // bridge's Review call only ever waits on one receive — and the channel
 // field is cleared alongside the rest of the dialog's state so a stray
 // message arriving after this dialog has already closed (there is none in
-// practice, since nothing re-sends toolApproveRequestMsg for the same
+// practice, since nothing re-sends ToolApproveRequestMsg for the same
 // request) cannot double-send on it.
 func (m Root) resolveToolApproveWith(decision permissions.Decision) (tea.Model, tea.Cmd) {
 	if m.toolApprove.reply != nil {

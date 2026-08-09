@@ -693,7 +693,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.finishCompact(msg.summary, msg.err)
 
-	case toolApproveRequestMsg:
+	case ToolApproveRequestMsg:
 		// A tools-enabled turn can pause more than once (one dialog per
 		// ask-tier tool call), so unlike compactDoneMsg's own stale-result
 		// guard there is no "this can only ever be stale" check here: any
