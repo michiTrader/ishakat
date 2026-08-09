@@ -65,7 +65,7 @@ import (
 // are not implemented yet.
 func BuildEngine(cfg *config.Config, cat *catalog.Catalog, modelText, version string, wantTools bool) (eng *engine.Engine, ref ModelRef, system, warn string, err error) {
 	var fb *BootFallback
-	ref, fb, err = ResolveModelForBoot(cfg, modelText)
+	ref, fb, err = ResolveModelForBoot(cfg, cat, modelText)
 	if err != nil {
 		return nil, ModelRef{}, "", "", err
 	}
@@ -75,8 +75,7 @@ func BuildEngine(cfg *config.Config, cat *catalog.Catalog, modelText, version st
 	}
 
 	system, warn = SystemPrompt(cfg)
-	if fb != nil {
-		fbLine := fmt.Sprintf("app.default_model (%s) %s; using %s instead", fb.From, fb.Reason, fb.To)
+	if fbLine := fb.Describe(); fbLine != "" {
 		if warn == "" {
 			warn = fbLine
 		} else {

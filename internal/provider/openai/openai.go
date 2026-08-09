@@ -220,8 +220,32 @@ func (p *Provider) httpError(resp *http.Response) *provider.Error {
 		e.Message = env.Error.Message
 		e.Code = codeString(env.Error)
 	}
+	// Gemini's OpenAI-compatible layer returns its errors wrapped in a JSON
+	// *array* — `[{"error": {...}}]` — which the object decode above cannot
+	// read. Without this rung the fallback below kicked in and, because that
+	// body is pretty-printed, firstLine cut it at the first newline: the user
+	// saw exactly `HTTP 400: [{` and the actual reason was thrown away. An
+	// error message that destroys its own diagnostic is worse than no message,
+	// because it looks like the program already told you what happened.
 	if e.Message == "" {
-		e.Message = firstLine(string(raw), 200)
+		var arr []struct {
+			Error *wireError `json:"error"`
+		}
+		if err := json.Unmarshal(raw, &arr); err == nil {
+			for _, item := range arr {
+				if item.Error != nil && item.Error.Message != "" {
+					e.Message = item.Error.Message
+					e.Code = codeString(item.Error)
+					break
+				}
+			}
+		}
+	}
+	if e.Message == "" {
+		// collapseJSON rather than firstLine: a pretty-printed body is one
+		// value spread over many lines, so cutting at the first newline keeps
+		// only its opening brace.
+		e.Message = collapseJSON(string(raw), 300)
 	}
 	if e.Message == "" {
 		e.Message = http.StatusText(resp.StatusCode)
@@ -255,6 +279,34 @@ func codeString(we *wireError) string {
 		return n.String()
 	}
 	return we.Type
+}
+
+// collapseJSON flattens a multi-line body into a single line so that
+// truncating it keeps information instead of punctuation. firstLine is right
+// for a one-line body and actively harmful for a pretty-printed one: it
+// returns the opening bracket and discards the message that follows.
+func collapseJSON(s string, max int) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	space := true // leading whitespace is dropped
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+			if !space {
+				b.WriteByte(' ')
+				space = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		space = false
+	}
+	out := strings.TrimSpace(b.String())
+	// Rune-aware: a byte-slice cut can split a multi-byte character and put
+	// a replacement glyph in the middle of an error message.
+	if r := []rune(out); len(r) > max {
+		out = string(r[:max]) + "…"
+	}
+	return out
 }
 
 func firstLine(s string, max int) string {

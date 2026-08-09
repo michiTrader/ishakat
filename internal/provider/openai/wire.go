@@ -22,11 +22,11 @@ import "encoding/json"
 // servicios exigen content:"" y otros lo rechazan; marshalTools se encarga
 // de eso).
 type ChatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	Name       string         `json:"name,omitempty"`
-	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Name       string            `json:"name,omitempty"`
+	ToolCalls  []wireToolCallOut `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 // wireToolDef es una entrada del array `tools` del cuerpo del request
@@ -66,15 +66,46 @@ type wireUsage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
-// wireToolCall es una llamada a herramienta, en streaming llega troceada.
+// wireToolFuncCall is the function half of a tool call, shared by both
+// directions because its shape is identical in each.
+type wireToolFuncCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// wireToolCall es una llamada a herramienta tal como *llega* en streaming,
+// troceada. Index es obligatorio en esa dirección: los fragmentos de una
+// misma llamada se reensamblan por él (ver toolAccumulator.add), y dos
+// llamadas en paralelo solo se distinguen así.
+//
+// Deliberadamente NO se reutiliza para construir un request: ver
+// wireToolCallOut y el comentario que lo acompaña.
 type wireToolCall struct {
-	Index    int    `json:"index"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Function struct {
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
-	} `json:"function"`
+	Index    int              `json:"index"`
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function wireToolFuncCall `json:"function"`
+}
+
+// wireToolCallOut es una llamada a herramienta tal como se *envía* dentro de
+// un mensaje assistant del historial. Es un tipo aparte de wireToolCall por
+// una razón concreta y no por simetría: `index` pertenece al formato de
+// respuesta en streaming, no al de request, y enviarlo es lo que hacía que
+// Gemini rechazara con HTTP 400 cualquier turno posterior a una llamada a
+// herramienta.
+//
+// Un solo struct para las dos direcciones parece economía y es una trampa:
+// obliga a que el campo exista en la dirección donde sobra, y como `index`
+// no llevaba `omitempty` (correctamente — en streaming un índice 0 es real y
+// no debe desaparecer), el request salía siempre con `"index": 0`. OpenAI
+// ignora los campos que no conoce y el error quedó invisible durante todo el
+// desarrollo; la capa de compatibilidad de Gemini los valida y devuelve 400.
+// El formato de entrada y el de salida son dos contratos distintos que
+// coinciden en parte, así que se modelan por separado.
+type wireToolCallOut struct {
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function wireToolFuncCall `json:"function"`
 }
 
 // wireDelta es el incremento de un chunk de streaming.

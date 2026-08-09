@@ -137,22 +137,28 @@ func Headless(opts HeadlessOptions) int {
 
 	// 4. Model and provider. ResolveModelForBoot is P2: with opts.Model
 	// empty (no explicit -m/--model), an app.default_model that fails to
-	// resolve to a usable provider is routed to another configured,
-	// credentialed provider instead of failing outright — see its own doc
-	// comment. An explicit -m/--model always goes through ResolveModel's
-	// ordinary path unchanged (a typo must fail loudly, not land somewhere
-	// else silently).
-	ref, fb, err := ResolveModelForBoot(cfg, opts.Model)
+	// resolve to a usable provider — or that was never set at all — is
+	// routed to another configured, credentialed provider instead of
+	// failing outright, and reported once via fb.Describe(). An explicit
+	// -m/--model always goes through ResolveModel's ordinary path unchanged
+	// (a typo must fail loudly, not land somewhere else silently).
+	//
+	// The catalog snapshot is loaded first because the resolver now consults
+	// it: given a choice, a boot fallback should pick a model the provider
+	// was last seen actually serving rather than this build's compiled-in
+	// preset id. LoadCatalog reads local cache only (§4.4 keeps the network
+	// off this path), so hoisting it above the resolution costs nothing.
+	catalogSnapshot := LoadCatalog(cfg)
+	ref, fb, err := ResolveModelForBoot(cfg, &catalogSnapshot.Catalog, opts.Model)
 	if err != nil {
 		s.fail(err)
 		return ExitError
 	}
-	if fb != nil {
-		s.warn(fmt.Sprintf("app.default_model (%s) %s; using %s instead", fb.From, fb.Reason, fb.To))
+	if line := fb.Describe(); line != "" {
+		s.warn(line)
 	}
 	// Read pricing from the local catalog only; unknown prices remain unknown.
 	var modelCost *catalog.Cost
-	catalogSnapshot := LoadCatalog(cfg)
 	if model, found := catalogSnapshot.Catalog.Get(ref.Ref); found {
 		modelCost = model.Cost
 	}

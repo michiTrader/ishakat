@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 )
 
@@ -211,7 +212,7 @@ func TestResolveModelForBootFallsBackWhenDefaultHasNoCredential(t *testing.T) {
 		},
 	}
 
-	ref, fb, err := ResolveModelForBoot(cfg, "")
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v, want a successful fallback", err)
 	}
@@ -251,7 +252,7 @@ func TestResolveModelForBootFallsBackWhenDefaultProviderDisabled(t *testing.T) {
 		},
 	}
 
-	ref, fb, err := ResolveModelForBoot(cfg, "")
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v", err)
 	}
@@ -269,7 +270,7 @@ func TestResolveModelForBootFallsBackWhenDefaultProviderDisabled(t *testing.T) {
 // nil *BootFallback — nothing happened worth reporting.
 func TestResolveModelForBootNoFallbackWhenDefaultAlreadyWorks(t *testing.T) {
 	cfg := cfgWithProviders()
-	ref, fb, err := ResolveModelForBoot(cfg, "")
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v", err)
 	}
@@ -299,7 +300,7 @@ func TestResolveModelForBootNeverOverridesAnExplicitModelFlag(t *testing.T) {
 		},
 	}
 
-	_, fb, err := ResolveModelForBoot(cfg, "omniroute/auto/coding")
+	_, fb, err := ResolveModelForBoot(cfg, nil, "omniroute/auto/coding")
 	if err == nil {
 		t.Fatal("an explicit -m naming a disabled provider must fail, not silently fall back")
 	}
@@ -321,7 +322,7 @@ func TestResolveModelForBootFailsWithNoUsableProviderAtAll(t *testing.T) {
 		},
 	}
 
-	_, fb, err := ResolveModelForBoot(cfg, "")
+	_, fb, err := ResolveModelForBoot(cfg, nil, "")
 	if err == nil {
 		t.Fatal("want an error: no provider anywhere is usable")
 	}
@@ -348,7 +349,7 @@ func TestResolveModelForBootSkipsProvidersWithNoVerifyModelPreset(t *testing.T) 
 		},
 	}
 
-	ref, fb, err := ResolveModelForBoot(cfg, "")
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v", err)
 	}
@@ -357,5 +358,247 @@ func TestResolveModelForBootSkipsProvidersWithNoVerifyModelPreset(t *testing.T) 
 	}
 	if fb == nil {
 		t.Fatal("want a non-nil *BootFallback")
+	}
+}
+
+// --- boot with no app.default_model at all -------------------------------
+//
+// The tests below cover the bug report's third symptom: a configuration
+// with exactly one enabled, credentialed provider and no [app] section
+// warned "no model to use: pass -m/--model or set app.default_model" on
+// every single launch and started with eng = nil, even though there was
+// obviously something usable to run. See ResolveModelForBoot's own comment
+// on the errNoModelConfigured branch.
+
+// userReportedCfg is the configuration from the bug report, verbatim in
+// structure: schema + one [[provider]] entry, and no [app] table, so
+// App.DefaultModel is the zero value.
+func userReportedCfg() *config.Config {
+	return &config.Config{
+		Schema: config.Schema,
+		Providers: []config.Provider{{
+			ID: "gemini-direct", Name: "Google Gemini", Kind: "openai",
+			BaseURL:  "https://generativelanguage.googleapis.com/v1beta/openai",
+			Discover: true, Enabled: true, AuthOK: true,
+		}},
+	}
+}
+
+func TestResolveModelForBootNoDefaultModelPicksAUsableProvider(t *testing.T) {
+	cfg := userReportedCfg()
+
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v; a config with one enabled, "+
+			"credentialed provider must not fail to boot just because "+
+			"app.default_model is unset", err)
+	}
+	if ref.Provider != "gemini-direct" {
+		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "gemini-direct")
+	}
+	if ref.WireID == "" {
+		t.Error("ref.WireID is empty: the fallback must name a concrete model")
+	}
+	if fb == nil {
+		t.Fatal("want a non-nil *BootFallback: silently choosing a model the user " +
+			"never configured is exactly the kind of invisible decision this " +
+			"type exists to report")
+	}
+	if !fb.Unset() {
+		t.Errorf("fb.Unset() = false (fb.From = %q), want true: nothing was configured "+
+			"to fall back away from", fb.From)
+	}
+}
+
+// TestBootFallbackDescribeUnsetNamesNoEmptyRef is the reason Describe()
+// exists at all. The previous phrasing was a bare
+// "app.default_model (%s) %s; using %s instead", which for the unset case
+// would have rendered "app.default_model () is not set; using X instead" —
+// an empty pair of parentheses in the very first line of output.
+func TestBootFallbackDescribeUnsetNamesNoEmptyRef(t *testing.T) {
+	fb := &BootFallback{To: "gemini-direct/gemini-3-flash", Reason: "is not set"}
+
+	got := fb.Describe()
+	if strings.Contains(got, "()") {
+		t.Errorf("Describe() = %q, must not contain an empty '()' pair", got)
+	}
+	if !strings.Contains(got, "gemini-direct/gemini-3-flash") {
+		t.Errorf("Describe() = %q, want it to name the model actually used", got)
+	}
+	if !strings.Contains(got, "model set") {
+		t.Errorf("Describe() = %q, want it to say how to make the choice stick", got)
+	}
+}
+
+func TestBootFallbackDescribeNilIsEmpty(t *testing.T) {
+	var fb *BootFallback
+	if got := fb.Describe(); got != "" {
+		t.Errorf("(*BootFallback)(nil).Describe() = %q, want \"\": the no-fallback "+
+			"case must print nothing at all", got)
+	}
+}
+
+// TestResolveModelForBootStillFailsWithNoProviderAtAll pins the boundary of
+// the fix: routing around an unset default is only correct when there is
+// something to route to. An empty configuration has to keep failing, and
+// with the message that names the actual fix.
+func TestResolveModelForBootStillFailsWithNoProviderAtAll(t *testing.T) {
+	cfg := &config.Config{Schema: config.Schema}
+
+	_, _, err := ResolveModelForBoot(cfg, nil, "")
+	if err == nil {
+		t.Fatal("with no providers declared at all there is nothing to fall back to; " +
+			"ResolveModelForBoot must fail")
+	}
+	if !strings.Contains(err.Error(), "provider add") {
+		t.Errorf("error = %v, want it to point at `ishakat provider add`", err)
+	}
+}
+
+// TestResolveModelForBootNoDefaultSkipsUncredentialedProvider: an enabled
+// provider whose credential never resolved cannot answer a turn, so picking
+// it would trade a startup warning for a failing first turn.
+func TestResolveModelForBootNoDefaultSkipsUncredentialedProvider(t *testing.T) {
+	cfg := &config.Config{
+		Schema: config.Schema,
+		Providers: []config.Provider{
+			{ID: "omniroute", Kind: "openai", Enabled: true, AuthOK: false, MissingEnv: "OMNIROUTE_API_KEY"},
+			{ID: "openai", Kind: "openai", Enabled: true, AuthOK: true},
+		},
+	}
+
+	ref, fb, err := ResolveModelForBoot(cfg, nil, "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v", err)
+	}
+	if ref.Provider != "openai" {
+		t.Errorf("ref.Provider = %q, want %q (omniroute has no credential)", ref.Provider, "openai")
+	}
+	if fb == nil || !fb.Unset() {
+		t.Fatalf("want an unset-default fallback, got %+v", fb)
+	}
+}
+
+// TestResolveModelForBootStillFailsWhenNothingIsCredentialed: providers are
+// declared and enabled, but none of them can authenticate. There is nothing
+// honest to boot into, so the error must survive.
+func TestResolveModelForBootStillFailsWhenNothingIsCredentialed(t *testing.T) {
+	cfg := &config.Config{
+		Schema: config.Schema,
+		Providers: []config.Provider{
+			{ID: "omniroute", Kind: "openai", Enabled: true, AuthOK: false, MissingEnv: "OMNIROUTE_API_KEY"},
+			{ID: "openai", Kind: "openai", Enabled: true, AuthOK: false, MissingEnv: "OPENAI_API_KEY"},
+		},
+	}
+
+	_, _, err := ResolveModelForBoot(cfg, nil, "")
+	if err == nil {
+		t.Fatal("no provider has a working credential; ResolveModelForBoot must fail " +
+			"rather than boot into a model that cannot answer")
+	}
+}
+
+// --- the catalog is preferred over the compiled-in preset id --------------
+
+// catalogOf builds a snapshot with the given models, using the same
+// provider/wire split catalog.Build produces.
+func catalogOf(models ...catalog.Model) *catalog.Catalog {
+	return &catalog.Catalog{Models: models}
+}
+
+func catModel(provider, wireID string, opts ...func(*catalog.Model)) catalog.Model {
+	m := catalog.Model{
+		Ref:      provider + "/" + wireID,
+		Provider: provider,
+		WireID:   wireID,
+		Name:     wireID,
+		Health:   catalog.HealthOK,
+	}
+	for _, o := range opts {
+		o(&m)
+	}
+	return m
+}
+
+// TestResolveModelForBootPrefersTheCatalogOverThePreset is the reason
+// pickBootModel takes a catalog at all. config.VerifyModelFor returns a
+// model id compiled into *this build* ("gemini-2.0-flash"); the catalog
+// holds what the provider was last seen actually serving on this machine.
+// When the two disagree the live answer has to win, or a user whose account
+// has moved on gets booted onto a model that may no longer exist.
+func TestResolveModelForBootPrefersTheCatalogOverThePreset(t *testing.T) {
+	cfg := userReportedCfg()
+	cat := catalogOf(catModel("gemini-direct", "gemini-3.1-flash-lite"))
+
+	ref, fb, err := ResolveModelForBoot(cfg, cat, "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v", err)
+	}
+	if ref.WireID != "gemini-3.1-flash-lite" {
+		t.Errorf("ref.WireID = %q, want the catalog's model, not the preset's "+
+			"compiled-in %q", ref.WireID, "gemini-2.0-flash")
+	}
+	if fb == nil || fb.To != "gemini-direct/gemini-3.1-flash-lite" {
+		t.Errorf("fb = %+v, want it to report the catalog model it chose", fb)
+	}
+}
+
+// TestResolveModelForBootFallsBackToPresetWithoutACatalog: a first run has
+// no cache, and that is an ordinary state rather than an error. The preset
+// id is the honest second choice — `provider add` proved it answers.
+func TestResolveModelForBootFallsBackToPresetWithoutACatalog(t *testing.T) {
+	cfg := userReportedCfg()
+
+	ref, _, err := ResolveModelForBoot(cfg, catalogOf(), "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v", err)
+	}
+	if ref.WireID != "gemini-2.0-flash" {
+		t.Errorf("ref.WireID = %q, want the gemini preset's VerifyModel with an "+
+			"empty catalog", ref.WireID)
+	}
+}
+
+// TestResolveModelForBootSkipsDeprecatedAndUnusableCatalogEntries: the
+// provider itself said these are going away or cannot be authenticated, so
+// starting a session on one is a slow-motion failure.
+func TestResolveModelForBootSkipsDeprecatedAndUnusableCatalogEntries(t *testing.T) {
+	cfg := userReportedCfg()
+	cat := catalogOf(
+		catModel("gemini-direct", "gemini-1.0-retired", func(m *catalog.Model) {
+			m.Tags = []string{catalog.TagDeprecated}
+		}),
+		catModel("gemini-direct", "gemini-locked", func(m *catalog.Model) {
+			m.Health = catalog.HealthUnauthenticated
+		}),
+		catModel("gemini-direct", "gemini-3.1-flash-lite"),
+	)
+
+	ref, _, err := ResolveModelForBoot(cfg, cat, "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v", err)
+	}
+	if ref.WireID != "gemini-3.1-flash-lite" {
+		t.Errorf("ref.WireID = %q, want the first usable, non-deprecated entry", ref.WireID)
+	}
+}
+
+// TestResolveModelForBootIgnoresOtherProvidersCatalogEntries: the catalog
+// holds every provider's models at once, so the lookup must be scoped or a
+// gemini-only configuration could boot with an OpenAI wire id.
+func TestResolveModelForBootIgnoresOtherProvidersCatalogEntries(t *testing.T) {
+	cfg := userReportedCfg()
+	cat := catalogOf(
+		catModel("openai", "gpt-4o"),
+		catModel("gemini-direct", "gemini-3.1-flash-lite"),
+	)
+
+	ref, _, err := ResolveModelForBoot(cfg, cat, "")
+	if err != nil {
+		t.Fatalf("ResolveModelForBoot() error = %v", err)
+	}
+	if ref.Provider != "gemini-direct" || ref.WireID != "gemini-3.1-flash-lite" {
+		t.Errorf("ref = %q, want a gemini-direct model: openai is not even declared "+
+			"in this configuration", ref.Ref)
 	}
 }
