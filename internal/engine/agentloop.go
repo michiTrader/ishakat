@@ -173,9 +173,10 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				reasoning.WriteString(ev.Text)
 			case EventToolCall:
 				toolCalls = append(toolCalls, toolCallOut{
-					id:   ev.ID,
-					name: ev.Name,
-					args: ev.Args,
+					id:        ev.ID,
+					name:      ev.Name,
+					args:      ev.Args,
+					signature: ev.Signature,
 				})
 			case EventUsage:
 				iterUsage = ev.Usage
@@ -241,7 +242,8 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			asstBlocks = append(asstBlocks, convo.TextBlock(text.String()))
 		}
 		for _, tc := range toolCalls {
-			asstBlocks = append(asstBlocks, convo.ToolCallBlock(tc.id, tc.name, tc.args))
+			asstBlocks = append(asstBlocks,
+				convo.ToolCallBlock(tc.id, tc.name, tc.args).WithSignature(tc.signature))
 		}
 		if len(asstBlocks) > 0 {
 			asst := convo.NewMessage(convo.RoleAssistant, asstBlocks...)
@@ -431,6 +433,12 @@ type toolCallOut struct {
 	id   string
 	name string
 	args json.RawMessage
+
+	// signature is the provider's opaque continuation token for this call. It
+	// has to survive into the recorded BlockToolCall, because the next
+	// iteration re-sends the whole history and Gemini 3 rejects a history
+	// whose tool calls lost their signatures.
+	signature string
 }
 
 // abortedAssistant builds the partial assistant message persisted when the user
@@ -445,7 +453,8 @@ func abortedAssistant(text, reasoning string, calls []toolCallOut, model string)
 		blocks = append(blocks, convo.TextBlock(text))
 	}
 	for _, tc := range calls {
-		blocks = append(blocks, convo.ToolCallBlock(tc.id, tc.name, tc.args))
+		blocks = append(blocks,
+			convo.ToolCallBlock(tc.id, tc.name, tc.args).WithSignature(tc.signature))
 	}
 	m := convo.NewMessage(convo.RoleAssistant, blocks...)
 	m.Model = model

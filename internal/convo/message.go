@@ -119,6 +119,30 @@ type Block struct {
 	// con Args.
 	ToolCallID string `json:"tool_call_id,omitempty"`
 
+	// Signature is an opaque continuation token the provider attached to this
+	// block and requires back, byte for byte, on the next request.
+	//
+	// This does not violate the rule at the top of the file. What convo must
+	// never hold is a provider's JSON *shape*; a signature has no shape — it
+	// is an opaque string, transported exactly as ToolCallID and Args already
+	// are: produced by whoever received the block, never interpreted here.
+	// Nothing in this package reads its contents, and the name is
+	// deliberately generic because two vendors need the same round-trip.
+	//
+	// It exists because for Gemini 3 the round-trip is mandatory, not
+	// decorative. Gemini attaches a thought_signature — an encrypted snapshot
+	// of its private reasoning — to the first function-call part of each
+	// step. Dropping it on the way back is not a quality loss but a hard
+	// HTTP 400, "Function call is missing a thought_signature in functionCall
+	// parts", which is exactly what made every turn after a tool call fail
+	// against gemini-direct while the same model worked through a gateway
+	// that preserved the field. Anthropic's extended thinking signs its
+	// thinking blocks the same way.
+	//
+	// Empty for every provider that signs nothing, which is most of them: the
+	// field then costs one word in memory and nothing at all on the wire.
+	Signature string `json:"signature,omitempty"`
+
 	// IsError marca un BlockToolResult que trae un fallo en vez de una salida.
 	// El fallo es dato, no excepción: entra al contexto para que el modelo lo
 	// vea y reaccione, que es el mecanismo entero por el que el bucle reactivo
@@ -147,6 +171,19 @@ func ImageBlock(mime string, data []byte, name string) Block {
 // proveedor, no convo, porque su forma la define el dialecto.
 func ToolCallBlock(id, name string, args json.RawMessage) Block {
 	return Block{Kind: BlockToolCall, ToolCallID: id, Name: name, Args: args}
+}
+
+// WithSignature devuelve una copia del bloque con el token opaco de
+// continuación del proveedor (ver Block.Signature).
+//
+// Es un método en vez de un parámetro más en los constructores para que las
+// decenas de sitios que no tienen firma que llevar —todos los proveedores
+// salvo Gemini 3 y el pensamiento extendido de Anthropic— se lean igual que
+// antes, y para que adjuntar una firma sea una decisión visible en el único
+// sitio que de verdad recibió una.
+func (b Block) WithSignature(sig string) Block {
+	b.Signature = sig
+	return b
 }
 
 // ToolResultBlock construye el resultado de una herramienta. El id tiene que

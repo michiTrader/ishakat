@@ -77,6 +77,16 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 							Name:      blk.Name,
 							Arguments: string(blk.Args),
 						},
+						// La firma vuelve tal como llegó. Para Gemini 3 esto
+						// no es una mejora de calidad sino el requisito que
+						// decide si la petición se acepta: sin ella responde
+						// HTTP 400 "Function call is missing a
+						// thought_signature" y el bucle de herramientas no
+						// pasa del primer paso. googleExtra devuelve nil
+						// cuando no hay firma, y con `omitempty` eso significa
+						// que el cuerpo que se manda a cualquier otro
+						// proveedor no cambia ni un byte.
+						Extra: googleExtra(blk.Signature),
 					})
 				} else {
 					deg.ToolsFlattened++

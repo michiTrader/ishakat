@@ -115,6 +115,17 @@ type Event struct {
 	// servicio no asigna id (algunos endpoints locales no lo hacen).
 	ID string
 
+	// Signature es el token opaco de continuación que el servicio adjuntó a
+	// esta llamada a herramienta y espera de vuelta idéntico en la petición
+	// siguiente (convo.Block.Signature lo documenta en detalle). Viaja por
+	// aquí, y no en un caché lateral del adaptador, porque el historial ya es
+	// el sitio donde vive todo lo que hay que reenviar: un caché en el
+	// proveedor se perdería al reconstruirlo —cada cambio de modelo con
+	// ctrl+p construye uno nuevo— y no sobreviviría a --resume, que es
+	// justamente el caso en que el turno a medias hay que reenviarlo entero.
+	// Vacío para todos los proveedores que no firman nada.
+	Signature string
+
 	// Usage viene en EventUsage y, si el servicio lo manda tarde, también
 	// puede venir adosado a EventDone.
 	Usage *convo.Usage

@@ -398,6 +398,11 @@ func runTurn(ctx context.Context, p provider.Provider, req provider.Request, s s
 		case provider.EventToolCall:
 			msg.Blocks = append(msg.Blocks, convo.Block{
 				Kind: convo.BlockToolCall, Name: ev.Name, Args: ev.Args,
+				// ToolCallID and Signature were both dropped here. This path
+				// only prints the turn, but the message it builds is what a
+				// later --resume replays, and a replayed Gemini tool call
+				// without its signature is an HTTP 400.
+				ToolCallID: ev.ID, Signature: ev.Signature,
 			})
 			s.tool(ev.Name, ev.Args)
 		case provider.EventUsage:
