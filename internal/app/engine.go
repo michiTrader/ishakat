@@ -12,6 +12,7 @@ package app
 import (
 	"fmt"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/provider"
@@ -49,12 +50,20 @@ import (
 // ResolveModelForBoot's own doc comment for why a caller-supplied choice
 // is never second-guessed the way an unresolved default is.
 //
-// Caps is deliberately the zero value (text-only): the model picker (Step
-// 10) is what will thread the catalog's per-model capabilities through once
-// it exists, and until then every request behaves as if the model supports
-// only text, which is always safe (never sends an image or a tool the
-// target can't take — see provider.Caps's own doc comment).
-func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Engine, ref ModelRef, system, warn string, err error) {
+// cat and wantTools are what decide provider.Caps (see CapsFor): together
+// they are the fix for the Step 16 bug where Caps was hard-coded to its
+// zero value here, which made the OpenAI dialect drop the `tools` array
+// from every request and left [tools].enabled = true doing literally
+// nothing — no tool call, therefore no permission check, therefore no
+// approval overlay. cat may be nil (a first run with no cache); wantTools
+// is the caller's intent, and the conversation's engine is the only one
+// that passes true — compact_model's own engine must never be handed tools
+// (§10: summarizing is not acting).
+//
+// Images/Reasoning stay at the zero value; CapsFor's own comment explains
+// why widening them today would change wire output for capabilities that
+// are not implemented yet.
+func BuildEngine(cfg *config.Config, cat *catalog.Catalog, modelText, version string, wantTools bool) (eng *engine.Engine, ref ModelRef, system, warn string, err error) {
 	var fb *BootFallback
 	ref, fb, err = ResolveModelForBoot(cfg, modelText)
 	if err != nil {
@@ -75,7 +84,16 @@ func BuildEngine(cfg *config.Config, modelText, version string) (eng *engine.Eng
 		}
 	}
 
-	stream := NewStreamer(prov, provider.Caps{})
+	caps, capsWarn := CapsFor(cfg, cat, ref.Ref, wantTools)
+	if capsWarn != "" {
+		if warn == "" {
+			warn = capsWarn
+		} else {
+			warn = warn + "; " + capsWarn
+		}
+	}
+
+	stream := NewStreamer(prov, caps)
 	return engine.New(stream, cfg.App.MaxRetries), ref, system, warn, nil
 }
 
@@ -109,7 +127,22 @@ func providerFor(cfg *config.Config, ref ModelRef, version string) (provider.Pro
 // maxRetries is bound to cfg.App.MaxRetries, same as BuildEngine's own
 // engine.New call — a mid-session switch has no reason to retry differently
 // than the session started.
-func NewEngineFactory(cfg *config.Config, version string) tui.EngineFactory {
+//
+// cat and wantTools are threaded through for the same reason BuildEngine
+// takes them, and re-evaluated per destination ref rather than captured as
+// a single boolean: switching from a tool-capable model to one the catalog
+// says has no tool support has to stop sending the `tools` array, and
+// switching back has to resume it. Binding the boot model's answer once
+// would make the picker able to break tool calling — or to start sending
+// tools to a model that rejects them — with no way to recover short of a
+// restart.
+//
+// Unlike BuildEngine there is nowhere to return a warning to:
+// tui.EngineFactory is func(ref) (*engine.Engine, error) by design (§6.1 —
+// tui knows nothing about catalogs or configuration). A downgrade is
+// therefore silent here; it is still correct, and the footer already shows
+// which model is active.
+func NewEngineFactory(cfg *config.Config, cat *catalog.Catalog, version string, wantTools bool) tui.EngineFactory {
 	return func(refText string) (*engine.Engine, error) {
 		ref, err := ResolveModel(cfg, refText)
 		if err != nil {
@@ -119,7 +152,8 @@ func NewEngineFactory(cfg *config.Config, version string) tui.EngineFactory {
 		if err != nil {
 			return nil, err
 		}
-		stream := NewStreamer(prov, provider.Caps{})
+		caps, _ := CapsFor(cfg, cat, ref.Ref, wantTools)
+		stream := NewStreamer(prov, caps)
 		return engine.New(stream, cfg.App.MaxRetries), nil
 	}
 }

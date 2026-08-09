@@ -88,7 +88,14 @@ func Run(version string, resume bool) int {
 	// interface the user can still open, read /help in, and fix the
 	// configuration from without restarting. tui.Options.Engine already
 	// documents nil as a supported value for exactly this reason.
-	eng, ref, system, warn, buildErr := BuildEngine(cfg, "", version)
+	//
+	// snap.Catalog and cfg.Tools.Enabled are what let this engine actually
+	// offer tools (see CapsFor): passing wantTools = true here — and false
+	// for compactEng below — is the fix for the Step 16 bug where every
+	// request went out with a zero provider.Caps, so the dialect dropped the
+	// `tools` array and the model could never call a tool, never trip the
+	// Guard, and never open the approval overlay this step exists to draw.
+	eng, ref, system, warn, buildErr := BuildEngine(cfg, &snap.Catalog, "", version, cfg.Tools.Enabled)
 	model := ref.Ref
 	if buildErr != nil {
 		warnp.Warn(os.Stderr, buildErr.Error())
@@ -107,7 +114,14 @@ func Run(version string, resume bool) int {
 	// eng's own is above: it only means /compact falls back to
 	// convo.DropOldest (see tui.Root.startCompact), not that the whole
 	// interface refuses to start.
-	compactEng, compactRef, _, compactWarn, compactErr := BuildEngine(cfg, cfg.App.CompactModel, version)
+	//
+	// wantTools is false: compaction summarizes a conversation, and a
+	// summarizer has no business being handed write_file or bash (§10). This
+	// is not merely a safety default — RunAgentTurn is never used for
+	// compaction (startCompact calls engine.Summarize), so offering tools
+	// here would put a `tools` array on the wire that nothing could ever
+	// execute.
+	compactEng, compactRef, _, compactWarn, compactErr := BuildEngine(cfg, &snap.Catalog, cfg.App.CompactModel, version, false)
 	if compactErr != nil {
 		warnp.Warn(os.Stderr, compactErr.Error())
 		compactEng = nil
@@ -202,9 +216,14 @@ func Run(version string, resume bool) int {
 		// literally everywhere": without this, every desktop session with no
 		// override would have read the same false that a phone should, and the
 		// key would have had no effect for the one host it names.
-		Termux:     xdg.IsTermux(),
-		Engine:     eng,
-		EngineFor:  NewEngineFactory(cfg, version),
+		Termux: xdg.IsTermux(),
+		Engine: eng,
+		// The factory re-decides Caps per destination model (see its own
+		// comment), so switching models with ctrl+p keeps tool calling
+		// working — or correctly stops offering tools to a model the
+		// catalog says cannot take them — instead of inheriting whatever
+		// the boot model happened to support.
+		EngineFor:  NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
 		Model:      model,
 		System:     system,
 		Catalog:    &snap.Catalog,

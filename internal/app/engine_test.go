@@ -21,7 +21,7 @@ func TestBuildEngineResolvesTheDefaultModelAndRunsARealTurn(t *testing.T) {
 
 	cfg := cfgFor(t, srv.URL)
 
-	eng, ref, system, warn, err := BuildEngine(cfg, "", "0.0.0-test")
+	eng, ref, system, warn, err := BuildEngine(cfg, nil, "", "0.0.0-test", false)
 	if err != nil {
 		t.Fatalf("BuildEngine returned an error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestBuildEngineHonoursTheModelFlagOverTheDefault(t *testing.T) {
 	defer srv.Close()
 
 	cfg := cfgFor(t, srv.URL)
-	_, ref, _, _, err := BuildEngine(cfg, "omniroute/gpt-5", "0.0.0-test")
+	_, ref, _, _, err := BuildEngine(cfg, nil, "omniroute/gpt-5", "0.0.0-test", false)
 	if err != nil {
 		t.Fatalf("BuildEngine returned an error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestBuildEngineHonoursTheModelFlagOverTheDefault(t *testing.T) {
 
 func TestBuildEngineFailsWithoutAnEnabledProvider(t *testing.T) {
 	cfg := &config.Config{Schema: config.Schema}
-	if _, _, _, _, err := BuildEngine(cfg, "", "0.0.0-test"); err == nil {
+	if _, _, _, _, err := BuildEngine(cfg, nil, "", "0.0.0-test", false); err == nil {
 		t.Fatal("BuildEngine with no providers configured should return an error, not a usable engine")
 	}
 }
@@ -91,7 +91,7 @@ func TestBuildEngineFallsBackAndWarnsWhenDefaultModelIsUnusable(t *testing.T) {
 		APIKey: "test-key", Enabled: true, AuthOK: true,
 	})
 
-	eng, ref, _, warn, err := BuildEngine(cfg, "", "0.0.0-test")
+	eng, ref, _, warn, err := BuildEngine(cfg, nil, "", "0.0.0-test", false)
 	if err != nil {
 		t.Fatalf("BuildEngine returned an error: %v", err)
 	}
