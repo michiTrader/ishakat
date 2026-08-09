@@ -40,7 +40,7 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 
 	for _, m := range msgs {
 		var b strings.Builder
-		var toolCalls []wireToolCall
+		var toolCalls []wireToolCallOut
 		var toolResults []ChatMessage
 
 		for _, blk := range m.Blocks {
@@ -70,13 +70,10 @@ func FromConvo(msgs []convo.Message, caps provider.Caps) ([]ChatMessage, provide
 
 			case convo.BlockToolCall:
 				if caps.Tools {
-					toolCalls = append(toolCalls, wireToolCall{
+					toolCalls = append(toolCalls, wireToolCallOut{
 						ID:   blk.ToolCallID,
 						Type: "function",
-						Function: struct {
-							Name      string `json:"name,omitempty"`
-							Arguments string `json:"arguments,omitempty"`
-						}{
+						Function: wireToolFuncCall{
 							Name:      blk.Name,
 							Arguments: string(blk.Args),
 						},

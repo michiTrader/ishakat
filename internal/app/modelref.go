@@ -1,9 +1,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 )
 
@@ -86,8 +88,7 @@ func lookupModelProvider(cfg *config.Config, text string) (pc config.Provider, w
 		via = "default"
 	}
 	if q == "" {
-		return config.Provider{}, "", "", fmt.Errorf("no model to use: pass -m/--model or set " +
-			"app.default_model in the configuration")
+		return config.Provider{}, "", "", errNoModelConfigured
 	}
 
 	// Config aliases. A short hop chain (an alias pointing to another alias)
@@ -167,6 +168,22 @@ func isProviderID(cfg *config.Config, id string) bool {
 	return ok
 }
 
+// errNoModelConfigured is lookupModelProvider's "there is no model to
+// resolve at all": no -m/--model was given AND app.default_model is empty.
+//
+// It is a sentinel rather than a fresh fmt.Errorf because
+// ResolveModelForBoot has to tell this case apart from every other
+// resolution failure, and matching on message text would be exactly the
+// kind of brittle coupling that breaks the next time the wording is
+// improved. ResolveModel (the strict path) still surfaces it verbatim; only
+// ResolveModelForBoot treats it as "pick something sensible" — see
+// pickBootModel.
+//
+// The wording stays the actionable one it always was, because it is still
+// what an explicit `ishakat -m ""`-style dead end deserves to print.
+var errNoModelConfigured = errors.New("no model to use: pass -m/--model or set " +
+	"app.default_model in the configuration")
+
 // BootFallback records what ResolveModelForBoot silently did instead of the
 // literal ref the configuration or the -m flag asked for, so the caller can
 // print exactly one line about it (headless.go's step 4, app.go's engine
@@ -181,8 +198,35 @@ type BootFallback struct {
 	// To is the reference the fallback picked instead.
 	To string
 	// Reason is a short, human phrase for why From didn't work: "is
-	// disabled", "has no working credential" or "is not declared".
+	// disabled", "has no working credential", "is not declared" or "is not
+	// set".
 	Reason string
+}
+
+// Unset reports whether this fallback happened because nothing was
+// configured at all (app.default_model empty), as opposed to something
+// configured that turned out to be unusable.
+//
+// Callers use it to phrase their one report line: "app.default_model (x) is
+// disabled; using y instead" reads correctly for a broken default and
+// absurdly for an absent one, where there is no x to name.
+func (f *BootFallback) Unset() bool { return f != nil && f.From == "" }
+
+// Describe is the single, shared phrasing of what a fallback did, so
+// app.go's TUI startup and headless.go's step 4 cannot drift into saying it
+// two different ways — they previously each held their own copy of the same
+// fmt.Sprintf, which is how the "(%s)" would have ended up printing an
+// empty pair of parentheses for the unset case in one entry point and not
+// the other.
+func (f *BootFallback) Describe() string {
+	if f == nil {
+		return ""
+	}
+	if f.Unset() {
+		return fmt.Sprintf("app.default_model is not set; using %s for this session "+
+			"(run `ishakat model set %s` to make it stick)", f.To, f.To)
+	}
+	return fmt.Sprintf("app.default_model (%s) %s; using %s instead", f.From, f.Reason, f.To)
 }
 
 // ResolveModelForBoot is P2: ResolveModel's own doc comment already
@@ -216,14 +260,14 @@ type BootFallback struct {
 // AuthOK, and reported once via the returned *BootFallback rather than
 // silently.
 //
-// The wire id for the fallback comes from config.VerifyModelFor: the exact
-// model preset's `provider add` already proved answers for that provider's
-// credential. A provider with no matching preset (added entirely by hand,
-// under a kind/base_url this package has never verified) has no such
-// wire id to guess, so it is skipped in favour of one that does — falling
-// back to a plausible-looking but unverified model id would trade one
-// startup failure for a different, harder to diagnose one.
-func ResolveModelForBoot(cfg *config.Config, modelText string) (ModelRef, *BootFallback, error) {
+// The wire id for the fallback comes from the local catalog when it has one
+// for the provider, and from config.VerifyModelFor otherwise — see
+// pickBootModel for why that order matters.
+//
+// cat is the local snapshot and may be nil (a first run with no cache is an
+// ordinary state, not an error); nothing here ever touches the network,
+// which §4.4 keeps off the startup path.
+func ResolveModelForBoot(cfg *config.Config, cat *catalog.Catalog, modelText string) (ModelRef, *BootFallback, error) {
 	if strings.TrimSpace(modelText) != "" {
 		ref, err := ResolveModel(cfg, modelText)
 		return ref, nil, err
@@ -231,10 +275,38 @@ func ResolveModelForBoot(cfg *config.Config, modelText string) (ModelRef, *BootF
 
 	pc, wire, via, err := lookupModelProvider(cfg, modelText)
 	if err != nil {
-		// "no model to use" (app.default_model itself is empty) or "no
-		// provider is enabled": there is nothing configured to fall back
-		// away from, so there is nothing this function can do that
-		// ResolveModel didn't already try.
+		// app.default_model is empty AND no -m was given. Until this
+		// branch existed, that was reported as the fatal-looking
+		// "no model to use: pass -m/--model or set app.default_model",
+		// which for the TUI meant a ⚠ on stderr and eng = nil on *every
+		// single launch* of a configuration that is otherwise perfectly
+		// usable — one enabled, credentialed provider and a full catalog
+		// sitting right there. The session then only worked because the
+		// user opened the picker with ctrl+p and re-chose a model by hand,
+		// every time, which is where the "── now: … ──" line in the bug
+		// report came from (picker.go). The warning was not describing a
+		// broken configuration; it was describing an unmade decision this
+		// function is already in the business of making.
+		//
+		// An absent default is strictly LESS ambiguous than the
+		// disabled/uncredentialed default handled below, which this
+		// function has always routed around silently-but-reported: there
+		// is no user intent to second-guess at all. So it takes the same
+		// path and gets the same one-line report.
+		if errors.Is(err, errNoModelConfigured) {
+			if ref, ok := pickBootModel(cfg, cat); ok {
+				return ref, &BootFallback{To: ref.Ref, Reason: "is not set"}, nil
+			}
+			// Nothing usable to pick either. "set app.default_model" is now
+			// the wrong advice: with no provider that can answer, naming a
+			// model in the configuration fixes nothing, and sending the
+			// user to edit TOML for a problem that needs a credential is
+			// how the earlier startup messages wasted people's time.
+			// Report what is actually missing instead.
+			return ModelRef{}, nil, noUsableProviderError(cfg)
+		}
+		// A different failure entirely ("no provider is enabled yet", a
+		// broken alias): report exactly what ResolveModel would.
 		return ModelRef{}, nil, err
 	}
 	if pc.Enabled && pc.AuthOK {
@@ -249,19 +321,7 @@ func ResolveModelForBoot(cfg *config.Config, modelText string) (ModelRef, *BootF
 	}
 	from := pc.ID + "/" + wire
 
-	for _, alt := range EnabledProviders(cfg) {
-		if !alt.AuthOK || strings.EqualFold(alt.ID, pc.ID) {
-			continue
-		}
-		altWire, ok := config.VerifyModelFor(alt.ID)
-		if !ok {
-			continue
-		}
-		fallbackRef, fbErr := ResolveModel(cfg, alt.ID+"/"+altWire)
-		if fbErr != nil {
-			continue
-		}
-		fallbackRef.Via = "fallback"
+	if fallbackRef, ok := pickBootModel(cfg, cat, pc.ID); ok {
 		return fallbackRef, &BootFallback{From: from, To: fallbackRef.Ref, Reason: reason}, nil
 	}
 
@@ -275,4 +335,149 @@ func ResolveModelForBoot(cfg *config.Config, modelText string) (ModelRef, *BootF
 		"app.default_model (%s) %s, and no other configured provider has a working "+
 			"credential either: check the [[provider]] entries in %s",
 		from, reason, configOrigin(cfg))
+}
+
+// noUsableProviderError explains why boot found nothing to run when
+// app.default_model was never set, and it deliberately does not mention
+// app.default_model at all: that key is not what is missing here.
+//
+// The two states are distinguished because they need opposite actions, and
+// telling them apart is the whole value of the message. "Nothing is
+// declared" is a fresh install and wants `provider add`. "Declared but
+// nothing can authenticate" already has the TOML and wants the credential —
+// naming the environment variables the configuration itself asked for is
+// the shortest path from the error to a working session.
+func noUsableProviderError(cfg *config.Config) error {
+	enabled := EnabledProviders(cfg)
+	if len(enabled) == 0 {
+		return fmt.Errorf("no provider is enabled yet: run "+
+			"`ishakat provider add <name>` (openai, anthropic, gemini, nvidia, omniroute) "+
+			"or check the [[provider]] entries in %s", configOrigin(cfg))
+	}
+
+	missing := make([]string, 0, len(enabled))
+	for _, p := range enabled {
+		if p.AuthOK {
+			continue
+		}
+		if env := strings.TrimSpace(p.MissingEnv); env != "" {
+			missing = append(missing, fmt.Sprintf("%s (%s)", p.ID, env))
+			continue
+		}
+		missing = append(missing, p.ID)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("no provider has a working credential yet: %s. "+
+			"Export the API key, or re-run `ishakat provider add` to store it",
+			strings.Join(missing, ", "))
+	}
+
+	// Enabled and credentialed, yet pickBootModel still found nothing: every
+	// such provider was declared by hand under an id with no preset, so
+	// there is no model id to use and no catalog entry either. Guessing one
+	// is what VerifyModelFor's doc comment refuses to do, so ask.
+	return fmt.Errorf("no model could be chosen automatically: run "+
+		"`ishakat models --refresh` to discover what the configured providers serve, "+
+		"or set app.default_model in %s", configOrigin(cfg))
+}
+
+// pickBootModel finds a model that can actually serve a turn right now,
+// without touching the network. It is ResolveModelForBoot's shared "and what
+// should we use instead?" step, for both of that function's fallbacks: an
+// app.default_model that is unusable, and one that was never set.
+//
+// skip lists provider ids that must not be chosen — the caller passes the
+// provider that already failed, so the fallback cannot land back on it. It
+// is variadic purely so the unset case, which has nothing to exclude, can
+// call this without inventing a sentinel argument.
+//
+// Providers are considered in EnabledProviders' declaration order (the same
+// order the rest of the package treats as the user's own preference) and
+// skipped unless AuthOK: an enabled provider with no resolved credential
+// cannot answer, so choosing it would swap a startup warning for a failing
+// first turn.
+//
+// The model id for a chosen provider is looked for in two places, in this
+// order, and the order is the point:
+//
+//  1. The local catalog, filtered to models that can serve a turn
+//     (Health.Usable) and that are not deprecated. This is preferred
+//     because it reflects what the provider itself said it serves, on this
+//     machine, the last time discovery ran — so a Gemini user gets a Gemini
+//     model that currently exists.
+//  2. config.VerifyModelFor's preset id, as the catalog-less fallback (a
+//     first run, or a cache that has not been written yet). This is a
+//     compiled-in constant, so it is by definition the older, staler
+//     answer of the two — `gemini-2.0-flash` is what this build happens to
+//     have been written with, not necessarily what the account can serve
+//     today — but it is a model id `provider add`'s verification probe
+//     actually proved, which is far better than a guess.
+//
+// A provider offering neither is skipped rather than guessed at, for the
+// reason VerifyModelFor's own doc comment gives: inventing a plausible model
+// id for a service this package has never talked to trades one honest
+// startup failure for a stranger one at first turn.
+func pickBootModel(cfg *config.Config, cat *catalog.Catalog, skip ...string) (ModelRef, bool) {
+	skipped := func(id string) bool {
+		for _, s := range skip {
+			if strings.EqualFold(s, id) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, p := range EnabledProviders(cfg) {
+		if !p.AuthOK || skipped(p.ID) {
+			continue
+		}
+		wire, ok := catalogModelFor(cat, p.ID)
+		if !ok {
+			if wire, ok = config.VerifyModelFor(p.ID); !ok {
+				continue
+			}
+		}
+		// Resolved through ResolveModel rather than assembled by hand so
+		// the choice passes the very same validation any other reference
+		// does (provider declared, provider enabled, non-empty wire id).
+		ref, err := ResolveModel(cfg, p.ID+"/"+wire)
+		if err != nil {
+			continue
+		}
+		ref.Via = "fallback"
+		return ref, true
+	}
+	return ModelRef{}, false
+}
+
+// catalogModelFor returns a wire id from the local snapshot for providerID,
+// preferring models that can actually be used.
+//
+// Catalog order is already the meaningful one (catalog.Build preserves
+// provider declaration order and sorts within a provider), so this takes the
+// first acceptable entry rather than imposing a second opinion about which
+// model is "best" — that ranking is the picker's job (§4.5/§9.4), and this
+// function only has to answer "something that works".
+//
+// Deprecated models are skipped: the provider has said out loud that they
+// are going away, and starting a session on one is a slow-motion failure.
+// Unusable health (HealthUnauthenticated) is skipped for the same reason
+// pickBootModel checks AuthOK.
+func catalogModelFor(cat *catalog.Catalog, providerID string) (string, bool) {
+	if cat == nil {
+		return "", false
+	}
+	for _, m := range cat.Models {
+		if !strings.EqualFold(m.Provider, providerID) {
+			continue
+		}
+		if !m.Health.Usable() || m.Deprecated() {
+			continue
+		}
+		if strings.TrimSpace(m.WireID) == "" {
+			continue
+		}
+		return m.WireID, true
+	}
+	return "", false
 }
