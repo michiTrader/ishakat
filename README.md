@@ -82,6 +82,7 @@ truth and this table is only a map of it.
 | 3 | Internal and aesthetic improvements | ⬜ |
 | 4 | Robustness | ⬜ |
 | 5 | Distribution and packaging | ⬜ |
+| 6 | Community capability layer: install skills and tools other people wrote | 📄 **proposal only** — §20, not approved |
 
 Step 13bis jumps the queue for a blunt reason: `make build` is not an
 installation method, and until a one-line install exists nobody — including
@@ -120,6 +121,27 @@ The reason capabilities are files rather than compiled plugins is partly that
 Go plugins do not work on Android at all, and partly that this is better:
 every capability ishakat writes is a text file you can read in your editor
 before it ever runs.
+
+### Are capabilities tied to a particular AI provider?
+
+No, and that part is already settled. A capability file names an HTTP request, a
+parameter schema and a signing scheme, or it is plain prose. **It never mentions
+a provider, a model, or a vendor's tool-calling format**, because translating to
+each vendor's dialect happens in a lower layer the capability cannot see. So a
+tool on your disk keeps working when you switch from GPT to Claude to Gemini to
+a local model in Ollama — including mid-conversation, which is what the hot swap
+is for. That is a consequence of how the layers are separated, not a feature
+that still has to be built.
+
+**What does not exist is a way to hand one of those files to somebody else.**
+There is a written proposal for it — [`docs/PLAN.md`](docs/PLAN.md) §20 —
+sketching `ishakat install <ref>` with no server, no accounts and no npm
+involved, just a URL and a pinned hash. **It is a proposal, not a plan of
+record:** the hard part is not the file format, it is what it means to trust a
+capability nobody on your machine wrote or read, and that question is not
+answered yet. Nothing about it is implemented, and none of it displaces the part
+that is actually the point — that ishakat builds what *your* usage showed you
+needed, instead of handing you a catalogue of what other people needed.
 
 ## Requirements
 
