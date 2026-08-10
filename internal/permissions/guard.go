@@ -113,7 +113,7 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 
 func tierFor(name string) Tier {
 	switch name {
-	case "read_file", "glob", "grep":
+	case "read_file", "glob", "grep", "fetch":
 		return Low
 	case "write_file", "edit_file":
 		return Medium
@@ -128,7 +128,14 @@ func tierFor(name string) Tier {
 
 func (g *Guard) mode(req Request) string {
 	switch req.Name {
-	case "read_file", "glob", "grep":
+	// fetch shares Read's policy knob rather than getting its own config
+	// key: both are danger:low, read-only operations whose actual boundary
+	// is enforced elsewhere (the filesystem for read_file/glob/grep, the
+	// egress allowlist baked into the Fetch tool itself for fetch — see
+	// fetch.go's doc comment and §19.8). A new host still needs its own
+	// allowlist entry regardless of this mode, so "allow" here only means
+	// "do not additionally prompt for hosts already on that list".
+	case "read_file", "glob", "grep", "fetch":
 		return g.permissions.Read
 	case "write_file", "edit_file":
 		return g.permissions.Write

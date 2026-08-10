@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestCoreRegistersAllSixToolsByName(t *testing.T) {
-	r := Core()
-	want := []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep"}
+func TestCoreRegistersAllSevenToolsByName(t *testing.T) {
+	r := Core(nil, false)
+	want := []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch"}
 	got := r.Tools()
 	if len(got) != len(want) {
 		t.Fatalf("Core(): got %d tools, want %d", len(got), len(want))
@@ -24,7 +24,7 @@ func TestCoreRegistersAllSixToolsByName(t *testing.T) {
 }
 
 func TestRegistryLookupUnknownName(t *testing.T) {
-	r := Core()
+	r := Core(nil, false)
 	if _, ok := r.Lookup("does_not_exist"); ok {
 		t.Error("Lookup(\"does_not_exist\") should not find a tool")
 	}
@@ -124,10 +124,28 @@ func TestRegistryDuplicateNameKeepsFirstPositionLastValue(t *testing.T) {
 }
 
 func TestCoreEachCallReturnsIndependentRegistry(t *testing.T) {
-	a := Core()
-	b := Core()
+	a := Core(nil, false)
+	b := Core(nil, false)
 	if a == b {
 		t.Error("Core() should build a fresh Registry each call")
+	}
+}
+
+func TestCorePassesEgressAllowlistToFetch(t *testing.T) {
+	r := Core([]string{"example.com"}, false)
+	tool, ok := r.Lookup("fetch")
+	if !ok {
+		t.Fatal("Core(): fetch not registered")
+	}
+	f, ok := tool.(Fetch)
+	if !ok {
+		t.Fatalf("Core(): fetch tool has type %T, want Fetch", tool)
+	}
+	if len(f.Allow) != 1 || f.Allow[0] != "example.com" {
+		t.Errorf("Core(): fetch.Allow = %v, want [example.com]", f.Allow)
+	}
+	if f.AllowAll {
+		t.Error("Core([]string{...}, false): fetch.AllowAll should be false")
 	}
 }
 

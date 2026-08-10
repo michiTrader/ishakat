@@ -91,7 +91,7 @@ func toolNamesIn(body map[string]any) []string {
 
 // runOneTurn drives a single turn through eng so the streamer actually
 // performs its HTTP request, which is what puts a body in the recorder. The
-// request carries the real six-tool catalogue: what is being tested is
+// request carries the real seven-tool catalogue: what is being tested is
 // whether the Caps gate lets them through to the wire, so the tools have to
 // be genuinely present in the engine.Request for their absence downstream to
 // mean anything.
@@ -101,7 +101,7 @@ func runOneTurn(t *testing.T, eng *engine.Engine, wireID string) {
 	eng.Start(t.Context(), engine.Request{
 		Model:    wireID,
 		Messages: []convo.Message{convo.User("create a file")},
-		Tools:    ToolDefsFrom(tools.Core()),
+		Tools:    ToolDefsFrom(tools.Core(nil, false)),
 	}, &buf)
 	drainEngineTest(t, &buf)
 }

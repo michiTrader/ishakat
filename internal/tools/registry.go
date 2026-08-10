@@ -40,12 +40,21 @@ func NewRegistry(tools ...Tool) *Registry {
 	return r
 }
 
-// Core builds the Registry over the six tools Step 15 shipped: read_file,
-// write_file, edit_file, bash, glob, grep — in §19.1's table order. This is
-// the constructor internal/app calls; NewRegistry itself stays general so
-// tests (and Step 16's permission-gated variants, later) can build smaller
-// registries over fakes without dragging the real six along.
-func Core() *Registry {
+// Core builds the Registry over layer 1's eight tools (§19.1): the six
+// Step 15 shipped unconditionally — read_file, write_file, edit_file, bash,
+// glob, grep — plus fetch (Step 19), which alone needs constructor data of
+// its own. fetch's egress allowlist lives in config.Tools.Egress; Core takes
+// it apart into egressAllow/egressAllowAll rather than accepting a
+// config.Tools value, for the same reason Fetch itself doesn't import
+// internal/config (see fetch.go's doc comment): this package's tools take
+// the minimal, purpose-built arguments a cross-cutting concern needs, not
+// whole configuration types. dispatch (Step 22) will be the eighth and last
+// to land.
+//
+// NewRegistry itself stays general so tests (and the permission-gated
+// variants Step 16 already wires through internal/app) can build smaller
+// registries over fakes without dragging the real set along.
+func Core(egressAllow []string, egressAllowAll bool) *Registry {
 	return NewRegistry(
 		ReadFile{},
 		WriteFile{},
@@ -53,6 +62,7 @@ func Core() *Registry {
 		Bash{},
 		Glob{},
 		Grep{},
+		Fetch{Allow: egressAllow, AllowAll: egressAllowAll},
 	)
 }
 
