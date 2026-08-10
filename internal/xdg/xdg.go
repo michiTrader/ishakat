@@ -56,9 +56,16 @@ func StateDir() string  { return filepath.Join(StateHome(), App) }
 func ConfigFile() string      { return filepath.Join(ConfigDir(), "config.toml") }
 func CredentialsFile() string { return filepath.Join(ConfigDir(), "credentials.toml") }
 func ThemesDir() string       { return filepath.Join(ConfigDir(), "themes") }
-func CatalogFile() string     { return filepath.Join(CacheDir(), "catalog.json") }
-func SessionsDir() string     { return filepath.Join(DataDir(), "sessions") }
-func ErrorFile() string       { return filepath.Join(StateDir(), "last-error.json") }
+
+// AgentsFile is the global layer of Step 18's AGENTS.md precedence (docs/PLAN.md
+// §11): standing rules the user wants applied to every project, the same way
+// config.toml holds settings that apply everywhere until a project overrides
+// them. It lives beside config.toml rather than under DataDir/CacheDir because
+// it is meant to be hand-edited, exactly like config.toml itself.
+func AgentsFile() string  { return filepath.Join(ConfigDir(), "AGENTS.md") }
+func CatalogFile() string { return filepath.Join(CacheDir(), "catalog.json") }
+func SessionsDir() string { return filepath.Join(DataDir(), "sessions") }
+func ErrorFile() string   { return filepath.Join(StateDir(), "last-error.json") }
 
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
