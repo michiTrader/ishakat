@@ -463,6 +463,9 @@ func cmdDoctor() int {
 	fmt.Printf("  state dir    %s\n", xdg.StateDir())
 	fmt.Println()
 
+	reportAgentsMD(os.Stdout, cfg)
+	fmt.Println()
+
 	// The terminal section: how the working directory renders, what the
 	// interface decided about colour and characters, and a sample of those
 	// characters so the guess can be checked by eye.

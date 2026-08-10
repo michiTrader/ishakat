@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/MichiTrader/ishakat/internal/agentsmd"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tui"
@@ -72,6 +73,26 @@ func reportTerminal(w io.Writer, cfg *config.Config) {
 			fmt.Fprintf(w, "  note: %s\n", line)
 		}
 		fmt.Fprintf(w, "  note: config.toml is at %s\n", xdg.ConfigFile())
+	}
+}
+
+// reportAgentsMD prints Step 18's three AGENTS.md paths and which of them
+// were actually found, so "is my AGENTS.md being read at all" has an answer
+// that does not require reading the source. Sources() lists all three
+// regardless of existence — the closing criterion this satisfies is being
+// able to see the paths even on a project that has none of them yet, not
+// just the ones that are present.
+func reportAgentsMD(w io.Writer, cfg *config.Config) {
+	fmt.Fprintf(w, "  agents.md    %v\n", cfg == nil || cfg.App.AgentsMD)
+	if cfg != nil && !cfg.App.AgentsMD {
+		return
+	}
+	for _, src := range agentsmd.Sources(xdg.AgentsFile(), ".") {
+		state := "not found"
+		if _, err := os.Stat(src.Path); err == nil {
+			state = "found"
+		}
+		fmt.Fprintf(w, "    %-8s %-8s %s\n", src.Layer, state, xdg.Pretty(src.Path))
 	}
 }
 
