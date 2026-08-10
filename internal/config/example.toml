@@ -10,6 +10,10 @@ system_prompt = "Eres un asistente de desarrollo conciso."
 timeout_s = 120
 connect_timeout_s = 10
 max_retries = 3
+# agents_md: append AGENTS.md rules (global -> project -> local) to the
+# system prompt so they don't have to be repeated every message. See
+# `ishakat doctor` for which of the three files are actually found.
+agents_md = true
 
 [session]
 save = true

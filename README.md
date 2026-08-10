@@ -16,10 +16,12 @@ live on disk as text files you can read, edit and delete — which is how
 ishakat extends itself without ever loading model-written code into its own
 process.
 
-> **Status: Phase 2.5 (agent runtime), Steps 14-17 are closed.**
+> **Status: Phase 2.5 (agent runtime), Steps 14-18 are closed.**
 > The tool-calling loop, six built-in tools, permission guard, per-session
-> cost-budget enforcement, and tool-call rendering (both TUI and headless
-> report a call and whether it succeeded) are implemented end to end.
+> cost-budget enforcement, tool-call rendering (both TUI and headless
+> report a call and whether it succeeded), and project `AGENTS.md` support
+> (global → project → local rules merged into the system prompt, reported
+> by `ishakat doctor`) are implemented end to end.
 > See [Roadmap](#roadmap).
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
@@ -54,6 +56,7 @@ process.
 | Model picker (`ctrl+p`, §9.4) | ✅ implemented in `internal/tui.Picker`: fuzzy search, provider grouping, filters (all/free/tools/vision/favorites) |
 | Hot swap confirmation (§4.6/§9.5) | ✅ `engine.CheckSwap` plus the `internal/tui` conflict dialog: compact/drop-oldest for a context conflict, switch-anyway for a capability warning, cancel-only when the destination has no credential |
 | `/compact` client-side summarization (§9.8/§10) | ✅ `engine.Summarize` calls `compact_model` to replace older turns with a summary, kept auditable via `convo.ApplySummary`; falls back to `drop-oldest` per `[compact].on_error` if the call fails, and auto-triggers once `[compact].trigger_pct` is crossed |
+| Project `AGENTS.md` (§11 step 18) | ✅ `internal/agentsmd` merges global (`~/.config/ishakat/AGENTS.md`), project (`./AGENTS.md`) and local (`./AGENTS.local.md`, gitignored) rules into the system prompt, on by default (`app.agents_md`), reported by `ishakat doctor` |
 | `--resume` | ❌ step 13, not written yet |
 | `[tools]` configuration (§19) | ⚠️ parsed and validated, but nothing runs it yet — step 14 |
 | Tool calling, skills, self-extension | ❌ Phase 2.5 (steps 14–25), designed in §19, not written |
@@ -78,7 +81,7 @@ truth and this table is only a map of it.
 | 1 | Research and architecture | ✅ closed |
 | 2 | Prototype: streaming chat, catalog, picker, hot swap, compaction | 🔨 12 of 13 |
 | 2 bis | Distribution: `curl \| sh` + release workflow (pulled forward) | ⬜ |
-| 2.5 | **The agent**: tool calling, permissions, skills, self-extension | ⬜ steps 14–25 |
+| 2.5 | **The agent**: tool calling, permissions, skills, self-extension | 🔨 steps 14–18 of 14–25 closed |
 | 3 | Internal and aesthetic improvements | ⬜ |
 | 4 | Robustness | ⬜ |
 | 5 | Distribution and packaging | ⬜ |

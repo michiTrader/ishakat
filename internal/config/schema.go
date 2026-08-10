@@ -28,10 +28,22 @@ type App struct {
 	Stream           bool   `toml:"stream"`
 	SystemPrompt     string `toml:"system_prompt"`
 	SystemPromptFile string `toml:"system_prompt_file"`
-	TimeoutS         int    `toml:"timeout_s"`
-	ConnectTimeoutS  int    `toml:"connect_timeout_s"`
-	MaxRetries       int    `toml:"max_retries"`
-	Locale           string `toml:"locale"`
+
+	// AgentsMD turns Step 18's AGENTS.md discovery off. True by default: the
+	// whole feature exists so standing rules do not have to be repeated every
+	// message (docs/PLAN.md §11), and a user who never created any of the
+	// three files pays nothing for this being on — Resolve returns silently
+	// empty. It is here, not hardcoded, for the same reason app.system_prompt
+	// itself is configurable: a script driving `ishakat -p` in an
+	// environment with an unrelated AGENTS.md lying around (a monorepo
+	// shared with another AGENTS.md-reading tool, say) needs a way to say
+	// "not for this one".
+	AgentsMD bool `toml:"agents_md"`
+
+	TimeoutS        int    `toml:"timeout_s"`
+	ConnectTimeoutS int    `toml:"connect_timeout_s"`
+	MaxRetries      int    `toml:"max_retries"`
+	Locale          string `toml:"locale"`
 }
 
 type Session struct {
