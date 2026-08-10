@@ -138,3 +138,66 @@ func TestSystemPromptSurfacesAnAgentsMDWarningAlongsideSystemPromptFileWarning(t
 		t.Errorf("warn = %q, want it to mention the unreadable global AGENTS.md layer", warn)
 	}
 }
+
+// TestSystemPromptAppendsSkillsSummaryWhenToolsEnabled is Step 19's core
+// wiring test: internal/skills.Discover existed since PR #97 but nothing
+// ever called it, so a SKILL.md on disk had no effect on any turn. This
+// pins the fix — the progressive-disclosure listing (name + description
+// only, never the body) lands after the base prompt/AGENTS.md rules,
+// exactly like Step 18's own appendSystemBlock pattern.
+func TestSystemPromptAppendsSkillsSummaryWhenToolsEnabled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	skillsDir := filepath.Join(t.TempDir(), "skills", "demo")
+	if err := os.MkdirAll(skillsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	body := "---\nname: demo\ndescription: does demo things\n---\nFull body, must not appear in the prompt.\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg := &config.Config{
+		App:   config.App{SystemPrompt: "You are ishakat."},
+		Tools: config.Tools{Enabled: true, SkillsDir: filepath.Dir(skillsDir)},
+	}
+	system, warn := SystemPrompt(cfg)
+
+	if warn != "" {
+		t.Errorf("warn = %q, want empty", warn)
+	}
+	if !strings.Contains(system, "demo: does demo things") {
+		t.Errorf("system = %q, want it to contain the skill's name+description", system)
+	}
+	if strings.Contains(system, "Full body") {
+		t.Errorf("system = %q, must not contain the skill's body (progressive disclosure)", system)
+	}
+}
+
+// TestSystemPromptSkipsSkillsWhenToolsDisabled covers the gate: a skill
+// points the model at read_file to load its body, so listing one when
+// cfg.Tools.Enabled is false would name a capability nothing can reach.
+func TestSystemPromptSkipsSkillsWhenToolsDisabled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	skillsDir := filepath.Join(t.TempDir(), "skills", "demo")
+	if err := os.MkdirAll(skillsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	body := "---\nname: demo\ndescription: does demo things\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg := &config.Config{
+		App:   config.App{SystemPrompt: "base"},
+		Tools: config.Tools{Enabled: false, SkillsDir: filepath.Dir(skillsDir)},
+	}
+	system, _ := SystemPrompt(cfg)
+
+	if system != "base" {
+		t.Errorf("system = %q, want unchanged %q (tools disabled)", system, "base")
+	}
+}
