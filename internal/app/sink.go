@@ -20,6 +20,10 @@ type sink interface {
 	delta(s string)
 	reasoning(s string)
 	tool(name string, args json.RawMessage)
+	// toolResult reports how a previously announced tool call finished.
+	// output is already truncated by the engine's own MaxOutputBytes
+	// (§12bis); this only trims it further for a one-line summary.
+	toolResult(name string, isError bool, output string)
 	usage(u *convo.Usage)
 	warn(s string)
 	fail(err error)
@@ -93,10 +97,39 @@ func (t *textSink) reasoning(s string) {
 }
 
 func (t *textSink) tool(name string, args json.RawMessage) {
-	// Tools are post-1.0 (§18). A tool call the model asked for is honest
-	// information that can't be swallowed silently, but it shouldn't
-	// pollute stdout either.
+	// The call itself is honest information about what the agent is about
+	// to do, and it can't be swallowed silently — but it shouldn't pollute
+	// stdout either, since stdout only ever carries the assistant's answer
+	// (this function's own doc comment, point 1).
 	fmt.Fprintf(t.err, "%s\n", t.paint(dim, "· tool call requested: "+name+" "+compact(args)))
+}
+
+// toolResult is the other half of Step 17's headless gap: tool() alone only
+// says a call was *requested*, never whether it worked. Before this, a
+// denied write and a successful one were indistinguishable on stderr —
+// `ishakat -p` could silently no-op a file write and a script piping the
+// output would have no way to tell, since headless mode has no TUI overlay
+// to fall back on (that half is internal/tui/toolactivity.go, Step 16's own
+// bug report). A failure is painted in the warning colour and keeps the
+// first line of the tool's own error text; a success stays dim and short —
+// this is a progress note, not the transcript.
+func (t *textSink) toolResult(name string, isError bool, output string) {
+	if isError {
+		fmt.Fprintf(t.err, "%s\n", t.paint(yellow, "⚠ "+name+" failed: "+firstLine(output)))
+		return
+	}
+	fmt.Fprintf(t.err, "%s\n", t.paint(dim, "· "+name+" done"))
+}
+
+// firstLine is the text up to the first newline, mirroring
+// internal/tui/toolactivity.go's own helper of the same name and for the
+// same reason: a multi-line failure (a stack trace, a shell's stderr) must
+// not turn one progress line into a dozen.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 func (t *textSink) usage(*convo.Usage) {}
@@ -184,6 +217,13 @@ type jsonEvent struct {
 	Name string          `json:"name,omitempty"`
 	Args json.RawMessage `json:"args,omitempty"`
 
+	// tool_result — Text carries the (already engine-truncated) output;
+	// Error marks a failed or denied call. Correlating this back to the
+	// tool_call event that preceded it is by position in the stream, the
+	// same way provider.Event's own tool_calls/results pair without an
+	// explicit link in --json's flattened view.
+	Error bool `json:"error,omitempty"`
+
 	// usage
 	Usage *convo.Usage `json:"usage,omitempty"`
 
@@ -244,6 +284,14 @@ func (j *jsonSink) reasoning(s string) {
 
 func (j *jsonSink) tool(name string, args json.RawMessage) {
 	j.emit(jsonEvent{Type: "tool_call", Name: name, Args: args})
+}
+
+// toolResult is Step 17's headless fix: without it a `--json | jq` consumer
+// sees a "tool_call" line and then either the model's next line or nothing,
+// with no way to tell a denied or failed call from a successful one that
+// simply produced no further text this iteration.
+func (j *jsonSink) toolResult(name string, isError bool, output string) {
+	j.emit(jsonEvent{Type: "tool_result", Name: name, Text: output, Error: isError})
 }
 
 func (j *jsonSink) usage(u *convo.Usage) {

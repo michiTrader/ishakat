@@ -139,6 +139,8 @@ func runAgentTurnHeadless(
 				s.reasoning(b.Text)
 			case convo.BlockToolCall:
 				s.tool(b.Name, b.Args)
+			case convo.BlockToolResult:
+				s.toolResult(b.Name, b.IsError, b.Text)
 			}
 		}
 		if store != nil && conv != nil {

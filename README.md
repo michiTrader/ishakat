@@ -16,10 +16,10 @@ live on disk as text files you can read, edit and delete — which is how
 ishakat extends itself without ever loading model-written code into its own
 process.
 
-> **Status: Phase 2.5 (agent runtime), Step 16's initial delivery is closed.**
-> The tool-calling loop, six built-in tools, permission guard, and per-session
-> cost-budget enforcement are implemented for the headless pipeline. The TUI
-> still uses the original streaming path and is the next integration surface.
+> **Status: Phase 2.5 (agent runtime), Steps 14-17 are closed.**
+> The tool-calling loop, six built-in tools, permission guard, per-session
+> cost-budget enforcement, and tool-call rendering (both TUI and headless
+> report a call and whether it succeeded) are implemented end to end.
 > See [Roadmap](#roadmap).
 > The headless pipeline (`ishakat -p "…"`), model catalog (`ishakat models`),
 > and interactive TUI are wired end to end. The catalog resolves
