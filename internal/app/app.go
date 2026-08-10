@@ -150,7 +150,9 @@ func Run(version string, resume bool) int {
 			modelCost = m.Cost
 		}
 		guard := permissions.New(cfg.Tools.Permissions, false, reviewer)
-		agentOpts = buildAgentOptions(cfg.Tools, guard, modelCost)
+		var toolsWarn string
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost)
+		warnp.Warn(os.Stderr, toolsWarn)
 	}
 
 	// cfg.Warnings carries one entry per enabled provider missing its

@@ -132,6 +132,65 @@ func TestGuardFetchTierIsLow(t *testing.T) {
 	}
 }
 
+func TestGuardSetToolTiersLowSkipsReview(t *testing.T) {
+	reviewer := &recordingReviewer{}
+	guard := New(testPermissions(), false, reviewer)
+	guard.SetToolTiers(map[string]Tier{"greet": Low})
+	if err := guard.Authorize(context.Background(), "greet", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("Authorize() error = %v", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 (Low tier should never be reviewed)", reviewer.calls)
+	}
+}
+
+func TestGuardSetToolTiersMediumUsesWritePolicy(t *testing.T) {
+	permissions := testPermissions()
+	permissions.Write = "allow"
+	reviewer := &recordingReviewer{}
+	guard := New(permissions, false, reviewer)
+	guard.SetToolTiers(map[string]Tier{"greet": Medium})
+	if err := guard.Authorize(context.Background(), "greet", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("Authorize() error = %v", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 (write=allow should skip review for a Medium-tier declarative tool)", reviewer.calls)
+	}
+}
+
+func TestGuardSetToolTiersCannotLowerNativeToolTier(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), false, reviewer)
+	// A manifest (or any caller) naming itself "bash" must not reduce
+	// bash's own hardcoded High tier -- tierFor's fixed switch always
+	// wins for the seven native names.
+	guard.SetToolTiers(map[string]Tier{"bash": Low})
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"pwd"}`)); err != nil {
+		t.Fatalf("Authorize() error = %v", err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1 (bash must still be reviewed despite SetToolTiers)", reviewer.calls)
+	}
+}
+
+func TestGuardNilToolTiersBehavesAsBeforeStep20(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
+	guard := New(testPermissions(), false, reviewer)
+	// SetToolTiers never called: an unrecognized name must still default
+	// to High and still consult the reviewer via Shell's policy, exactly
+	// like TestGuardUnknownToolIsHighAndCannotGainSessionApproval already
+	// pins for the pre-Step-20 case.
+	if err := guard.Authorize(context.Background(), "future_tool", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1", reviewer.calls)
+	}
+	if reviewer.request.Tier != High {
+		t.Fatalf("tier = %v, want High", reviewer.request.Tier)
+	}
+}
+
 func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)

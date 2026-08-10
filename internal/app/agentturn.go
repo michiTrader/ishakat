@@ -29,18 +29,48 @@ import (
 )
 
 // buildAgentOptions translates config.Tools into engine.AgentOptions,
-// binding tools.Core() — layer 1's seven tools shipped so far (the six from
-// Step 15 plus fetch from Step 19) — as the catalogue and runner. fetch's
-// egress allowlist comes straight from cfgTools.Egress, the same
+// binding tools.WithDeclarative — layer 1's seven native tools (the six from
+// Step 15 plus fetch from Step 19) plus every layer-2 declarative tool
+// (rung 1, Step 20) found under cfgTools.Dir — as the catalogue and runner.
+// fetch's egress allowlist comes straight from cfgTools.Egress, the same
 // config.Tools already threaded through this function; no new parameter is
-// needed. cfgTools.MaxCallsPerTurn/MaxOutputBytes pass through as-is: when
-// they are the zero value (unset in config), AgentOptions' own doc comment
-// says zero means its built-in default, and because defaults.toml's own
-// values (25, 32768) equal RunAgentTurn's built-in defaults exactly, a stock
+// needed, and the same allowlist governs every declarative tool's own
+// [origin] check (see tools.DeclarativeTools' doc comment). A discovery
+// problem (an unreadable directory, or the first unparseable tool.toml)
+// does not stop the turn — the second return value is a warn string the
+// caller surfaces the same way SystemPrompt's own skills.Discover warning
+// already does, never a fatal error, matching DiscoverDeclarative's own
+// "an install with no tools of its own yet is not a warning" contract.
+// cfgTools.MaxCallsPerTurn/MaxOutputBytes pass through as-is: when they are
+// the zero value (unset in config), AgentOptions' own doc comment says zero
+// means its built-in default, and because defaults.toml's own values (25,
+// 32768) equal RunAgentTurn's built-in defaults exactly, a stock
 // configuration and a caller that skipped config entirely (a zero
 // config.Tools) both mean the same thing.
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost) engine.AgentOptions {
-	reg := tools.Core(cfgTools.Egress.Allow, cfgTools.Egress.AllowAll)
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost) (engine.AgentOptions, string) {
+	reg, warn := tools.WithDeclarative(cfgTools.Egress.Allow, cfgTools.Egress.AllowAll, cfgTools.Dir)
+	if guard != nil {
+		// Every tool beyond the native seven (declarative tools chief
+		// among them) gets its real Tool.Danger()-inferred Tier registered
+		// here, so permissions.Guard's own tierFor/mode default (safe but
+		// blind: High/"ask" for any name it does not recognize) becomes
+		// aware of what declarative.go's inferDanger actually computed for
+		// each manifest, without permissions ever importing tools (see
+		// Guard.SetToolTiers' own doc comment on why the translation lives
+		// on this side of the boundary).
+		tiers := make(map[string]permissions.Tier)
+		for _, t := range reg.Tools() {
+			switch t.Danger() {
+			case tools.DangerLow:
+				tiers[t.Name()] = permissions.Low
+			case tools.DangerMedium:
+				tiers[t.Name()] = permissions.Medium
+			default:
+				tiers[t.Name()] = permissions.High
+			}
+		}
+		guard.SetToolTiers(tiers)
+	}
 	opts := engine.AgentOptions{
 		Tools:          ToolDefsFrom(reg),
 		Runner:         ToolRunnerWithGuard(reg, guard),
@@ -54,7 +84,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		opts.CacheReadCostUSD = cost.CacheRead
 		opts.CacheWriteCostUSD = cost.CacheWrite
 	}
-	return opts
+	return opts, warn
 }
 
 // runAgentTurnHeadless runs one turn through RunAgentTurn instead of
@@ -96,7 +126,10 @@ func runAgentTurnHeadless(
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
-	opts := buildAgentOptions(cfgTools, guard, cost)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost)
+	if toolsWarn != "" {
+		s.warn(toolsWarn)
+	}
 	// Usage.CostUSD is persisted on assistant messages. Reusing that durable
 	// total means a resumed conversation starts at the amount already spent,
 	// rather than resetting the budget at every process launch.
