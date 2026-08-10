@@ -9,3 +9,8 @@ dist/
 # `make build`, per host.
 bin/
 .go_env.sh
+
+# Step 18's local AGENTS.md layer: per-machine/per-person rules that must
+# never leak into a shared repository, the same reason credentials.toml is
+# never AGENTS.md itself.
+AGENTS.local.md
