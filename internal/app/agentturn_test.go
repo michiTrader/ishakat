@@ -266,3 +266,91 @@ func TestRunAgentTurnHeadlessSeedsBudgetFromPersistedSpend(t *testing.T) {
 		t.Errorf("stderr must report the cost-budget stop, got: %q", errb.String())
 	}
 }
+
+// TestBuildAgentOptionsIncludesDeclarativeToolFromDir is Step 20's own wiring
+// closing criterion: a tool.toml under cfgTools.Dir must reach
+// engine.AgentOptions.Tools (what the model is offered) and be dispatchable
+// through Runner (what actually executes the call), exactly like every
+// native tool already does — with no model involved in producing the
+// manifest itself, matching the "hand-writable and testable without any
+// model generating anything" bar the roadmap sets for this step.
+func TestBuildAgentOptionsIncludesDeclarativeToolFromDir(t *testing.T) {
+	toolsDir := t.TempDir()
+	toolDir := filepath.Join(toolsDir, "greet")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte(`
+name = "greet"
+description = "say hello"
+
+[request]
+method = "GET"
+url = "https://example.com/greet"
+`)
+	if err := os.WriteFile(filepath.Join(toolDir, "tool.toml"), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cfgTools := config.Tools{
+		Enabled: true,
+		Dir:     toolsDir,
+	}
+	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+
+	var found bool
+	for _, def := range opts.Tools {
+		if def.Name == "greet" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("opts.Tools does not include the discovered declarative tool: %+v", opts.Tools)
+	}
+}
+
+// TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn proves an
+// unparseable tool.toml under cfgTools.Dir does not stop the turn from
+// being built, but does return a non-empty warn — the same
+// "warn, don't fail" contract SystemPrompt already applies to
+// skills.Discover's own Warn field.
+func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
+	toolsDir := t.TempDir()
+	toolDir := filepath.Join(toolsDir, "broken")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolDir, "tool.toml"), []byte("not valid toml [["), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cfgTools := config.Tools{Enabled: true, Dir: toolsDir}
+	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	if warn == "" {
+		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
+	}
+	// Native tools must still be present — a broken declarative manifest
+	// must not take down layer 1.
+	if len(opts.Tools) != 7 {
+		t.Errorf("opts.Tools has %d entries, want 7 (native only, broken manifest skipped)", len(opts.Tools))
+	}
+}
+
+// TestBuildAgentOptionsEmptyDirBehavesAsBefore pins that an unset
+// cfgTools.Dir (the zero value, matching every pre-Step-20 config and every
+// existing test that never set it) yields exactly the same seven tools
+// buildAgentOptions always has, with no warn — Step 20 changes nothing for
+// an install that has not created a tools directory of its own.
+func TestBuildAgentOptionsEmptyDirBehavesAsBefore(t *testing.T) {
+	cfgTools := config.Tools{Enabled: true}
+	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	if len(opts.Tools) != 7 {
+		t.Errorf("opts.Tools has %d entries, want 7", len(opts.Tools))
+	}
+}

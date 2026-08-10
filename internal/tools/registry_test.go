@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -146,6 +148,144 @@ func TestCorePassesEgressAllowlistToFetch(t *testing.T) {
 	}
 	if f.AllowAll {
 		t.Error("Core([]string{...}, false): fetch.AllowAll should be false")
+	}
+}
+
+// --- DeclarativeTools / WithDeclarative -------------------------------------
+
+func TestDeclarativeToolsEmptyDirReturnsNilAndNoWarn(t *testing.T) {
+	got, warn := DeclarativeTools("", nil, false)
+	if got != nil {
+		t.Errorf("DeclarativeTools(\"\", ...): got %v, want nil", got)
+	}
+	if warn != "" {
+		t.Errorf("DeclarativeTools(\"\", ...): warn = %q, want empty", warn)
+	}
+}
+
+func TestDeclarativeToolsMissingDirReturnsNilAndNoWarn(t *testing.T) {
+	got, warn := DeclarativeTools(filepath.Join(t.TempDir(), "does-not-exist"), nil, false)
+	if got != nil {
+		t.Errorf("DeclarativeTools(missing dir): got %v, want nil", got)
+	}
+	if warn != "" {
+		t.Errorf("DeclarativeTools(missing dir): warn = %q, want empty", warn)
+	}
+}
+
+func TestDeclarativeToolsFindsToolAndCarriesAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte(`
+name = "greet"
+description = "say hello"
+
+[request]
+method = "GET"
+url = "https://example.com/greet"
+`)
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got, warn := DeclarativeTools(dir, []string{"example.com"}, false)
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d tools, want 1", len(got))
+	}
+	if got[0].Name() != "greet" {
+		t.Errorf("Name() = %q, want greet", got[0].Name())
+	}
+	dt, ok := got[0].(DeclarativeTool)
+	if !ok {
+		t.Fatalf("tool has type %T, want DeclarativeTool", got[0])
+	}
+	if len(dt.Allow) != 1 || dt.Allow[0] != "example.com" {
+		t.Errorf("Allow = %v, want [example.com]", dt.Allow)
+	}
+	if dt.AllowAll {
+		t.Error("AllowAll should be false")
+	}
+}
+
+func TestWithDeclarativeNoDirBehavesLikeCore(t *testing.T) {
+	reg, warn := WithDeclarative(nil, false, "")
+	if warn != "" {
+		t.Errorf("unexpected warn: %q", warn)
+	}
+	want := []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch"}
+	got := reg.Tools()
+	if len(got) != len(want) {
+		t.Fatalf("WithDeclarative(nil, false, \"\"): got %d tools, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name() != name {
+			t.Errorf("position %d: got %q, want %q", i, got[i].Name(), name)
+		}
+	}
+}
+
+func TestWithDeclarativeAppendsDiscoveredToolsAfterNativeSeven(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte(`
+name = "greet"
+description = "say hello"
+
+[request]
+method = "GET"
+url = "https://example.com/greet"
+`)
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	reg, warn := WithDeclarative(nil, false, dir)
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	got := reg.Tools()
+	if len(got) != 8 {
+		t.Fatalf("got %d tools, want 8 (7 native + 1 declarative)", len(got))
+	}
+	if got[7].Name() != "greet" {
+		t.Errorf("tool at position 7 = %q, want greet", got[7].Name())
+	}
+	if _, ok := reg.Lookup("greet"); !ok {
+		t.Error("Lookup(\"greet\") found nothing")
+	}
+	// Native tools must still resolve exactly as Core() alone provides.
+	if _, ok := reg.Lookup("fetch"); !ok {
+		t.Error("Lookup(\"fetch\") found nothing after adding declarative tools")
+	}
+}
+
+func TestWithDeclarativeSurfacesDiscoveryWarn(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), []byte("not valid toml [["), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	reg, warn := WithDeclarative(nil, false, dir)
+	if warn == "" {
+		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
+	}
+	want := []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch"}
+	got := reg.Tools()
+	if len(got) != len(want) {
+		t.Fatalf("a broken manifest should not add a tool: got %d, want %d", len(got), len(want))
 	}
 }
 

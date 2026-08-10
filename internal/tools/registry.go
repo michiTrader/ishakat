@@ -66,6 +66,54 @@ func Core(egressAllow []string, egressAllowAll bool) *Registry {
 	)
 }
 
+// DeclarativeTools converts DiscoverDeclarative(dir)'s findings into Tools,
+// each sharing the same egress allowlist Core's own Fetch uses — a
+// declarative tool's [origin] check (declarative.go's hostAllowed call) is
+// the same boundary fetch's is, so both must agree on what "allowed" means
+// for a given install. dir == "" (Tools.dir unset) returns a nil slice and
+// an empty warn, matching DiscoverDeclarative's own no-op contract for that
+// case, so a caller does not need its own branch to skip this step when
+// layer 2's tool directory is not configured.
+//
+// This is a plain []Tool, not a *Registry, on purpose: Core's own 7-tool
+// contract (TestCoreRegistersAllSevenToolsByName) must never depend on
+// whether a caller also wants declarative tools, so a caller merges the two
+// with NewRegistry(append(Core(...).Tools(), DeclarativeTools(...)...)...)
+// rather than this function returning a competing Registry constructor.
+func DeclarativeTools(dir string, egressAllow []string, egressAllowAll bool) ([]Tool, string) {
+	res := DiscoverDeclarative(dir)
+	if len(res.Tools) == 0 {
+		return nil, res.Warn
+	}
+	out := make([]Tool, 0, len(res.Tools))
+	for _, m := range res.Tools {
+		out = append(out, DeclarativeTool{
+			Manifest: m,
+			Allow:    egressAllow,
+			AllowAll: egressAllowAll,
+		})
+	}
+	return out, res.Warn
+}
+
+// WithDeclarative builds a Registry over Core's own seven tools plus every
+// tool DeclarativeTools(dir, ...) finds, in that order — native tools first,
+// matching §19.1's own layer ordering (layer 1 before layer 2). A manifest
+// naming a native tool (e.g. a tool.toml with name = "fetch") loses the
+// Lookup/Run slot to it per NewRegistry's own last-registration-wins rule,
+// but keeps its position in Tools() at the native tool's spot — an unlikely
+// case Step 20 does not need to guard against further, since §19.5's own
+// area (danger inference) does not depend on name collisions being
+// impossible, only on danger never being under-counted.
+func WithDeclarative(egressAllow []string, egressAllowAll bool, declarativeDir string) (*Registry, string) {
+	reg := Core(egressAllow, egressAllowAll)
+	extra, warn := DeclarativeTools(declarativeDir, egressAllow, egressAllowAll)
+	if len(extra) == 0 {
+		return reg, warn
+	}
+	return NewRegistry(append(reg.Tools(), extra...)...), warn
+}
+
 // Tools returns the registered Tools in registration order. The caller (§12bis
 // bindTools in internal/app) walks this once at boot to build the
 // []engine.ToolDef the model sees; nothing here mutates after construction, so
