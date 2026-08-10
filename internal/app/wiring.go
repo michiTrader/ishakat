@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MichiTrader/ishakat/internal/agentsmd"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/xdg"
 
 	// The §5.4 registry only knows the dialects someone imports. This blank
 	// import is the switch that turns on kind = "openai", and it lives here
@@ -120,15 +122,64 @@ func configOrigin(cfg *config.Config) string {
 // §5.2 is explicit: if both system_prompt and system_prompt_file are set,
 // the file wins. An unreadable file is not a reason to abort startup; the
 // warning is returned and execution continues with whatever the TOML had.
+//
+// Step 18 (§11) then appends the merged AGENTS.md rules, when
+// cfg.App.AgentsMD is on: a project's standing instructions are additional
+// context on top of whatever system_prompt/system_prompt_file already said,
+// never a replacement for it — the two are orthogonal knobs answering
+// different questions ("who is the assistant" vs. "what does this project
+// need it to know"). This is the one place both BuildEngine and Headless
+// resolve the system prompt (see their own comments), so a caller never has
+// to remember to ask for AGENTS.md separately.
 func SystemPrompt(cfg *config.Config) (string, string) {
+	system := cfg.App.SystemPrompt
+	var warn string
+
 	if f := strings.TrimSpace(cfg.App.SystemPromptFile); f != "" {
 		raw, err := os.ReadFile(f)
 		if err != nil {
-			return cfg.App.SystemPrompt, fmt.Sprintf("could not read system_prompt_file (%s): %v", f, err)
+			warn = fmt.Sprintf("could not read system_prompt_file (%s): %v", f, err)
+		} else {
+			system = strings.TrimSpace(string(raw))
 		}
-		return strings.TrimSpace(string(raw)), ""
 	}
-	return cfg.App.SystemPrompt, ""
+
+	if cfg.App.AgentsMD {
+		res := agentsmd.Resolve(xdg.AgentsFile(), ".")
+		if res.Text != "" {
+			system = appendSystemBlock(system, res.Text)
+		}
+		if res.Warn != "" {
+			warn = joinWarn(warn, res.Warn)
+		}
+	}
+
+	return system, warn
+}
+
+// appendSystemBlock adds a block of rules to the end of the base system
+// prompt, blank-line separated. Kept as its own function because an empty
+// base prompt (the common case: most users never set system_prompt) must not
+// grow a leading blank line — AGENTS.md content becomes the entire prompt in
+// that case, not an addendum to nothing.
+func appendSystemBlock(base, block string) string {
+	if base == "" {
+		return block
+	}
+	return base + "\n\n" + block
+}
+
+// joinWarn combines two warning strings the way BuildEngine's own fbLine/warn
+// combination already does (engine.go), so a caller printing warn verbatim
+// sees every problem instead of only the first or the last.
+func joinWarn(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return a + "; " + b
 }
 
 // Dialects are the dialects this binary can speak. `ishakat doctor` reports
