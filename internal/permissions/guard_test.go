@@ -110,6 +110,28 @@ func TestGuardYoloDoesNotAllowHighRiskTools(t *testing.T) {
 	}
 }
 
+func TestGuardAllowsFetchWithoutReview(t *testing.T) {
+	// fetch is danger:low (§19.1) and shares Read's policy knob (guard.go's
+	// mode() doc comment): the egress allowlist, not this guard, is what
+	// stops an unwanted host, so a Read="allow" configuration must not
+	// additionally prompt for a fetch call the way it does not for
+	// read_file/glob/grep.
+	reviewer := &recordingReviewer{}
+	guard := New(testPermissions(), false, reviewer)
+	if err := guard.Authorize(context.Background(), "fetch", json.RawMessage(`{"url":"https://example.com"}`)); err != nil {
+		t.Fatalf("Authorize() error = %v", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0", reviewer.calls)
+	}
+}
+
+func TestGuardFetchTierIsLow(t *testing.T) {
+	if got := tierFor("fetch"); got != Low {
+		t.Fatalf("tierFor(%q) = %v, want Low", "fetch", got)
+	}
+}
+
 func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)

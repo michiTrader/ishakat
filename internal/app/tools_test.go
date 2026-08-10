@@ -11,10 +11,10 @@ import (
 )
 
 func TestToolDefsFromCopiesNameDescriptionParameters(t *testing.T) {
-	reg := tools.Core()
+	reg := tools.Core(nil, false)
 	defs := ToolDefsFrom(reg)
-	if len(defs) != 6 {
-		t.Fatalf("got %d ToolDefs, want 6", len(defs))
+	if len(defs) != 7 {
+		t.Fatalf("got %d ToolDefs, want 7", len(defs))
 	}
 	byName := map[string]bool{}
 	for i, d := range defs {
@@ -26,7 +26,7 @@ func TestToolDefsFromCopiesNameDescriptionParameters(t *testing.T) {
 			t.Errorf("ToolDef %d (%s): empty Parameters", i, d.Name)
 		}
 	}
-	for _, name := range []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep"} {
+	for _, name := range []string{"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch"} {
 		if !byName[name] {
 			t.Errorf("ToolDefsFrom: missing %q", name)
 		}
