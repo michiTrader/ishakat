@@ -67,6 +67,18 @@ func CatalogFile() string { return filepath.Join(CacheDir(), "catalog.json") }
 func SessionsDir() string { return filepath.Join(DataDir(), "sessions") }
 func ErrorFile() string   { return filepath.Join(StateDir(), "last-error.json") }
 
+// UsageFile is §19.7's crystallization-by-observation ledger: one JSON
+// line per normalized bash/fetch invocation pattern, with a count and a
+// last-seen date. It lives under StateDir, not DataDir or CacheDir,
+// because it is neither user data worth backing up (SessionsDir) nor a
+// disposable cache that is safe to delete and silently redownload
+// (CatalogFile) — losing it only degrades suggest mode's memory of what
+// has repeated before, exactly the kind of "frequently changed state
+// that is not quite a cache" $XDG_STATE_HOME exists for. Path matches
+// §19.7's own worked example verbatim:
+// "$XDG_STATE_HOME/ishakat/usage.jsonl".
+func UsageFile() string { return filepath.Join(StateDir(), "usage.jsonl") }
+
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
 
