@@ -54,8 +54,34 @@ type Guard struct {
 	yolo        bool
 	reviewer    Reviewer
 
+	// tiers supplements tierFor's fixed switch (the seven native tools)
+	// for names it does not recognize -- Step 20's declarative tools chief
+	// among them. nil (the zero value, and every pre-Step-20 caller that
+	// never calls SetToolTiers) means "no supplement": tierForRequest then
+	// falls back to the exact same High/"ask" default this package always
+	// had, so a caller that ignores this field sees no behavior change.
+	tiers map[string]Tier
+
 	mu      sync.Mutex
 	session map[string]struct{}
+}
+
+// SetToolTiers registers the Tier a tool name outside tierFor's own fixed
+// switch should use, both for the Request.Tier a Reviewer sees and for
+// mode's default branch (see mode's own doc comment on how a Tier maps to a
+// permission class there). A caller (internal/app) builds this from the
+// real Registry's own Tool.Danger() -- the same one-way-ratcheted inference
+// declarative.go's inferDanger already applies (§19.5 rule 2: a manifest
+// may only ever raise its own risk tier, never lower it) -- so a Guard
+// never has to import internal/tools to reason about a tool it did not
+// itself define, preserving the package boundary between the two exactly
+// as before. Names tierFor's own switch already covers (the seven native
+// tools) are unaffected regardless of what this map says for them: a
+// manifest naming itself "bash" cannot reduce bash's own hardcoded High
+// tier by appearing here, because tierFor's fixed switch is always
+// consulted first.
+func (g *Guard) SetToolTiers(tiers map[string]Tier) {
+	g.tiers = tiers
 }
 
 // New creates a guard for one application session. yolo changes only ask into
@@ -72,7 +98,7 @@ func New(permissions config.Permissions, yolo bool, reviewer Reviewer) *Guard {
 // Authorize permits a request or returns ErrDenied. A high-tier request cannot
 // receive a session grant, even if the reviewer asks for one.
 func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMessage) error {
-	req := Request{Name: name, Arguments: clone(arguments), Tier: tierFor(name)}
+	req := Request{Name: name, Arguments: clone(arguments), Tier: g.tierFor(name)}
 	if reason := g.hardDeny(req); reason != "" {
 		return fmt.Errorf("%w: %s", ErrDenied, reason)
 	}
@@ -111,6 +137,26 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	return nil
 }
 
+// isNativeToolName reports whether name is one of tierFor's/mode's own
+// seven recognized names (layer 1, §19.1) -- the boundary (*Guard).tierFor
+// and (*Guard).mode use to decide whether a name may ever be supplemented
+// by g.tiers: a manifest naming itself "bash" must never reduce bash's own
+// hardcoded High tier by appearing in g.tiers, so both methods consult
+// g.tiers only for names this reports false for.
+func isNativeToolName(name string) bool {
+	switch name {
+	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash":
+		return true
+	default:
+		return false
+	}
+}
+
+// tierFor is the fixed switch over layer 1's seven native tools -- kept as
+// a free function, not a method, so guard_test.go's existing
+// TestGuardFetchTierIsLow (calling tierFor("fetch") directly) keeps
+// compiling unchanged, and so its own contract (these seven names, no
+// more) can never quietly depend on a Guard's tiers map.
 func tierFor(name string) Tier {
 	switch name {
 	case "read_file", "glob", "grep", "fetch":
@@ -124,6 +170,24 @@ func tierFor(name string) Tier {
 		// inheriting a low-risk default.
 		return High
 	}
+}
+
+// tierFor is tierFor(name) supplemented by g.tiers for any name outside
+// the fixed native seven -- Step 20's declarative tools chief among them.
+// g.tiers == nil (no caller ever set it, matching every pre-Step-20 Guard
+// and every Guard a caller builds without SetToolTiers) falls through to
+// tierFor's own High default unchanged, so this method is a pure addition:
+// nothing that worked before behaves differently now.
+func (g *Guard) tierFor(name string) Tier {
+	if isNativeToolName(name) {
+		return tierFor(name)
+	}
+	if g.tiers != nil {
+		if t, ok := g.tiers[name]; ok {
+			return t
+		}
+	}
+	return tierFor(name)
 }
 
 func (g *Guard) mode(req Request) string {
@@ -142,7 +206,28 @@ func (g *Guard) mode(req Request) string {
 	case "bash":
 		return g.permissions.Shell
 	default:
-		return "ask"
+		// A name outside the native seven (Step 20's declarative tools
+		// chief among them) reuses the policy knob matching req.Tier --
+		// itself already resolved through g.tierFor, which honors
+		// g.tiers/Tool.Danger() rather than assuming High. Low mirrors
+		// read_file's own reasoning (reversible, no destructive local
+		// effect); Medium mirrors write_file's (scoped, undoable); a tool
+		// nothing marked otherwise stays High and reuses Shell's
+		// generally-stricter default. A caller that never calls
+		// SetToolTiers sees req.Tier == High here exactly as before (since
+		// tierFor's own default is High), and defaults.toml ships
+		// shell = "ask", the same value the old bare "ask" default
+		// hardcoded -- so an install that has not touched
+		// [tools.permissions] and has no declarative tools of its own sees
+		// no change at all.
+		switch req.Tier {
+		case Low:
+			return g.permissions.Read
+		case Medium:
+			return g.permissions.Write
+		default:
+			return g.permissions.Shell
+		}
 	}
 }
 

@@ -49,6 +49,28 @@ import (
 // config.Tools) both mean the same thing.
 func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost) (engine.AgentOptions, string) {
 	reg, warn := tools.WithDeclarative(cfgTools.Egress.Allow, cfgTools.Egress.AllowAll, cfgTools.Dir)
+	if guard != nil {
+		// Every tool beyond the native seven (declarative tools chief
+		// among them) gets its real Tool.Danger()-inferred Tier registered
+		// here, so permissions.Guard's own tierFor/mode default (safe but
+		// blind: High/"ask" for any name it does not recognize) becomes
+		// aware of what declarative.go's inferDanger actually computed for
+		// each manifest, without permissions ever importing tools (see
+		// Guard.SetToolTiers' own doc comment on why the translation lives
+		// on this side of the boundary).
+		tiers := make(map[string]permissions.Tier)
+		for _, t := range reg.Tools() {
+			switch t.Danger() {
+			case tools.DangerLow:
+				tiers[t.Name()] = permissions.Low
+			case tools.DangerMedium:
+				tiers[t.Name()] = permissions.Medium
+			default:
+				tiers[t.Name()] = permissions.High
+			}
+		}
+		guard.SetToolTiers(tiers)
+	}
 	opts := engine.AgentOptions{
 		Tools:          ToolDefsFrom(reg),
 		Runner:         ToolRunnerWithGuard(reg, guard),
