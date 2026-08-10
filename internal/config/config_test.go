@@ -733,6 +733,41 @@ func TestEvolveOffSkipsSelftestWarning(t *testing.T) {
 	}
 }
 
+// TestAgentsMDDefaultsTrue guards Step 18's opt-out design: the feature must
+// be on without the user ever mentioning it, and turned off only by an
+// explicit agents_md = false.
+func TestAgentsMDDefaultsTrue(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "minimal.toml")
+	if err := os.WriteFile(p, []byte("schema = 1\n"), 0o600); err != nil {
+		t.Fatalf("could not write the temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("embedded defaults failed Validate: %v", err)
+	}
+	if !cfg.App.AgentsMD {
+		t.Error("app.agents_md should default to true")
+	}
+}
+
+func TestAgentsMDExplicitFalseIsHonored(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "off.toml")
+	if err := os.WriteFile(p, []byte("schema = 1\n[app]\nagents_md = false\n"), 0o600); err != nil {
+		t.Fatalf("could not write the temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.App.AgentsMD {
+		t.Error("app.agents_md = false in the user layer should stick")
+	}
+}
+
 func TestRedacted(t *testing.T) {
 	cfg := &config.Config{
 		Providers: []config.Provider{

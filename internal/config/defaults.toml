@@ -14,6 +14,11 @@ fallback_model = ""
 stream = true
 system_prompt = ""
 system_prompt_file = ""
+# Step 18: append AGENTS.md rules (global -> project -> local) to the system
+# prompt so they don't have to be repeated every message. On by default: a
+# project with none of the three files pays nothing for this. Set to false
+# to opt a specific run or repository out entirely.
+agents_md = true
 timeout_s = 120
 connect_timeout_s = 10
 max_retries = 3
