@@ -9,6 +9,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/agentsmd"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/skills"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 
 	// The §5.4 registry only knows the dialects someone imports. This blank
@@ -131,6 +132,15 @@ func configOrigin(cfg *config.Config) string {
 // need it to know"). This is the one place both BuildEngine and Headless
 // resolve the system prompt (see their own comments), so a caller never has
 // to remember to ask for AGENTS.md separately.
+//
+// Step 19 (§19.4) then appends the rung-0 skills listing, gated behind
+// cfg.Tools.Enabled: a skill is discovered content the model can act on by
+// calling read_file on skills.Skill.File (§19.1's own reasoning against a
+// second "load skill" tool), so offering the listing to a model that has no
+// tools at all would name a capability nothing can reach. Only Name +
+// Description of each skill enters the prompt (skills.Summary), never a
+// body — §19.4's progressive-disclosure rule is what keeps forty skills
+// costing ~600 tokens instead of forty times a SKILL.md's own 2.000-8.000.
 func SystemPrompt(cfg *config.Config) (string, string) {
 	system := cfg.App.SystemPrompt
 	var warn string
@@ -151,6 +161,16 @@ func SystemPrompt(cfg *config.Config) (string, string) {
 		}
 		if res.Warn != "" {
 			warn = joinWarn(warn, res.Warn)
+		}
+	}
+
+	if cfg.Tools.Enabled {
+		sk := skills.Discover(cfg.Tools.SkillsDir)
+		if summary := skills.Summary(sk.Skills); summary != "" {
+			system = appendSystemBlock(system, "Available skills (call read_file on their path for the full content):\n"+summary)
+		}
+		if sk.Warn != "" {
+			warn = joinWarn(warn, sk.Warn)
 		}
 	}
 
