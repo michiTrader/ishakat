@@ -313,7 +313,7 @@ func Headless(opts HeadlessOptions) int {
 			hist = &convo.Conversation{}
 		}
 		guard := permissions.New(cfg.Tools.Permissions, opts.Yolo, nil)
-		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, cfg.App.MaxRetries, req, user, s, store, conv, hist)
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, cfg.App.MaxRetries, req, user, s, store, conv, hist, opts.AllowToolCreate)
 	} else {
 		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
 	}

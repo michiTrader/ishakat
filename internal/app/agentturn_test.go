@@ -241,7 +241,7 @@ func TestRunAgentTurnHeadlessSeedsBudgetFromPersistedSpend(t *testing.T) {
 
 	_, turnErr := runAgentTurnHeadless(
 		context.Background(), prov, cfgTools, guard, cost,
-		2, req, user, s, nil, nil, hist,
+		2, req, user, s, nil, nil, hist, false,
 	)
 	if turnErr != nil {
 		t.Fatalf("runAgentTurnHeadless: %v", turnErr)

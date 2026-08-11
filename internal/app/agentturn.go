@@ -132,7 +132,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 // persistence of that same summary message, which the caller must do since
 // this function already persisted the loop's real messages individually.
 //
-// buildAgentOptions is always called with hasTTY = false here, regardless
+// buildAgentOptions is called with hasTTY = allowToolCreate here, regardless
 // of whether opts.StdinTTY/StdoutTTY (Headless's own test seams) happen to
 // report a real terminal on the other end of a pipe: §19.6's own rule is
 // about a human being present to resolve gate 2's approval dialog, and
@@ -141,16 +141,15 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 // opts.Yolo, nil)` — the third argument, reviewer, is always nil on this
 // path) — a `tool_create` call that reached gate 2 here would hit
 // Guard.Authorize's own "g.reviewer == nil" branch and simply fail with
-// ErrDenied, which is a worse experience than tool_create never appearing
-// in the catalogue this turn was given to begin with (§19.7's own "absent
-// from the registry" phrasing for Mode == "off", applied here for the
-// identical no-human-to-ask reason rather than a Mode value). A future
-// --allow-tool-create flag (§19.7, still unimplemented — see
-// tools.MetaToolsOptions.AllowWithoutTTY's own doc comment) is the
-// documented, deliberate escape hatch for a script that wants this path
-// anyway; until it exists, `ishakat -p`, `ishakat serve`, cron and CI can
-// never see tool_create, matching docs/PLAN.md §19.7's own instruction
-// verbatim: "With no TTY, tool_create is denied. Full stop."
+// ErrDenied regardless of allowToolCreate. That is deliberate, not a bug:
+// --allow-tool-create (§13/§19.7, HeadlessOptions.AllowToolCreate's own doc
+// comment) only grants *visibility* — tool_create appears in the registry
+// and the model may propose it — never unattended approval, since headless
+// still has no human to resolve the approval dialog against. With
+// allowToolCreate == false (the default, and every call site before this
+// parameter existed), the catalogue omits tool_create entirely, matching
+// docs/PLAN.md §19.7's own instruction verbatim: "With no TTY, tool_create
+// is denied. Full stop."
 func runAgentTurnHeadless(
 	ctx context.Context,
 	prov provider.Provider,
@@ -164,10 +163,11 @@ func runAgentTurnHeadless(
 	store *convo.Store,
 	conv *convo.Conversation,
 	hist *convo.Conversation,
+	allowToolCreate bool,
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, false)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, allowToolCreate)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}
