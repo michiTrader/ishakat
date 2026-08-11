@@ -18,6 +18,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
 	"github.com/MichiTrader/ishakat/internal/tools"
+	"github.com/MichiTrader/ishakat/internal/xdg"
 )
 
 // buildAgentOptions translates config.Tools into engine.AgentOptions,
@@ -92,9 +94,20 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		}
 		guard.SetToolTiers(tiers)
 	}
+	runner := ToolRunnerWithGuard(reg, guard)
+	// §19.7's ledger only ever feeds gate 1's Repetition criterion, which
+	// only matters while tool_create could ever be offered again -- under
+	// Mode == "off" nothing will read it before the next config change, so
+	// observing every bash/fetch call would be pure write-amplification
+	// for no consumer (see WithMetaTools' own "off means absent, not
+	// merely denied" framing for the identical reasoning applied to the
+	// meta-tools themselves).
+	if !strings.EqualFold(strings.TrimSpace(cfgTools.Evolve.Mode), "off") {
+		runner = ledgerObservingRunner(runner, xdg.UsageFile(), nil)
+	}
 	opts := engine.AgentOptions{
 		Tools:          ToolDefsFrom(reg),
-		Runner:         ToolRunnerWithGuard(reg, guard),
+		Runner:         runner,
 		MaxToolCalls:   cfgTools.MaxCallsPerTurn,
 		MaxOutputBytes: cfgTools.MaxOutputBytes,
 		BudgetUSD:      cfgTools.BudgetUSD,
