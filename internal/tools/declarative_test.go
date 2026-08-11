@@ -121,20 +121,58 @@ func TestParseManifestInvalidTOMLIsError(t *testing.T) {
 }
 
 func TestParseManifestIgnoresUnknownTables(t *testing.T) {
-	// §20.11 item 1: [package] and [selftest] must be accepted and silently
-	// ignored -- no error, no warning field on Manifest to check either,
-	// since there is deliberately none.
+	// §20.11 item 1: [package] must be accepted and silently ignored -- no
+	// error, no warning field on Manifest to check either, since there is
+	// deliberately none. [selftest] is no longer one of these tables (see
+	// TestParseManifestDecodesSelftest below) -- it decodes into
+	// Manifest.Selftest now that Step 21's tool_probe reads it.
 	_, err := parseManifest([]byte(`
 name = "with_extras"
 [request]
 url = "https://example.com/x"
 [package]
 id = "com.example.with_extras"
-[selftest]
-args = { coin = "BTC" }
 `))
 	if err != nil {
 		t.Fatalf("parseManifest: unexpected error for reserved tables: %v", err)
+	}
+}
+
+func TestParseManifestDecodesSelftest(t *testing.T) {
+	m, err := parseManifest([]byte(`
+name = "with_selftest"
+[request]
+url = "https://example.com/x"
+[selftest]
+args = { coin = "BTC" }
+env = { X_TESTNET = "1" }
+expect = "status_ok"
+`))
+	if err != nil {
+		t.Fatalf("parseManifest: unexpected error: %v", err)
+	}
+	if m.Selftest.Args["coin"] != "BTC" {
+		t.Errorf("Selftest.Args[coin] = %q, want BTC", m.Selftest.Args["coin"])
+	}
+	if m.Selftest.Env["X_TESTNET"] != "1" {
+		t.Errorf("Selftest.Env[X_TESTNET] = %q, want 1", m.Selftest.Env["X_TESTNET"])
+	}
+	if m.Selftest.Expect != "status_ok" {
+		t.Errorf("Selftest.Expect = %q, want status_ok", m.Selftest.Expect)
+	}
+}
+
+func TestParseManifestNoSelftestTableIsZeroValue(t *testing.T) {
+	m, err := parseManifest([]byte(`
+name = "no_selftest"
+[request]
+url = "https://example.com/x"
+`))
+	if err != nil {
+		t.Fatalf("parseManifest: unexpected error: %v", err)
+	}
+	if m.Selftest.Expect != "" || len(m.Selftest.Args) != 0 || len(m.Selftest.Env) != 0 {
+		t.Errorf("Selftest = %+v, want the zero value for a manifest with no [selftest] table", m.Selftest)
 	}
 }
 
