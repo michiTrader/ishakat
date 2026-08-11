@@ -296,7 +296,7 @@ url = "https://example.com/greet"
 		Enabled: true,
 		Dir:     toolsDir,
 	}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -328,14 +328,18 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	}
 
 	cfgTools := config.Tools{Enabled: true, Dir: toolsDir}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
 	if warn == "" {
 		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
 	}
 	// Native tools must still be present — a broken declarative manifest
-	// must not take down layer 1.
-	if len(opts.Tools) != 7 {
-		t.Errorf("opts.Tools has %d entries, want 7 (native only, broken manifest skipped)", len(opts.Tools))
+	// must not take down layer 1. hasTTY is false in this call, so
+	// tool_create is withheld (§19.6's TTY rule) but the other four
+	// meta-tools (Step 21) are still present once Dir is set, matching
+	// tools.WithMetaTools' own "Dir alone gates the four, TTY/Mode gate
+	// only tool_create" contract — 7 native + tool_list/probe/edit/delete.
+	if len(opts.Tools) != 11 {
+		t.Errorf("opts.Tools has %d entries, want 11 (7 native + 4 meta-tools, broken manifest skipped, no TTY so tool_create withheld)", len(opts.Tools))
 	}
 }
 
@@ -346,7 +350,7 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 // an install that has not created a tools directory of its own.
 func TestBuildAgentOptionsEmptyDirBehavesAsBefore(t *testing.T) {
 	cfgTools := config.Tools{Enabled: true}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}

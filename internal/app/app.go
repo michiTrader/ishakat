@@ -151,7 +151,16 @@ func Run(version string, resume bool) int {
 		}
 		guard := permissions.New(cfg.Tools.Permissions, false, reviewer)
 		var toolsWarn string
-		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost)
+		// hasTTY = !noTTY: the TUI is only ever running with a live
+		// terminal and a real reviewer bridge to resolve gate 2's approval
+		// dialog against (see buildAgentOptions' own doc comment on why
+		// runAgentTurnHeadless, the other call site, always passes false
+		// instead). noTTY itself is computed once at the top of Run from
+		// the same term.IsTerminal(os.Stdout.Fd()) check tui.Options.NoTTY
+		// already carries into the interface for unrelated (rendering)
+		// reasons — this reuses that one source of truth rather than
+		// asking the terminal a second time.
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, !noTTY)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}
 
