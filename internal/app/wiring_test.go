@@ -201,3 +201,33 @@ func TestSystemPromptSkipsSkillsWhenToolsDisabled(t *testing.T) {
 		t.Errorf("system = %q, want unchanged %q (tools disabled)", system, "base")
 	}
 }
+
+// TestDiscoverSkillsMirrorsSystemPromptsGate is /skills' own wiring test
+// (Step 19): tui.Options.Skills (app.go) has to see the exact same skills
+// SystemPrompt already folded into the prompt, or /skills could list a
+// capability the model was never actually told about, or vice versa. This
+// pins DiscoverSkills' gate against cfg.Tools.Enabled directly, the same
+// on/off split TestSystemPromptAppendsSkillsSummaryWhenToolsEnabled and
+// TestSystemPromptSkipsSkillsWhenToolsDisabled already cover from
+// SystemPrompt's own side.
+func TestDiscoverSkillsMirrorsSystemPromptsGate(t *testing.T) {
+	skillsDir := filepath.Join(t.TempDir(), "skills", "demo")
+	if err := os.MkdirAll(skillsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	body := "---\nname: demo\ndescription: does demo things\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	enabled := &config.Config{Tools: config.Tools{Enabled: true, SkillsDir: filepath.Dir(skillsDir)}}
+	res := DiscoverSkills(enabled)
+	if len(res.Skills) != 1 || res.Skills[0].Name != "demo" {
+		t.Errorf("DiscoverSkills(tools enabled) = %+v, want one skill named demo", res)
+	}
+
+	disabled := &config.Config{Tools: config.Tools{Enabled: false, SkillsDir: filepath.Dir(skillsDir)}}
+	if res := DiscoverSkills(disabled); len(res.Skills) != 0 {
+		t.Errorf("DiscoverSkills(tools disabled) = %+v, want empty (same gate as SystemPrompt)", res)
+	}
+}

@@ -127,12 +127,12 @@ func WithDeclarative(egressAllow []string, egressAllowAll bool, declarativeDir s
 // rather than re-deriving it.
 type MetaToolsOptions struct {
 	// Dir is the same layer-2 tools directory every meta-tool takes. Empty
-	// means "no tools directory configured" -- tool_list/probe/edit/delete
-	// have nothing to act on yet, so none of the five are added at all
-	// (matching DeclarativeTools' own "dir == \"\" is a no-op" contract):
-	// offering tool_create with no Dir to write into would let gate 1 pass
-	// and then fail on the actual write, which is a worse failure mode
-	// than never offering it.
+	// means "no tools directory configured" -- tool_list/probe/edit/archive/
+	// revive/delete have nothing to act on yet, so none of the seven are
+	// added at all (matching DeclarativeTools' own "dir == \"\" is a no-op"
+	// contract): offering tool_create with no Dir to write into would let
+	// gate 1 pass and then fail on the actual write, which is a worse
+	// failure mode than never offering it.
 	Dir string
 
 	// Allow/AllowAll are the same egress allowlist Core's own Fetch and
@@ -196,25 +196,33 @@ type MetaToolsOptions struct {
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
-// whichever of §19.5's five meta-tools opts.Dir/EvolveMode/HasTTY currently
+// whichever of §19.5's meta-tools opts.Dir/EvolveMode/HasTTY currently
 // allow, in the fixed order tool_list, tool_probe, tool_create, tool_edit,
-// tool_delete -- alphabetical by lifecycle stage (list before probe before
-// create before edit before delete), not alphabetical by name, so the
-// system prompt's own tool list reads in the same "what exists, then the
-// three ways to change it, then remove it" order §19.5's own table states
-// them in.
+// tool_archive, tool_revive, tool_delete -- alphabetical by lifecycle stage
+// (list before probe before create before edit before the two archive-state
+// transitions before delete), not alphabetical by name, so the system
+// prompt's own tool list reads in the same "what exists, then the ways to
+// change it, then remove it" order §19.5's own table states them in.
+// tool_archive/tool_revive sit between tool_edit and tool_delete because
+// neither changes a tool's content (tool_edit's job) nor removes it
+// (tool_delete's job) -- they only move it along the lifecycle diagram's
+// "unused N days -> archived" edge and back, which is closer to tool_probe's
+// own "moves the state, touches nothing else" shape than to either
+// neighbor's.
 //
-// tool_list/tool_probe/tool_edit/tool_delete are added whenever opts.Dir is
-// set, with no further gate: all four are read-only or act only on a tool
-// that already exists on disk, the same "acting on what is already there
-// changes nothing new" reasoning tool_list.go's own doc comment states for
-// itself, and tool_probe/tool_edit/tool_delete's own Danger()/Description()
-// doc comments make the identical case for a self-test, a targeted string
-// replacement and a confirmed deletion respectively -- none of the three
-// governance concerns (§19.6's gates, §19.7's Mode dial, §19.8's threat
-// model) exists to guard "may this agent look at or remove a tool a human
-// or an earlier turn already wrote", only "may it acquire a brand new
-// capability", which is tool_create's question alone.
+// tool_list/tool_probe/tool_edit/tool_archive/tool_revive/tool_delete are
+// added whenever opts.Dir is set, with no further gate: all six are
+// read-only or act only on a tool that already exists on disk, the same
+// "acting on what is already there changes nothing new" reasoning
+// tool_list.go's own doc comment states for itself, and tool_probe/
+// tool_edit/tool_archive/tool_revive/tool_delete's own Danger()/
+// Description() doc comments make the identical case for a self-test, a
+// targeted string replacement, an archive, a revive and a confirmed
+// deletion respectively -- none of the three governance concerns (§19.6's
+// gates, §19.7's Mode dial, §19.8's threat model) exists to guard "may this
+// agent look at, quiet down or remove a tool a human or an earlier turn
+// already wrote", only "may it acquire a brand new capability", which is
+// tool_create's question alone.
 //
 // tool_create is added only when both of §19.6/§19.7's own conditions hold:
 // opts.EvolveMode != "off" (§19.7's table, verbatim: "off" means
@@ -254,6 +262,8 @@ func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
 
 	extra = append(extra,
 		ToolEdit{Dir: opts.Dir, Allow: opts.Allow, AllowAll: opts.AllowAll},
+		ToolArchive{Dir: opts.Dir},
+		ToolRevive{Dir: opts.Dir},
 		ToolDelete{Dir: opts.Dir},
 	)
 

@@ -310,17 +310,18 @@ func TestWithMetaToolsEmptyDirBehavesLikeWithDeclarative(t *testing.T) {
 	}
 }
 
-// TestWithMetaToolsDirSetAddsFourAlwaysAvailableMetaTools proves
-// tool_list/tool_probe/tool_edit/tool_delete are added as soon as Dir is
-// set, with no further gate -- EvolveMode "off" and HasTTY false here on
-// purpose, to isolate that these four do not depend on either.
-func TestWithMetaToolsDirSetAddsFourAlwaysAvailableMetaTools(t *testing.T) {
+// TestWithMetaToolsDirSetAddsSixAlwaysAvailableMetaTools proves
+// tool_list/tool_probe/tool_edit/tool_archive/tool_revive/tool_delete are
+// added as soon as Dir is set, with no further gate -- EvolveMode "off" and
+// HasTTY false here on purpose, to isolate that these six do not depend on
+// either.
+func TestWithMetaToolsDirSetAddsSixAlwaysAvailableMetaTools(t *testing.T) {
 	dir := t.TempDir()
 	reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "off", HasTTY: false})
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
-	for _, name := range []string{"tool_list", "tool_probe", "tool_edit", "tool_delete"} {
+	for _, name := range []string{"tool_list", "tool_probe", "tool_edit", "tool_archive", "tool_revive", "tool_delete"} {
 		if _, ok := reg.Lookup(name); !ok {
 			t.Errorf("Lookup(%q) found nothing with Dir configured", name)
 		}
@@ -328,9 +329,9 @@ func TestWithMetaToolsDirSetAddsFourAlwaysAvailableMetaTools(t *testing.T) {
 	if _, ok := reg.Lookup("tool_create"); ok {
 		t.Error("tool_create must not be present when EvolveMode is \"off\"")
 	}
-	// 7 native + 4 meta-tools, tool_create withheld.
-	if got := len(reg.Tools()); got != 11 {
-		t.Errorf("got %d tools, want 11", got)
+	// 7 native + 6 meta-tools, tool_create withheld.
+	if got := len(reg.Tools()); got != 13 {
+		t.Errorf("got %d tools, want 13", got)
 	}
 }
 
@@ -359,6 +360,25 @@ func TestWithMetaToolsNoTTYOmitsToolCreateEntirely(t *testing.T) {
 	}
 }
 
+// TestWithMetaToolsArchiveReviveDoNotDependOnEvolveModeOrTTY proves
+// tool_archive/tool_revive behave exactly like tool_list/tool_probe/
+// tool_edit/tool_delete on this axis -- present whenever Dir is set,
+// regardless of EvolveMode or HasTTY -- because neither acquires a new
+// capability (§19.6/§19.7's governance question), it only moves an
+// existing tool along the lifecycle diagram's archive/revive edge. Checked
+// with the single most restrictive combination (Mode "off", no TTY) that
+// omits tool_create, to isolate that this restriction is specific to
+// tool_create and does not leak onto its neighbors.
+func TestWithMetaToolsArchiveReviveDoNotDependOnEvolveModeOrTTY(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "off", HasTTY: false})
+	for _, name := range []string{"tool_archive", "tool_revive"} {
+		if _, ok := reg.Lookup(name); !ok {
+			t.Errorf("Lookup(%q) found nothing even though only tool_create should be gated", name)
+		}
+	}
+}
+
 // TestWithMetaToolsAllowWithoutTTYSubstitutesForHasTTY proves
 // AllowWithoutTTY (the future --allow-tool-create flag's config-level
 // stand-in, per its own doc comment) grants the identical outcome HasTTY
@@ -374,8 +394,8 @@ func TestWithMetaToolsAllowWithoutTTYSubstitutesForHasTTY(t *testing.T) {
 // TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate is the positive
 // case every other test in this group isolates a single failing condition
 // against: both §19.7's Mode gate and §19.6's TTY gate satisfied together
-// add all five meta-tools, in the fixed order WithMetaTools' own doc
-// comment states (list, probe, create, edit, delete).
+// add every meta-tool, in the fixed order WithMetaTools' own doc comment
+// states (list, probe, create, edit, archive, revive, delete).
 func TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate(t *testing.T) {
 	dir := t.TempDir()
 	reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: true})
@@ -384,7 +404,7 @@ func TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate(t *testing.T) {
 	}
 	wantOrder := []string{
 		"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch",
-		"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_delete",
+		"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_archive", "tool_revive", "tool_delete",
 	}
 	got := reg.Tools()
 	if len(got) != len(wantOrder) {
@@ -437,9 +457,9 @@ func TestWithMetaToolsDeclarativeToolStillDiscovered(t *testing.T) {
 			t.Errorf("Lookup(%q) found nothing", name)
 		}
 	}
-	// 7 native + 1 declarative + 5 meta-tools.
-	if got := len(reg.Tools()); got != 13 {
-		t.Errorf("got %d tools, want 13", got)
+	// 7 native + 1 declarative + 7 meta-tools.
+	if got := len(reg.Tools()); got != 15 {
+		t.Errorf("got %d tools, want 15", got)
 	}
 }
 
