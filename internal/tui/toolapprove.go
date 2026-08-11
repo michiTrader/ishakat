@@ -147,7 +147,11 @@ func (m Root) renderToolApprove() string {
 	b.WriteString(" aprobación de herramienta\n")
 	fmt.Fprintf(&b, " %s   %s\n", d.req.Name, tierLabel(d.req.Tier))
 	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
-	for _, line := range wrapArgsLines(d.req.Arguments, width-1) {
+	argLines, structured := renderManifestProvenance(d.req.Name, d.req.Arguments, width-1)
+	if !structured {
+		argLines = wrapArgsLines(d.req.Arguments, width-1)
+	}
+	for _, line := range argLines {
 		b.WriteString(" " + line + "\n")
 	}
 	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
@@ -200,4 +204,166 @@ func wrapArgsLines(args json.RawMessage, width int) []string {
 		return strings.Split(wrapText(string(args), width), "\n")
 	}
 	return strings.Split(wrapText(pretty.String(), width), "\n")
+}
+
+// toolApproveManifestArgs mirrors the JSON shape of tool_create's
+// arguments (internal/tools.toolCreateArgs, unexported) closely enough to
+// render §19.6 gate 2's own requirement -- "full manifest + code +
+// provenance", "always; not delegable to allow for session" -- as labeled
+// fields instead of the one undifferentiated JSON dump wrapArgsLines
+// produces for every other tool. This is the gap more than one §17
+// Bitácora entry named explicitly: "the interactive approval surface
+// still shows whatever generic dialog Step 16 built, not a self-
+// extension-aware one".
+//
+// A second, tui-local copy of these field names -- rather than importing
+// tools.toolCreateArgs directly -- is the deliberate cost of §6.1's
+// boundary: internal/tools must never import internal/tui
+// (TestToolsNoImportaTUI), and root.go's own agentOpts comment already
+// commits this package to not reaching into internal/tools either, so
+// Request.Arguments's raw JSON is the only channel provenance can travel
+// through. Only the fields this dialog actually renders are mirrored --
+// params, selftest_*, and the profitability estimates gate 1 already
+// consumed before this dialog was ever reached are deliberately left out;
+// what a human needs to decide "does this deserve to exist on my disk" is
+// what it calls, where it came from, and why, not every knob.
+type toolApproveManifestArgs struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Method      string   `json:"method"`
+	URL         string   `json:"url"`
+	Origin      string   `json:"origin"`
+	Reason      string   `json:"reason"`
+	Sources     []string `json:"sources"`
+	SessionID   string   `json:"session_id"`
+	Repetitions int      `json:"repetitions"`
+}
+
+// toolApproveEditArgs mirrors tool_edit's argument shape
+// (internal/tools.toolEditArgs) for the same reason and under the same
+// §6.1 constraint as toolApproveManifestArgs above -- an edit changes an
+// already-installed tool's request just as easily as a creation acquires
+// a new one (tool_edit.go's own Danger() comment), so the human deciding
+// whether to approve it needs to see the exact before/after text, not a
+// JSON object naming fields called old_string and new_string.
+type toolApproveEditArgs struct {
+	Name       string `json:"name"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all"`
+}
+
+// renderManifestProvenance renders req.Name/req.Arguments as a structured,
+// labeled view for the two meta-tools that write executable capability to
+// disk (tool_create, tool_edit) -- every other tool name falls through
+// unchanged to wrapArgsLines's generic JSON dump, which is exactly right
+// for them: read_file's path or bash's command needs no provenance
+// section, only tool_create/tool_edit's own write path does (§19.8
+// mitigation 1/2). ok is false whenever this dialog should not attempt the
+// structured view -- either the tool is not one of the two, or args fails
+// to decode into the expected shape, which should not happen (these are
+// the same arguments tool_create.go/tool_edit.go already validated before
+// Guard.Authorize was ever reached) but a rendering path degrades to the
+// generic dump rather than showing a blank, zero-valued manifest.
+func renderManifestProvenance(name string, args json.RawMessage, width int) (lines []string, ok bool) {
+	switch name {
+	case "tool_create":
+		var a toolApproveManifestArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, false
+		}
+		return renderToolCreateManifest(a, width), true
+	case "tool_edit":
+		var a toolApproveEditArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, false
+		}
+		return renderToolEditManifest(a, width), true
+	default:
+		return nil, false
+	}
+}
+
+// renderToolCreateManifest lays out a's fields under three headings --
+// what it is, what it calls, and why it exists -- so the three questions
+// gate 2 exists to answer (what does this do, where does my data go, is
+// the stated reason believable) each have their own line rather than
+// sharing one undifferentiated block.
+func renderToolCreateManifest(a toolApproveManifestArgs, width int) []string {
+	var lines []string
+	add := func(s string) {
+		lines = append(lines, strings.Split(wrapText(s, width), "\n")...)
+	}
+
+	add(fmt.Sprintf("crear tool: %s", a.Name))
+	if a.Description != "" {
+		add("  " + a.Description)
+	}
+	add("")
+	add("solicitud")
+	method := a.Method
+	if method == "" {
+		method = "?"
+	}
+	add(fmt.Sprintf("  %s %s", method, a.URL))
+	add("")
+	add("procedencia")
+	add(fmt.Sprintf("  origen: %s", originLabel(a.Origin)))
+	if a.Reason != "" {
+		add(fmt.Sprintf("  motivo: %s", a.Reason))
+	}
+	if a.Origin == "agent" && a.Repetitions > 0 {
+		add(fmt.Sprintf("  repeticiones observadas: %d", a.Repetitions))
+	}
+	if len(a.Sources) > 0 {
+		add(fmt.Sprintf("  fuentes: %s", strings.Join(a.Sources, ", ")))
+	} else {
+		add("  fuentes: (ninguna declarada)")
+	}
+	if a.SessionID != "" {
+		add(fmt.Sprintf("  sesión: %s", a.SessionID))
+	}
+	return lines
+}
+
+// renderToolEditManifest lays out a's exact-string patch as a before/after
+// pair -- the same "what does this actually change" question gate 2 asks
+// of a creation, applied to a tool that already exists.
+func renderToolEditManifest(a toolApproveEditArgs, width int) []string {
+	var lines []string
+	add := func(s string) {
+		lines = append(lines, strings.Split(wrapText(s, width), "\n")...)
+	}
+	add(fmt.Sprintf("editar tool: %s", a.Name))
+	add("")
+	add("reemplaza")
+	add("  " + a.OldString)
+	add("")
+	add("por")
+	add("  " + a.NewString)
+	if a.ReplaceAll {
+		add("")
+		add("  (todas las ocurrencias)")
+	}
+	return lines
+}
+
+// originLabel names a tool_create manifest's [origin].created_by value in
+// the same short Spanish prose the rest of this dialog's copy uses,
+// mirroring §19.6's own "three legitimate origins" table (agent-initiated,
+// user-declared, user-forced) rather than showing the raw enum string a
+// human has not necessarily read docs/PLAN.md to recognise.
+func originLabel(origin string) string {
+	switch origin {
+	case "agent":
+		return "el agente (detectó repetición)"
+	case "user_declared":
+		return "vos (flujo declarado)"
+	case "user_forced":
+		return "vos (forzado)"
+	case "":
+		return "(no especificado)"
+	default:
+		return origin
+	}
 }
