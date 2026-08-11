@@ -18,6 +18,8 @@ import (
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
 	"github.com/MichiTrader/ishakat/internal/provider/fake"
+	"github.com/MichiTrader/ishakat/internal/tools"
+	"github.com/MichiTrader/ishakat/internal/xdg"
 )
 
 // TestHeadlessAgentLoopToolCallThenAnswer is §12bis's own closing criterion:
@@ -443,5 +445,63 @@ func TestBuildAgentOptionsEmptyDirBehavesAsBefore(t *testing.T) {
 	}
 	if len(opts.Tools) != 7 {
 		t.Errorf("opts.Tools has %d entries, want 7", len(opts.Tools))
+	}
+}
+
+// TestBuildAgentOptionsThreadsLedgerPathIntoToolCreate confirms
+// buildAgentOptions supplies xdg.UsageFile() as tool_create's LedgerPath --
+// the same "real ledger, not the model's own claim" wiring
+// tool_create_test.go/registry_test.go already cover at their own layers,
+// checked here at the one call site that actually assembles a live
+// tools.Registry end to end. XDG_STATE_HOME is overridden so the assertion
+// does not depend on (or pollute) whatever the sandbox's real state
+// directory happens to be.
+func TestBuildAgentOptionsThreadsLedgerPathIntoToolCreate(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+
+	cfgTools := config.Tools{
+		Enabled: true,
+		Dir:     t.TempDir(),
+		Evolve:  config.Evolve{Mode: "suggest", AllowWithoutTTY: true},
+	}
+	reg, warn := tools.WithMetaTools(tools.MetaToolsOptions{
+		Dir:             cfgTools.Dir,
+		EvolveMode:      cfgTools.Evolve.Mode,
+		AllowWithoutTTY: cfgTools.Evolve.AllowWithoutTTY,
+		HasTTY:          true,
+		LedgerPath:      xdg.UsageFile(),
+	})
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	got, ok := reg.Lookup("tool_create")
+	if !ok {
+		t.Fatal("expected tool_create to be present")
+	}
+	tc, ok := got.(tools.ToolCreate)
+	if !ok {
+		t.Fatalf("tool_create is not a tools.ToolCreate value: %T", got)
+	}
+	want := xdg.UsageFile()
+	if tc.LedgerPath != want {
+		t.Errorf("LedgerPath = %q, want %q", tc.LedgerPath, want)
+	}
+	if !strings.HasPrefix(tc.LedgerPath, stateHome) {
+		t.Errorf("LedgerPath %q does not respect the overridden XDG_STATE_HOME %q", tc.LedgerPath, stateHome)
+	}
+
+	opts, warn2 := buildAgentOptions(cfgTools, nil, nil, true)
+	if warn2 != "" {
+		t.Fatalf("unexpected warn: %q", warn2)
+	}
+	var sawToolCreate bool
+	for _, def := range opts.Tools {
+		if def.Name == "tool_create" {
+			sawToolCreate = true
+		}
+	}
+	if !sawToolCreate {
+		t.Fatal("buildAgentOptions did not offer tool_create with EvolveMode=suggest, AllowWithoutTTY=true")
 	}
 }

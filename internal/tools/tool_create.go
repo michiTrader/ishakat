@@ -140,6 +140,22 @@ type ToolCreate struct {
 	Allow      []string
 	AllowAll   bool
 	Thresholds evolve.Thresholds
+
+	// LedgerPath is §19.7's usage.jsonl path (xdg.UsageFile(), the
+	// caller's job to supply -- see evolve/ledger.go's own doc comment
+	// on why this package stays independent of internal/xdg). When set,
+	// realRepetitions overrides args.Repetitions (the model's own,
+	// unverified claim) with evolve.CountFor's real count from this
+	// ledger for OriginAgent proposals -- gate 1's Repetition criterion
+	// must not simply trust a number the same model proposing the tool
+	// also supplied; that is exactly the "ask an LLM does this deserve a
+	// tool? and it says yes" shape this whole package exists to refuse
+	// (see this file's own doc comment). Empty means "no ledger
+	// configured", the same as Mode == "off" never wiring one up in the
+	// first place (internal/app.buildAgentOptions) -- args.Repetitions
+	// is used unchanged in that case, matching every existing caller's
+	// behavior before this field existed.
+	LedgerPath string
 }
 
 var _ Tool = ToolCreate{}
@@ -374,7 +390,7 @@ func (t ToolCreate) Run(ctx context.Context, rawArgs json.RawMessage) (Result, e
 		Name:               args.Name,
 		Description:        args.Description,
 		Origin:             origin,
-		Repetitions:        args.Repetitions,
+		Repetitions:        t.realRepetitions(origin, args),
 		VaryingArgs:        args.VaryingArgs,
 		CreationCostTokens: args.CreationCostTokens,
 		PerUseSavingTokens: args.PerUseSavingTokens,
@@ -425,6 +441,34 @@ func parseOrigin(s string) (evolve.Origin, error) {
 	default:
 		return 0, fmt.Errorf("unknown origin %q, want one of agent/user_declared/user_forced", s)
 	}
+}
+
+// realRepetitions answers gate 1's Repetition criterion with the ledger's
+// own count rather than args.Repetitions verbatim, for OriginAgent
+// proposals with a LedgerPath configured -- see ToolCreate.LedgerPath's own
+// doc comment for why the model's self-reported number is never trusted
+// outright. Every other case returns args.Repetitions unchanged: origin !=
+// OriginAgent means Repetitions is not even read by Evaluate (Candidate's
+// own doc comment), and an empty LedgerPath means no ledger was ever wired
+// up for this install (Mode == "off"), so there is nothing to verify
+// against and the pre-existing behavior applies as-is.
+//
+// A ledger that fails to load (a real I/O error, not the ordinary "no
+// usage.jsonl yet" case LoadLedger itself already treats as an empty,
+// error-free Ledger) falls back to 0, not args.Repetitions -- an unreadable
+// ledger is exactly the situation where trusting the model's own claim
+// would defeat the whole point of verifying it, so the safer failure mode
+// is "prove nothing", which gate 1's Repetition check then refuses on its
+// own terms.
+func (t ToolCreate) realRepetitions(origin evolve.Origin, args toolCreateArgs) int {
+	if origin != evolve.OriginAgent || strings.TrimSpace(t.LedgerPath) == "" {
+		return args.Repetitions
+	}
+	l, err := evolve.LoadLedger(t.LedgerPath)
+	if err != nil {
+		return 0
+	}
+	return evolve.CountFor(l.Records, args.URL)
 }
 
 // requestHost extracts the hostname a manifest's (unrendered) request URL

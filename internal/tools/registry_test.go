@@ -443,6 +443,28 @@ func TestWithMetaToolsDeclarativeToolStillDiscovered(t *testing.T) {
 	}
 }
 
+// TestWithMetaToolsThreadsLedgerPathIntoToolCreate confirms
+// MetaToolsOptions.LedgerPath reaches the tool_create meta-tool's own
+// LedgerPath field unchanged -- WithMetaTools' own job here is pure
+// plumbing (see MetaToolsOptions.LedgerPath's doc comment), so this test
+// only asserts the field survives the trip, not any of ToolCreate's own
+// realRepetitions behavior (covered in tool_create_test.go).
+func TestWithMetaToolsThreadsLedgerPathIntoToolCreate(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: true, LedgerPath: "/tmp/some-usage.jsonl"})
+	got, ok := reg.Lookup("tool_create")
+	if !ok {
+		t.Fatal("expected tool_create to be present")
+	}
+	tc, ok := got.(ToolCreate)
+	if !ok {
+		t.Fatalf("tool_create is not a ToolCreate value: %T", got)
+	}
+	if tc.LedgerPath != "/tmp/some-usage.jsonl" {
+		t.Errorf("LedgerPath = %q, want %q", tc.LedgerPath, "/tmp/some-usage.jsonl")
+	}
+}
+
 // fakeNamedTool is a minimal Tool double for registry_test.go: enough to
 // exercise Registry's lookup/dispatch logic without depending on the real
 // six tools' own argument shapes or side effects.

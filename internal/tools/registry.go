@@ -187,6 +187,12 @@ type MetaToolsOptions struct {
 	// zero value is still a fully-defined, documented default rather than
 	// a caller error.
 	Thresholds evolve.Thresholds
+
+	// LedgerPath is passed straight through to ToolCreate.LedgerPath --
+	// see that field's own doc comment. Empty (the zero value) means "no
+	// ledger configured", matching every caller's behavior before this
+	// field existed.
+	LedgerPath string
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
@@ -242,6 +248,7 @@ func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
 			Allow:      opts.Allow,
 			AllowAll:   opts.AllowAll,
 			Thresholds: opts.Thresholds,
+			LedgerPath: opts.LedgerPath,
 		})
 	}
 

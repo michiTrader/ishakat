@@ -71,6 +71,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		AllowWithoutTTY: cfgTools.Evolve.AllowWithoutTTY,
 		HasTTY:          hasTTY,
 		Thresholds:      evolveThresholds(cfgTools, cfgTools.Evolve),
+		LedgerPath:      xdg.UsageFile(),
 	})
 	if guard != nil {
 		// Every tool beyond the native seven (declarative tools chief
