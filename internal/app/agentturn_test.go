@@ -336,12 +336,13 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	}
 	// Native tools must still be present — a broken declarative manifest
 	// must not take down layer 1. hasTTY is false in this call, so
-	// tool_create is withheld (§19.6's TTY rule) but the other four
-	// meta-tools (Step 21) are still present once Dir is set, matching
-	// tools.WithMetaTools' own "Dir alone gates the four, TTY/Mode gate
-	// only tool_create" contract — 7 native + tool_list/probe/edit/delete.
-	if len(opts.Tools) != 11 {
-		t.Errorf("opts.Tools has %d entries, want 11 (7 native + 4 meta-tools, broken manifest skipped, no TTY so tool_create withheld)", len(opts.Tools))
+	// tool_create is withheld (§19.6's TTY rule) but the other six
+	// meta-tools (Step 21, plus tool_archive/tool_revive) are still present
+	// once Dir is set, matching tools.WithMetaTools' own "Dir alone gates
+	// the six, TTY/Mode gate only tool_create" contract — 7 native +
+	// tool_list/probe/edit/archive/revive/delete.
+	if len(opts.Tools) != 13 {
+		t.Errorf("opts.Tools has %d entries, want 13 (7 native + 6 meta-tools, broken manifest skipped, no TTY so tool_create withheld)", len(opts.Tools))
 	}
 }
 
