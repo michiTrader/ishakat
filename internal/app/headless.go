@@ -59,6 +59,25 @@ type HeadlessOptions struct {
 	Quiet  bool  // --quiet: no warnings on stderr
 	Yolo   bool  // --yolo: approve write and shell tools without prompting
 
+	// AllowToolCreate is --allow-tool-create (§13, §19.7): the deliberate,
+	// separate escape hatch that lets `tool_create` appear in headless
+	// mode's registry even though headless has no reviewer channel to
+	// resolve gate 2 against. --yolo does NOT imply this -- granting
+	// self-evolution must be its own explicit flag a human typed knowingly
+	// into a specific script, never a side effect of "stop asking me so
+	// much". A `tool_create` call that reaches gate 2 with this flag set
+	// still has no reviewer (permissions.New's third argument stays nil in
+	// Headless, matching every existing headless call), so it fails with
+	// permissions.ErrDenied at call time rather than ever silently
+	// succeeding unattended -- the same "no human, no self-extension" rule
+	// docs/PLAN.md §19.7 states for `serve`, just surfaced as a normal
+	// tool-call error instead of the tool being entirely absent from the
+	// catalogue. What this flag actually buys a script: the model can see
+	// tool_create exists and *propose* it, and a human reviewing that
+	// script's transcript afterward can see the proposal was made and
+	// denied -- visibility, not unattended approval.
+	AllowToolCreate bool
+
 	// ConfigPath points at a different config.toml (--config).
 	ConfigPath string
 
