@@ -289,6 +289,160 @@ func TestWithDeclarativeSurfacesDiscoveryWarn(t *testing.T) {
 	}
 }
 
+// TestWithMetaToolsEmptyDirBehavesLikeWithDeclarative pins that an unset
+// Dir (the zero value, matching every install that has not configured a
+// layer-2 tools directory) yields exactly the native seven with none of
+// §19.5's five meta-tools added -- WithMetaTools' own doc comment's "no Dir
+// means nothing to act on yet" contract, mirrored from DeclarativeTools'
+// identical "dir == \"\" is a no-op" rule.
+func TestWithMetaToolsEmptyDirBehavesLikeWithDeclarative(t *testing.T) {
+	reg, warn := WithMetaTools(MetaToolsOptions{EvolveMode: "suggest", HasTTY: true})
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	if len(reg.Tools()) != 7 {
+		t.Errorf("got %d tools, want 7 (native only, no Dir configured)", len(reg.Tools()))
+	}
+	for _, name := range []string{"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_delete"} {
+		if _, ok := reg.Lookup(name); ok {
+			t.Errorf("Lookup(%q) found a meta-tool with no Dir configured", name)
+		}
+	}
+}
+
+// TestWithMetaToolsDirSetAddsFourAlwaysAvailableMetaTools proves
+// tool_list/tool_probe/tool_edit/tool_delete are added as soon as Dir is
+// set, with no further gate -- EvolveMode "off" and HasTTY false here on
+// purpose, to isolate that these four do not depend on either.
+func TestWithMetaToolsDirSetAddsFourAlwaysAvailableMetaTools(t *testing.T) {
+	dir := t.TempDir()
+	reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "off", HasTTY: false})
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	for _, name := range []string{"tool_list", "tool_probe", "tool_edit", "tool_delete"} {
+		if _, ok := reg.Lookup(name); !ok {
+			t.Errorf("Lookup(%q) found nothing with Dir configured", name)
+		}
+	}
+	if _, ok := reg.Lookup("tool_create"); ok {
+		t.Error("tool_create must not be present when EvolveMode is \"off\"")
+	}
+	// 7 native + 4 meta-tools, tool_create withheld.
+	if got := len(reg.Tools()); got != 11 {
+		t.Errorf("got %d tools, want 11", got)
+	}
+}
+
+// TestWithMetaToolsModeOffOmitsToolCreateEntirely is §19.7's own table,
+// quoted verbatim in MetaToolsOptions' doc comment: "off" means
+// "tool_create is absent from the registry", checked here with an
+// otherwise-permissive HasTTY=true so the omission can only be Mode's
+// doing, not the TTY rule's.
+func TestWithMetaToolsModeOffOmitsToolCreateEntirely(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "off", HasTTY: true})
+	if _, ok := reg.Lookup("tool_create"); ok {
+		t.Error("tool_create must be absent from the registry when EvolveMode is \"off\", even with a TTY present")
+	}
+}
+
+// TestWithMetaToolsNoTTYOmitsToolCreateEntirely is §19.6's own rule, quoted
+// verbatim in docs/PLAN.md §19.7: "With no TTY, tool_create is denied. Full
+// stop." Checked here with an otherwise-permissive EvolveMode so the
+// omission can only be the TTY rule's doing, not Mode's.
+func TestWithMetaToolsNoTTYOmitsToolCreateEntirely(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: false})
+	if _, ok := reg.Lookup("tool_create"); ok {
+		t.Error("tool_create must be absent from the registry with no TTY and AllowWithoutTTY unset")
+	}
+}
+
+// TestWithMetaToolsAllowWithoutTTYSubstitutesForHasTTY proves
+// AllowWithoutTTY (the future --allow-tool-create flag's config-level
+// stand-in, per its own doc comment) grants the identical outcome HasTTY
+// would, for a caller that has deliberately opted in.
+func TestWithMetaToolsAllowWithoutTTYSubstitutesForHasTTY(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: false, AllowWithoutTTY: true})
+	if _, ok := reg.Lookup("tool_create"); !ok {
+		t.Error("tool_create should be present when AllowWithoutTTY is true, even with no TTY")
+	}
+}
+
+// TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate is the positive
+// case every other test in this group isolates a single failing condition
+// against: both §19.7's Mode gate and §19.6's TTY gate satisfied together
+// add all five meta-tools, in the fixed order WithMetaTools' own doc
+// comment states (list, probe, create, edit, delete).
+func TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate(t *testing.T) {
+	dir := t.TempDir()
+	reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: true})
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	wantOrder := []string{
+		"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch",
+		"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_delete",
+	}
+	got := reg.Tools()
+	if len(got) != len(wantOrder) {
+		t.Fatalf("got %d tools, want %d: %+v", len(got), len(wantOrder), got)
+	}
+	for i, name := range wantOrder {
+		if got[i].Name() != name {
+			t.Errorf("position %d: got %q, want %q", i, got[i].Name(), name)
+		}
+	}
+}
+
+// TestWithMetaToolsOnRequestAndAutoBehaveLikeSuggest proves every Mode
+// value other than "off" (including one MetaToolsOptions.EvolveMode's own
+// doc comment names explicitly, "on_request"/"auto", plus an empty string
+// for a never-configured install) still admits tool_create once HasTTY is
+// satisfied -- only "off" has a registry-shape consequence; the rest is a
+// civility question for the agent's own judgement, not this function's.
+func TestWithMetaToolsOnRequestAndAutoBehaveLikeSuggest(t *testing.T) {
+	for _, mode := range []string{"on_request", "auto", "", "SUGGEST"} {
+		dir := t.TempDir()
+		reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: mode, HasTTY: true})
+		if _, ok := reg.Lookup("tool_create"); !ok {
+			t.Errorf("EvolveMode=%q: tool_create should be present", mode)
+		}
+	}
+}
+
+// TestWithMetaToolsDeclarativeToolStillDiscovered proves WithMetaTools does
+// not drop WithDeclarative's own job -- a real tool.toml under Dir must
+// still reach the registry alongside the meta-tools, in native-then-
+// declarative-then-meta order (WithDeclarative's own contract, extended).
+func TestWithMetaToolsDeclarativeToolStillDiscovered(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte("name = \"greet\"\ndescription = \"say hello\"\n\n[request]\nmethod = \"GET\"\nurl = \"https://example.com/greet\"\n")
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: true})
+	if warn != "" {
+		t.Fatalf("unexpected warn: %q", warn)
+	}
+	for _, name := range []string{"greet", "tool_list", "tool_create", "tool_delete"} {
+		if _, ok := reg.Lookup(name); !ok {
+			t.Errorf("Lookup(%q) found nothing", name)
+		}
+	}
+	// 7 native + 1 declarative + 5 meta-tools.
+	if got := len(reg.Tools()); got != 13 {
+		t.Errorf("got %d tools, want 13", got)
+	}
+}
+
 // fakeNamedTool is a minimal Tool double for registry_test.go: enough to
 // exercise Registry's lookup/dispatch logic without depending on the real
 // six tools' own argument shapes or side effects.

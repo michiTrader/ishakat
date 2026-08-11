@@ -29,26 +29,47 @@ import (
 )
 
 // buildAgentOptions translates config.Tools into engine.AgentOptions,
-// binding tools.WithDeclarative — layer 1's seven native tools (the six from
-// Step 15 plus fetch from Step 19) plus every layer-2 declarative tool
-// (rung 1, Step 20) found under cfgTools.Dir — as the catalogue and runner.
-// fetch's egress allowlist comes straight from cfgTools.Egress, the same
-// config.Tools already threaded through this function; no new parameter is
-// needed, and the same allowlist governs every declarative tool's own
-// [origin] check (see tools.DeclarativeTools' doc comment). A discovery
-// problem (an unreadable directory, or the first unparseable tool.toml)
-// does not stop the turn — the second return value is a warn string the
-// caller surfaces the same way SystemPrompt's own skills.Discover warning
-// already does, never a fatal error, matching DiscoverDeclarative's own
-// "an install with no tools of its own yet is not a warning" contract.
-// cfgTools.MaxCallsPerTurn/MaxOutputBytes pass through as-is: when they are
-// the zero value (unset in config), AgentOptions' own doc comment says zero
-// means its built-in default, and because defaults.toml's own values (25,
-// 32768) equal RunAgentTurn's built-in defaults exactly, a stock
-// configuration and a caller that skipped config entirely (a zero
-// config.Tools) both mean the same thing.
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost) (engine.AgentOptions, string) {
-	reg, warn := tools.WithDeclarative(cfgTools.Egress.Allow, cfgTools.Egress.AllowAll, cfgTools.Dir)
+// binding tools.WithMetaTools — layer 1's seven native tools (the six from
+// Step 15 plus fetch from Step 19), every layer-2 declarative tool (rung 1,
+// Step 20) found under cfgTools.Dir, and whichever of §19.5's five
+// meta-tools cfgTools.Dir/Evolve/hasTTY currently allow (Step 21) — as the
+// catalogue and runner. fetch's egress allowlist comes straight from
+// cfgTools.Egress, the same config.Tools already threaded through this
+// function; no new parameter is needed, and the same allowlist governs
+// every declarative tool's own [origin] check (see
+// tools.DeclarativeTools' doc comment) and tool_probe/tool_create/tool_edit's
+// identical check on a manifest they would write or invoke (§19.8
+// mitigation 4). A discovery problem (an unreadable directory, or the
+// first unparseable tool.toml) does not stop the turn — the second return
+// value is a warn string the caller surfaces the same way SystemPrompt's
+// own skills.Discover warning already does, never a fatal error, matching
+// DiscoverDeclarative's own "an install with no tools of its own yet is
+// not a warning" contract. cfgTools.MaxCallsPerTurn/MaxOutputBytes pass
+// through as-is: when they are the zero value (unset in config),
+// AgentOptions' own doc comment says zero means its built-in default, and
+// because defaults.toml's own values (25, 32768) equal RunAgentTurn's
+// built-in defaults exactly, a stock configuration and a caller that
+// skipped config entirely (a zero config.Tools) both mean the same thing.
+//
+// hasTTY is §19.6's own gate on tool_create specifically (docs/PLAN.md
+// §19.7, quoted verbatim in tools.MetaToolsOptions' own doc comment: "With
+// no TTY, tool_create is denied. Full stop.") — the caller passes what it
+// already knows (app.go's own term.IsTerminal(os.Stdout.Fd()) for the TUI;
+// always false from runAgentTurnHeadless below, since headless mode has no
+// reviewer channel for gate 2 to resolve against regardless of what fd
+// term.IsTerminal would report for a script piping through a real
+// terminal's stdin/stdout — see runAgentTurnHeadless's own comment on why
+// that is deliberate, not merely unwired yet).
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, hasTTY bool) (engine.AgentOptions, string) {
+	reg, warn := tools.WithMetaTools(tools.MetaToolsOptions{
+		Dir:             cfgTools.Dir,
+		Allow:           cfgTools.Egress.Allow,
+		AllowAll:        cfgTools.Egress.AllowAll,
+		EvolveMode:      cfgTools.Evolve.Mode,
+		AllowWithoutTTY: cfgTools.Evolve.AllowWithoutTTY,
+		HasTTY:          hasTTY,
+		Thresholds:      evolveThresholds(cfgTools, cfgTools.Evolve),
+	})
 	if guard != nil {
 		// Every tool beyond the native seven (declarative tools chief
 		// among them) gets its real Tool.Danger()-inferred Tier registered
@@ -110,6 +131,26 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 // its own to handle either path — except skipping the second, redundant
 // persistence of that same summary message, which the caller must do since
 // this function already persisted the loop's real messages individually.
+//
+// buildAgentOptions is always called with hasTTY = false here, regardless
+// of whether opts.StdinTTY/StdoutTTY (Headless's own test seams) happen to
+// report a real terminal on the other end of a pipe: §19.6's own rule is
+// about a human being present to resolve gate 2's approval dialog, and
+// headless mode has no reviewer at all wired to Guard for a High-tier
+// request (see headless.go's own `permissions.New(cfg.Tools.Permissions,
+// opts.Yolo, nil)` — the third argument, reviewer, is always nil on this
+// path) — a `tool_create` call that reached gate 2 here would hit
+// Guard.Authorize's own "g.reviewer == nil" branch and simply fail with
+// ErrDenied, which is a worse experience than tool_create never appearing
+// in the catalogue this turn was given to begin with (§19.7's own "absent
+// from the registry" phrasing for Mode == "off", applied here for the
+// identical no-human-to-ask reason rather than a Mode value). A future
+// --allow-tool-create flag (§19.7, still unimplemented — see
+// tools.MetaToolsOptions.AllowWithoutTTY's own doc comment) is the
+// documented, deliberate escape hatch for a script that wants this path
+// anyway; until it exists, `ishakat -p`, `ishakat serve`, cron and CI can
+// never see tool_create, matching docs/PLAN.md §19.7's own instruction
+// verbatim: "With no TTY, tool_create is denied. Full stop."
 func runAgentTurnHeadless(
 	ctx context.Context,
 	prov provider.Provider,
@@ -126,7 +167,7 @@ func runAgentTurnHeadless(
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, false)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}

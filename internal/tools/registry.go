@@ -11,6 +11,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/MichiTrader/ishakat/internal/evolve"
 )
 
 // Registry is an ordered, name-indexed set of Tools. Ordered because the
@@ -111,6 +114,134 @@ func WithDeclarative(egressAllow []string, egressAllowAll bool, declarativeDir s
 	if len(extra) == 0 {
 		return reg, warn
 	}
+	return NewRegistry(append(reg.Tools(), extra...)...), warn
+}
+
+// MetaToolsOptions decides which of §19.5's five meta-tools WithMetaTools
+// adds on top of WithDeclarative's own catalogue. The gating logic itself
+// belongs here rather than in internal/app, because "which meta-tools does
+// this install even offer" is a question about the tool layer's own
+// governance (§19.6/§19.7), not about wiring one call site — a future
+// second caller (e.g. a `/tools` TUI surface that lists what could be
+// created) reads the identical decision by calling this function again,
+// rather than re-deriving it.
+type MetaToolsOptions struct {
+	// Dir is the same layer-2 tools directory every meta-tool takes. Empty
+	// means "no tools directory configured" -- tool_list/probe/edit/delete
+	// have nothing to act on yet, so none of the five are added at all
+	// (matching DeclarativeTools' own "dir == \"\" is a no-op" contract):
+	// offering tool_create with no Dir to write into would let gate 1 pass
+	// and then fail on the actual write, which is a worse failure mode
+	// than never offering it.
+	Dir string
+
+	// Allow/AllowAll are the same egress allowlist Core's own Fetch and
+	// DeclarativeTools already take, reused by tool_probe (a probe's own
+	// real HTTP call) and tool_create/tool_edit (checked against the
+	// manifest a write would produce, §19.8 mitigation 4).
+	Allow    []string
+	AllowAll bool
+
+	// EvolveMode is config.Evolve.Mode's raw string ("off" | "on_request" |
+	// "suggest" | "auto"), taken as a plain string rather than an
+	// evolve-package type so this package still never imports
+	// internal/config (see Core's own doc comment on why Fetch's egress
+	// allowlist is unpacked the same way). "off" is the one value with a
+	// registry-shape consequence, spelled out verbatim in §19.7's own
+	// table: "`tool_create` is absent from the registry" -- not merely
+	// refused at call time, absent, so a model reading its own tool list
+	// under `off` sees no hint that self-extension exists at all. Every
+	// other value (including unrecognized ones, and the Go zero value "")
+	// behaves like "on_request" here: gate 1/2/3 and this file's own
+	// TTY rule are still the real gate on whether a call succeeds;
+	// on_request/suggest/auto only differ in whether the agent may
+	// *propose* it unprompted, a civility question §19.7 leaves entirely
+	// to the system prompt and the agent's own judgement, not to whether
+	// tool_create exists to be called.
+	EvolveMode string
+
+	// AllowWithoutTTY is config.Evolve.AllowWithoutTTY -- must stay false
+	// in every real install per that field's own doc comment, flipped only
+	// by a future --allow-tool-create flag a human typed knowingly into a
+	// specific script. Threaded through as a plain bool for the same
+	// import-boundary reason EvolveMode is a string.
+	AllowWithoutTTY bool
+
+	// HasTTY reports whether a human is actually present to authorize
+	// gate 2 for a tool_create call -- §19.6's own rule, quoted in
+	// docs/PLAN.md §19.7 verbatim: "With no TTY, tool_create is denied.
+	// Full stop." The caller (internal/app) is the one place that already
+	// knows this (term.IsTerminal, threaded through headless.go/app.go),
+	// so this field is the same "minimal, purpose-built argument" this
+	// package's whole API already prefers over accepting a config.Config
+	// or reaching for os.Stdout itself.
+	HasTTY bool
+
+	// Thresholds is gate 1's own configuration, passed straight through to
+	// ToolCreate -- see ToolCreate.Thresholds' own doc comment for why a
+	// zero value is still a fully-defined, documented default rather than
+	// a caller error.
+	Thresholds evolve.Thresholds
+}
+
+// WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
+// whichever of §19.5's five meta-tools opts.Dir/EvolveMode/HasTTY currently
+// allow, in the fixed order tool_list, tool_probe, tool_create, tool_edit,
+// tool_delete -- alphabetical by lifecycle stage (list before probe before
+// create before edit before delete), not alphabetical by name, so the
+// system prompt's own tool list reads in the same "what exists, then the
+// three ways to change it, then remove it" order §19.5's own table states
+// them in.
+//
+// tool_list/tool_probe/tool_edit/tool_delete are added whenever opts.Dir is
+// set, with no further gate: all four are read-only or act only on a tool
+// that already exists on disk, the same "acting on what is already there
+// changes nothing new" reasoning tool_list.go's own doc comment states for
+// itself, and tool_probe/tool_edit/tool_delete's own Danger()/Description()
+// doc comments make the identical case for a self-test, a targeted string
+// replacement and a confirmed deletion respectively -- none of the three
+// governance concerns (§19.6's gates, §19.7's Mode dial, §19.8's threat
+// model) exists to guard "may this agent look at or remove a tool a human
+// or an earlier turn already wrote", only "may it acquire a brand new
+// capability", which is tool_create's question alone.
+//
+// tool_create is added only when both of §19.6/§19.7's own conditions hold:
+// opts.EvolveMode != "off" (§19.7's table, verbatim: "off" means
+// "tool_create is absent from the registry", not merely refused), and a
+// human is actually present to authorize gate 2 (opts.HasTTY, or
+// opts.AllowWithoutTTY standing in for the future --allow-tool-create flag
+// this package does not yet parse itself). Failing either condition omits
+// tool_create from the returned Registry entirely -- the same "absent, not
+// merely denied" shape §19.7 states for Mode == "off", extended here to the
+// TTY case for the identical reason: a model that cannot see a tool in its
+// own catalogue cannot be talked into asking for it by anything in its
+// context, where a tool that exists but always errors is still a standing
+// invitation a sufficiently adversarial prompt could keep proposing.
+func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
+	reg, warn := WithDeclarative(opts.Allow, opts.AllowAll, opts.Dir)
+	if strings.TrimSpace(opts.Dir) == "" {
+		return reg, warn
+	}
+
+	extra := []Tool{
+		ToolList{Dir: opts.Dir},
+		ToolProbe{Dir: opts.Dir, Allow: opts.Allow, AllowAll: opts.AllowAll},
+	}
+
+	if !strings.EqualFold(strings.TrimSpace(opts.EvolveMode), "off") && (opts.HasTTY || opts.AllowWithoutTTY) {
+		extra = append(extra, ToolCreate{
+			Dir:        opts.Dir,
+			Allow:      opts.Allow,
+			AllowAll:   opts.AllowAll,
+			Thresholds: opts.Thresholds,
+		})
+	}
+
+	extra = append(extra,
+		ToolEdit{Dir: opts.Dir, Allow: opts.Allow, AllowAll: opts.AllowAll},
+		ToolDelete{Dir: opts.Dir},
+	)
+
 	return NewRegistry(append(reg.Tools(), extra...)...), warn
 }
 
