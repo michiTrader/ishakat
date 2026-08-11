@@ -11,6 +11,26 @@ import (
 	"github.com/MichiTrader/ishakat/internal/evolve"
 )
 
+// writeLedgerFixture writes a usage.jsonl under dir/usage.jsonl whose
+// records, once merged by evolve.Ledger.Observe, will report
+// evolve.CountFor(records, urls[0]) == len(urls) -- i.e. it replays urls in
+// order through a real Ledger exactly as internal/app's
+// ledgerObservingRunner would have, rather than hand-authoring Record.N
+// values that might not agree with shapeKey's own matching rules. Returns
+// the ledger's path for use as ToolCreate.LedgerPath.
+func writeLedgerFixture(t *testing.T, dir string, urls ...string) string {
+	t.Helper()
+	path := filepath.Join(dir, "usage.jsonl")
+	l := &evolve.Ledger{}
+	for _, u := range urls {
+		l.Observe(u, "2026-01-01")
+	}
+	if err := evolve.Save(path, l); err != nil {
+		t.Fatalf("writeLedgerFixture: %v", err)
+	}
+	return path
+}
+
 func TestToolCreateNameDescriptionDanger(t *testing.T) {
 	tc := ToolCreate{}
 	if tc.Name() != "tool_create" {
@@ -506,5 +526,144 @@ func TestParseOrigin(t *testing.T) {
 	}
 	if _, err := parseOrigin("bogus"); err == nil {
 		t.Error("parseOrigin(\"bogus\") should error")
+	}
+}
+
+// TestToolCreateWithLedgerPathUsesRealCountNotModelClaim is this
+// feature's core claim: an origin=agent proposal whose args.Repetitions is
+// far below the threshold gate 1 would otherwise refuse on, but whose
+// LedgerPath-backed real count clears it, must still be allowed --
+// realRepetitions substitutes the verified count in, it does not merely
+// add a second check alongside the model's own claim.
+func TestToolCreateWithLedgerPathUsesRealCountNotModelClaim(t *testing.T) {
+	dir := t.TempDir()
+	url := "http://example.com/greet"
+	ledgerPath := writeLedgerFixture(t, t.TempDir(), url, url, url)
+
+	tc := ToolCreate{Dir: dir, AllowAll: true, LedgerPath: ledgerPath}
+	args := baseArgs("example.com")
+	args.Origin = "agent"
+	args.URL = url
+	args.Repetitions = 0 // the model's own (unverified, and here wrong) claim
+
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected creation to succeed using the ledger's real count, got: %s", res.Text)
+	}
+}
+
+// TestToolCreateWithLedgerPathIgnoresAnInflatedModelClaim is the
+// complementary case: a model claiming many repetitions it cannot back up
+// in the ledger must still be refused -- the ledger overrides the claim in
+// both directions, not just upward.
+func TestToolCreateWithLedgerPathIgnoresAnInflatedModelClaim(t *testing.T) {
+	dir := t.TempDir()
+	url := "http://example.com/greet"
+	// The ledger only ever saw a *different* URL -- CountFor(records, url)
+	// for this one is 0, regardless of args.Repetitions below.
+	ledgerPath := writeLedgerFixture(t, t.TempDir(), "http://example.com/other")
+
+	tc := ToolCreate{Dir: dir, AllowAll: true, LedgerPath: ledgerPath}
+	args := baseArgs("example.com")
+	args.Origin = "agent"
+	args.URL = url
+	args.Repetitions = 999 // inflated claim the ledger does not support
+
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected gate 1 to refuse an inflated repetitions claim the ledger does not support")
+	}
+}
+
+// TestToolCreateWithoutLedgerPathTrustsModelClaimUnchanged is the backward
+// compatibility case: a zero-value LedgerPath (every caller before this
+// field existed, and any install with Evolve.Mode == "off") must behave
+// exactly as before -- args.Repetitions is used as-is, unverified.
+func TestToolCreateWithoutLedgerPathTrustsModelClaimUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	tc := ToolCreate{Dir: dir, AllowAll: true} // LedgerPath left zero-value
+	args := baseArgs("example.com")
+	args.Origin = "agent"
+	args.Repetitions = 5 // whatever gate 1's default MinRepeats requires
+
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected the model's own claim to be trusted with no LedgerPath configured, got: %s", res.Text)
+	}
+}
+
+// TestToolCreateWithLedgerPathDoesNotAffectUserForcedOrigin confirms
+// realRepetitions leaves non-agent origins alone: OriginUserForced skips
+// the Repetition criterion entirely (gate1.go's own doc comment), so a
+// LedgerPath that would otherwise refuse an agent-origin proposal must not
+// leak into refusing a user_forced one.
+func TestToolCreateWithLedgerPathDoesNotAffectUserForcedOrigin(t *testing.T) {
+	dir := t.TempDir()
+	url := "http://example.com/greet"
+	// An empty ledger: CountFor would answer 0 for anything.
+	ledgerPath := writeLedgerFixture(t, t.TempDir())
+
+	tc := ToolCreate{Dir: dir, AllowAll: true, LedgerPath: ledgerPath}
+	args := baseArgs("example.com")
+	args.URL = url // Origin stays "user_forced" per baseArgs
+
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected user_forced to bypass the Repetition criterion regardless of LedgerPath, got: %s", res.Text)
+	}
+}
+
+// TestRealRepetitionsUnreadableLedgerFallsBackToZeroNotModelClaim and
+// TestRealRepetitionsGenuineLoadErrorFallsBackToZeroNotModelClaim both
+// exercise realRepetitions directly (rather than through Run) since a
+// LoadLedger error is otherwise hard to trigger deterministically through
+// the full Run path -- see ToolCreate.LedgerPath's own doc comment on why
+// "fails to load" falls back to 0, not args.Repetitions.
+func TestRealRepetitionsUnreadableLedgerFallsBackToZeroNotModelClaim(t *testing.T) {
+	dir := t.TempDir()
+	// A directory where a file is expected: os.Open will fail with
+	// something other than os.IsNotExist.
+	ledgerPath := filepath.Join(dir, "usage-is-a-dir.jsonl")
+	if err := os.MkdirAll(ledgerPath, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tc := ToolCreate{LedgerPath: ledgerPath}
+	args := baseArgs("example.com")
+	args.Repetitions = 42 // must NOT be returned on a genuine load error
+
+	got := tc.realRepetitions(evolve.OriginAgent, args)
+	if got != 0 {
+		t.Errorf("realRepetitions() = %d, want 0 (not the model's claim of %d) on a genuine ledger load error", got, args.Repetitions)
+	}
+}
+
+func TestRealRepetitionsGenuineLoadErrorFallsBackToZeroNotModelClaim(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "sub", "usage.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ledgerPath), 0o000); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(filepath.Dir(ledgerPath), 0o755) })
+
+	tc := ToolCreate{LedgerPath: filepath.Join(ledgerPath, "unreachable")}
+	args := baseArgs("example.com")
+	args.Repetitions = 7
+
+	got := tc.realRepetitions(evolve.OriginAgent, args)
+	if got != 0 {
+		t.Errorf("realRepetitions() = %d, want 0 on a genuine ledger load error", got)
 	}
 }

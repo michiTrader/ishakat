@@ -56,6 +56,7 @@ FLAGS
       --no-save          do not write the session file
       --resume           reopen the last saved conversation (interactive mode only)
       --yolo             approve file writes and shell commands without prompts
+      --allow-tool-create  let tool_create appear over headless (§19.7); does NOT imply --yolo
   -q, --quiet            no warnings on stderr
       --config <path>    use a different config.toml
   -h, --help             this help text
@@ -122,22 +123,23 @@ func main() {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
 	var (
-		prompt     = fs.String("p", "", "question to answer without opening the interface")
-		promptLong = fs.String("prompt", "", "same as -p")
-		model      = fs.String("m", "", "model to use")
-		modelLong  = fs.String("model", "", "same as -m")
-		system     = fs.String("system", "", "system prompt for this turn")
-		jsonOut    = fs.Bool("json", false, "one JSON event per line")
-		stream     = fs.Bool("stream", false, "force streaming")
-		noStream   = fs.Bool("no-stream", false, "request the full response at once")
-		noSave     = fs.Bool("no-save", false, "do not write the session file")
-		resume     = fs.Bool("resume", false, "reopen the last saved conversation (interactive mode only)")
-		quiet      = fs.Bool("q", false, "no warnings on stderr")
-		quietLong  = fs.Bool("quiet", false, "same as -q")
-		yolo       = fs.Bool("yolo", false, "approve file writes and shell commands without prompts")
-		cfgPath    = fs.String("config", "", "alternate config.toml path")
-		showVer    = fs.Bool("v", false, "version")
-		showVerL   = fs.Bool("version", false, "version")
+		prompt          = fs.String("p", "", "question to answer without opening the interface")
+		promptLong      = fs.String("prompt", "", "same as -p")
+		model           = fs.String("m", "", "model to use")
+		modelLong       = fs.String("model", "", "same as -m")
+		system          = fs.String("system", "", "system prompt for this turn")
+		jsonOut         = fs.Bool("json", false, "one JSON event per line")
+		stream          = fs.Bool("stream", false, "force streaming")
+		noStream        = fs.Bool("no-stream", false, "request the full response at once")
+		noSave          = fs.Bool("no-save", false, "do not write the session file")
+		resume          = fs.Bool("resume", false, "reopen the last saved conversation (interactive mode only)")
+		quiet           = fs.Bool("q", false, "no warnings on stderr")
+		quietLong       = fs.Bool("quiet", false, "same as -q")
+		yolo            = fs.Bool("yolo", false, "approve file writes and shell commands without prompts")
+		allowToolCreate = fs.Bool("allow-tool-create", false, "let tool_create appear over headless (§19.7); does NOT imply --yolo")
+		cfgPath         = fs.String("config", "", "alternate config.toml path")
+		showVer         = fs.Bool("v", false, "version")
+		showVerL        = fs.Bool("version", false, "version")
 	)
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -184,16 +186,17 @@ func main() {
 
 	if headless {
 		os.Exit(app.Headless(app.HeadlessOptions{
-			Version:    version,
-			Prompt:     p,
-			Model:      firstNonEmpty(*model, *modelLong),
-			System:     *system,
-			JSON:       *jsonOut,
-			Stream:     streamPtr,
-			Save:       savePtr,
-			Quiet:      *quiet || *quietLong,
-			Yolo:       *yolo,
-			ConfigPath: *cfgPath,
+			Version:         version,
+			Prompt:          p,
+			Model:           firstNonEmpty(*model, *modelLong),
+			System:          *system,
+			JSON:            *jsonOut,
+			Stream:          streamPtr,
+			Save:            savePtr,
+			Quiet:           *quiet || *quietLong,
+			Yolo:            *yolo,
+			AllowToolCreate: *allowToolCreate,
+			ConfigPath:      *cfgPath,
 		}))
 	}
 

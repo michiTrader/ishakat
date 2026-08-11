@@ -162,9 +162,14 @@ type MetaToolsOptions struct {
 
 	// AllowWithoutTTY is config.Evolve.AllowWithoutTTY -- must stay false
 	// in every real install per that field's own doc comment, flipped only
-	// by a future --allow-tool-create flag a human typed knowingly into a
-	// specific script. Threaded through as a plain bool for the same
-	// import-boundary reason EvolveMode is a string.
+	// by a human writing allow_without_tty = true into config.toml itself
+	// (a persistent, install-wide override). The equivalent per-invocation
+	// escape hatch is --allow-tool-create (cmd/ishakat/main.go), which
+	// internal/app.buildAgentOptions instead feeds straight into HasTTY
+	// below -- see runAgentTurnHeadless's own doc comment for why the CLI
+	// flag substitutes for HasTTY rather than for this field. Threaded
+	// through as a plain bool for the same import-boundary reason
+	// EvolveMode is a string.
 	AllowWithoutTTY bool
 
 	// HasTTY reports whether a human is actually present to authorize
@@ -182,6 +187,12 @@ type MetaToolsOptions struct {
 	// zero value is still a fully-defined, documented default rather than
 	// a caller error.
 	Thresholds evolve.Thresholds
+
+	// LedgerPath is passed straight through to ToolCreate.LedgerPath --
+	// see that field's own doc comment. Empty (the zero value) means "no
+	// ledger configured", matching every caller's behavior before this
+	// field existed.
+	LedgerPath string
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
@@ -209,9 +220,12 @@ type MetaToolsOptions struct {
 // opts.EvolveMode != "off" (§19.7's table, verbatim: "off" means
 // "tool_create is absent from the registry", not merely refused), and a
 // human is actually present to authorize gate 2 (opts.HasTTY, or
-// opts.AllowWithoutTTY standing in for the future --allow-tool-create flag
-// this package does not yet parse itself). Failing either condition omits
-// tool_create from the returned Registry entirely -- the same "absent, not
+// opts.AllowWithoutTTY -- config.toml's persistent override -- or a caller
+// passing --allow-tool-create's value as opts.HasTTY itself, which is what
+// internal/app.buildAgentOptions/runAgentTurnHeadless actually do; this
+// package stays agnostic to which of the two the caller used). Failing
+// either condition omits tool_create from the returned Registry entirely --
+// the same "absent, not
 // merely denied" shape §19.7 states for Mode == "off", extended here to the
 // TTY case for the identical reason: a model that cannot see a tool in its
 // own catalogue cannot be talked into asking for it by anything in its
@@ -234,6 +248,7 @@ func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
 			Allow:      opts.Allow,
 			AllowAll:   opts.AllowAll,
 			Thresholds: opts.Thresholds,
+			LedgerPath: opts.LedgerPath,
 		})
 	}
 
