@@ -207,3 +207,51 @@ func TestSortedByCountDoesNotMutateInput(t *testing.T) {
 		t.Fatalf("SortedByCount must not mutate its input, got %+v", records)
 	}
 }
+
+// TestObserveMergesThreeBareURLObservationsPastTheSecond is a regression
+// test for a shapeKey bug that affected exactly the shape internal/app's
+// new ledgerObservingRunner feeds this package for `fetch` calls: a bare
+// URL with no wrapping command, so tokens[0] IS the whole pattern (unlike
+// "curl -s <url>", where the stable "curl" token never gets wildcarded and
+// this bug never triggers). Before the fix, a second observation's
+// differing query string wildcarded tokens[0] into "<prefix>*"
+// (mergeToken), but shapeKey only ever stripped text after a literal '?',
+// never a trailing '*' left by that merge -- so the *third* observation's
+// freshly-computed key ("<prefix>\x00N") no longer matched the stored
+// record's own key ("<prefix>*\x00N") and silently started a second,
+// unrelated record at N=1 instead of accumulating to N=3.
+func TestObserveMergesThreeBareURLObservationsPastTheSecond(t *testing.T) {
+	l := &Ledger{}
+	l.Observe("https://api.bybit.com/v5/market/tickers?symbol=BTCUSDT", "2026-08-01")
+	l.Observe("https://api.bybit.com/v5/market/tickers?symbol=ETHUSDT", "2026-08-02")
+	pattern, n := l.Observe("https://api.bybit.com/v5/market/tickers?symbol=SOLUSDT", "2026-08-03")
+
+	if len(l.Records) != 1 {
+		t.Fatalf("expected exactly one merged record after three observations of the same shape, got %d: %+v", len(l.Records), l.Records)
+	}
+	if n != 3 {
+		t.Fatalf("expected count 3 after three observations, got %d", n)
+	}
+	want := "https://api.bybit.com/v5/market/tickers*"
+	if pattern != want {
+		t.Fatalf("pattern = %q, want %q", pattern, want)
+	}
+}
+
+// TestCountForMatchesAThriceMergedBareURLPattern is CountFor's own half of
+// the same regression: gate 1's repetition evidence (Candidate.Repetitions)
+// is read through CountFor, not Observe's own return value, so a caller
+// asking "how many times has a URL shaped like this one repeated" must see
+// the same count Observe itself already converged on, using the identical
+// shapeKey both functions share.
+func TestCountForMatchesAThriceMergedBareURLPattern(t *testing.T) {
+	l := &Ledger{}
+	l.Observe("https://api.bybit.com/v5/market/tickers?symbol=BTCUSDT", "2026-08-01")
+	l.Observe("https://api.bybit.com/v5/market/tickers?symbol=ETHUSDT", "2026-08-02")
+	l.Observe("https://api.bybit.com/v5/market/tickers?symbol=SOLUSDT", "2026-08-03")
+
+	got := CountFor(l.Records, "https://api.bybit.com/v5/market/tickers?symbol=XRPUSDT")
+	if got != 3 {
+		t.Fatalf("CountFor = %d, want 3", got)
+	}
+}

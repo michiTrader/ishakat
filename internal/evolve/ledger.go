@@ -246,6 +246,20 @@ func tokenize(s string) []string {
 // of improvement real usage data should drive, the same "illustrative, not
 // exhaustive" stance declarative.go's financeHosts list already takes for
 // a different heuristic in this same step.
+//
+// The trailing TrimSuffix(first, "*") matters for a single-token pattern
+// (a bare fetch URL with no wrapping command, e.g. tool.Fetch's own
+// args.URL, as opposed to "curl -s <url>" where tokens[0] is the stable
+// "curl" and this never triggers): once a second observation's differing
+// query string has already merged tokens[0] into "<prefix>*"
+// (mergeToken's own doc comment), this function is called again on that
+// same merged Pattern to compute the record's own key on every subsequent
+// Observe/CountFor call. Without stripping the trailing "*" here too, that
+// third call's key ("<prefix>*\x00N") no longer equals a fresh
+// observation's key ("<prefix>\x00N", stripped only at '?') and the match
+// silently stops -- the third and every later observation of the same
+// pattern would start a brand new record at N=1 instead of accumulating,
+// exactly the failure this trims away.
 func shapeKey(tokens []string) string {
 	if len(tokens) == 0 {
 		return ""
@@ -254,6 +268,7 @@ func shapeKey(tokens []string) string {
 	if idx := strings.IndexByte(first, '?'); idx >= 0 {
 		first = first[:idx]
 	}
+	first = strings.TrimSuffix(first, "*")
 	return first + "\x00" + strconv.Itoa(len(tokens))
 }
 

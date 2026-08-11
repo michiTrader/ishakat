@@ -125,6 +125,44 @@ func TestLedgerObservingRunnerAccumulatesAcrossCalls(t *testing.T) {
 	}
 }
 
+func TestLedgerObservingRunnerAccumulatesAcrossThreeBareFetchURLs(t *testing.T) {
+	// Regression coverage for the shapeKey bug fixed in
+	// internal/evolve/ledger.go (see ledger_test.go's own
+	// TestObserveMergesThreeBareURLObservationsPastTheSecond): a bare
+	// fetch URL, unlike a bash command wrapping one, has no stable first
+	// token of its own, so this is the one call shape that actually
+	// exercised the bug this wiring's own third call would have hit in
+	// production.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "usage.jsonl")
+	run := ledgerObservingRunner(fakeRunner("ok", false), path, fixedNow("2026-08-11"))
+
+	for _, url := range []string{
+		`{"url":"https://api.bybit.com/v5/market/tickers?symbol=BTCUSDT"}`,
+		`{"url":"https://api.bybit.com/v5/market/tickers?symbol=ETHUSDT"}`,
+		`{"url":"https://api.bybit.com/v5/market/tickers?symbol=SOLUSDT"}`,
+	} {
+		if _, err := run(context.Background(), "fetch", json.RawMessage(url)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	l, err := evolve.LoadLedger(path)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if len(l.Records) != 1 {
+		t.Fatalf("got %d records, want 1 (all three should merge into one shape)", len(l.Records))
+	}
+	if l.Records[0].N != 3 {
+		t.Errorf("N = %d, want 3", l.Records[0].N)
+	}
+	want := "https://api.bybit.com/v5/market/tickers*"
+	if l.Records[0].Pattern != want {
+		t.Errorf("pattern = %q, want %q", l.Records[0].Pattern, want)
+	}
+}
+
 func TestLedgerObservingRunnerRecordsEvenOnToolError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "usage.jsonl")
