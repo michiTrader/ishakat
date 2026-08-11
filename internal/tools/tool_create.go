@@ -387,20 +387,8 @@ func (t ToolCreate) Run(ctx context.Context, rawArgs json.RawMessage) (Result, e
 
 	m := buildManifest(args)
 
-	parsedHost, hostErr := requestHost(m.Request.URL)
-	if hostErr != nil {
-		return ErrorResult(fmt.Sprintf("could not parse url %q: %v", m.Request.URL, hostErr)), nil
-	}
-	if !t.AllowAll && !hostAllowed(parsedHost, t.Allow) {
-		return ErrorResult(fmt.Sprintf(
-			"refused to create %q: host %q is not on the egress allowlist. A new host is its own separate decision (see [tools.egress].allow in config.toml) -- this is not a per-call approval.",
-			args.Name, parsedHost)), nil
-	}
-
-	if touchesCredentialPath(m) {
-		return ErrorResult(fmt.Sprintf(
-			"refused to create %q: its request touches a credential-shaped path (.ssh, .aws, .gnupg, id_rsa, .env, config.toml). This is a hard block, not a confirmation -- some shapes are simply not created.",
-			args.Name)), nil
+	if res, blocked := checkManifestSafety(m, t.Allow, t.AllowAll, "create"); blocked {
+		return res, nil
 	}
 
 	body, err := toml.Marshal(m)
@@ -453,6 +441,34 @@ func requestHost(rawURL string) (string, error) {
 		return "", err
 	}
 	return parsed.Hostname(), nil
+}
+
+// checkManifestSafety runs the two §19.8 structural checks a manifest must
+// pass before it may be written to disk, shared verbatim between
+// tool_create (a brand new manifest) and tool_edit (an edited one) --
+// §19.8's own mitigations 4 and 5 apply to *any* manifest content ending
+// up on disk, not only to the moment of first creation, since an edit is
+// just as capable of introducing an un-allowlisted host or a credential-
+// shaped path as a creation is. verb names the caller's own action
+// ("create"/"edit") for the returned message's wording only. blocked=false
+// means the manifest passed both checks and the (zero-value) Result should
+// be ignored.
+func checkManifestSafety(m Manifest, allow []string, allowAll bool, verb string) (Result, bool) {
+	parsedHost, err := requestHost(m.Request.URL)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("could not parse url %q: %v", m.Request.URL, err)), true
+	}
+	if !allowAll && !hostAllowed(parsedHost, allow) {
+		return ErrorResult(fmt.Sprintf(
+			"refused to %s %q: host %q is not on the egress allowlist. A new host is its own separate decision (see [tools.egress].allow in config.toml) -- this is not a per-call approval.",
+			verb, m.Name, parsedHost)), true
+	}
+	if touchesCredentialPath(m) {
+		return ErrorResult(fmt.Sprintf(
+			"refused to %s %q: its request touches a credential-shaped path (.ssh, .aws, .gnupg, id_rsa, .env, config.toml). This is a hard block, not a confirmation -- some shapes are simply not allowed.",
+			verb, m.Name)), true
+	}
+	return Result{}, false
 }
 
 // buildManifest translates toolCreateArgs into a Manifest ready for
