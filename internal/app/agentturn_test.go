@@ -343,6 +343,93 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	}
 }
 
+// TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue pins
+// --allow-tool-create's whole effect end to end: runAgentTurnHeadless's
+// allowToolCreate parameter must reach buildAgentOptions as its hasTTY
+// argument, the same substitution tools.WithMetaTools documents for
+// AllowWithoutTTY, so tool_create appears in the tools array actually sent
+// to the provider even though this call has no terminal at all. It does not
+// assert anything about gate 2 (permissions.Guard's reviewer is nil in
+// every headless call, on purpose — see HeadlessOptions.AllowToolCreate's
+// own doc comment): the flag's whole contract is visibility, not unattended
+// approval, and this test's job is only to prove the catalogue actually
+// changes when the flag is set.
+func TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue(t *testing.T) {
+	toolsDir := t.TempDir()
+
+	var sawToolCreate atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if arr, _ := body["tools"].([]any); arr != nil {
+			for _, raw := range arr {
+				def, _ := raw.(map[string]any)
+				fn, _ := def["function"].(map[string]any)
+				if name, _ := fn["name"].(string); name == "tool_create" {
+					sawToolCreate.Store(true)
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte(fake.SSEChunk(`{"choices":[{"index":0,"delta":{"content":"ok"}}]}`)))
+		_, _ = w.Write([]byte(fake.SSEChunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)))
+		_, _ = w.Write([]byte(fake.SSEDone()))
+		if fl != nil {
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	cfg := cfgFor(t, srv.URL)
+	cfgTools := config.Tools{
+		Enabled:         true,
+		Dir:             toolsDir,
+		MaxCallsPerTurn: 5,
+		MaxOutputBytes:  4096,
+		Evolve:          config.Evolve{Mode: "suggest"},
+	}
+
+	pc, ok := FindProvider(cfg, "omniroute")
+	if !ok {
+		t.Fatal("test provider not found in cfgFor's own configuration")
+	}
+	prov, err := NewProvider(cfg, pc, "0.0.0-test")
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	guard := permissions.New(cfgTools.Permissions, false, nil)
+	var outb, errb strings.Builder
+	s := &textSink{out: &outb, err: &errb}
+	req := provider.Request{Model: "gpt-test", Stream: true}
+	user := convo.User("hi")
+	hist := &convo.Conversation{}
+
+	if _, turnErr := runAgentTurnHeadless(
+		context.Background(), prov, cfgTools, guard, nil,
+		2, req, user, s, nil, nil, hist, false,
+	); turnErr != nil {
+		t.Fatalf("runAgentTurnHeadless (allowToolCreate=false): %v", turnErr)
+	}
+	if sawToolCreate.Load() {
+		t.Error("tool_create must be absent from the wire with allowToolCreate=false, matching §19.7's \"With no TTY, tool_create is denied. Full stop.\"")
+	}
+
+	sawToolCreate.Store(false)
+	hist = &convo.Conversation{}
+	if _, turnErr := runAgentTurnHeadless(
+		context.Background(), prov, cfgTools, guard, nil,
+		2, req, user, s, nil, nil, hist, true,
+	); turnErr != nil {
+		t.Fatalf("runAgentTurnHeadless (allowToolCreate=true): %v", turnErr)
+	}
+	if !sawToolCreate.Load() {
+		t.Error("tool_create must be present on the wire with allowToolCreate=true (--allow-tool-create's whole point)")
+	}
+}
+
 // TestBuildAgentOptionsEmptyDirBehavesAsBefore pins that an unset
 // cfgTools.Dir (the zero value, matching every pre-Step-20 config and every
 // existing test that never set it) yields exactly the same seven tools
