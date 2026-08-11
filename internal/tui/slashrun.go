@@ -118,6 +118,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runResumeCommand()
 	case slash.KindModels:
 		return m.runModelsCommand()
+	case slash.KindSkills:
+		return m.runSkillsCommand()
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}

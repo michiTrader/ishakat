@@ -234,10 +234,19 @@ func Run(version string, resume bool) int {
 		// working — or correctly stops offering tools to a model the
 		// catalog says cannot take them — instead of inheriting whatever
 		// the boot model happened to support.
-		EngineFor:  NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
-		Model:      model,
-		System:     system,
-		Catalog:    &snap.Catalog,
+		EngineFor: NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
+		Model:     model,
+		System:    system,
+		Catalog:   &snap.Catalog,
+		// DiscoverSkills reuses the exact same gate SystemPrompt (called
+		// inside BuildEngine, above) already applied when it built system:
+		// a second, disk-only call rather than threading the first result
+		// through BuildEngine's return values, because BuildEngine's five
+		// already-crowded returns are shared with Headless's own entry
+		// point (headless.go's step 4), which has no tui.Options to feed
+		// this into and would have to discard it. See DiscoverSkills' own
+		// comment for why this is one function, not two copies of the gate.
+		Skills:     DiscoverSkills(cfg),
 		Alias:      cfg.Alias,
 		Favorites:  cfg.Favorites.List,
 		PreferFree: cfg.Catalog.PreferFree,

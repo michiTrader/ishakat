@@ -64,6 +64,15 @@ const (
 	// (§13, Step 13), grouped by provider — the read-only counterpart of
 	// KindModel's picker, for a quick scan without opening an overlay.
 	KindModels
+	// KindSkills lists the rung-0 prose capabilities Discover found at
+	// startup (§19.2/§19.4, Step 19): name and description only, the same
+	// progressive-disclosure listing internal/skills.Summary already put in
+	// the system prompt — a body never loads here, exactly as the model
+	// itself only ever sees a body once it calls read_file on a skill's
+	// own File. Read-only, like KindModels: there is no "load skill" Kind,
+	// for the same reason skills.go's own package comment gives for not
+	// having a second tool that does what read_file already does.
+	KindSkills
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -105,6 +114,7 @@ var Commands = []Command{
 	{Name: "help", Describe: "esta pantalla", Kind: KindHelp},
 	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
 	{Name: "models", Describe: "explorar catalogo", Kind: KindModels},
+	{Name: "skills", Describe: "capacidades cargadas", Kind: KindSkills},
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},

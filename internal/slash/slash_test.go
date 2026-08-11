@@ -40,7 +40,7 @@ func TestDefaultRegistryCoversTheFullPlanTable(t *testing.T) {
 	// §13 names fourteen commands by name; every one of them has to resolve,
 	// or /help and the dropdown would silently disagree with the PLAN.
 	want := []string{
-		"help", "model", "models", "theme", "compact", "new", "resume",
+		"help", "model", "models", "skills", "theme", "compact", "new", "resume",
 		"clear", "copy", "retry", "stats", "config", "debug", "exit",
 	}
 	r := slash.Default()

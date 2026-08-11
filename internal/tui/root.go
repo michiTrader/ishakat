@@ -12,6 +12,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/skills"
 	"github.com/MichiTrader/ishakat/internal/slash"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
@@ -189,6 +190,18 @@ type Root struct {
 	// built by internal/app, and read by both /model's direct resolution
 	// and the picker's incremental search.
 	cat *catalog.Catalog
+
+	// skills is the rung-0 prose capability listing (§19.2/§19.4, Step 19),
+	// already resolved once at startup by internal/app.SystemPrompt's own
+	// skills.Discover call and handed over here unchanged — this package
+	// never touches the filesystem to find a SKILL.md itself (§6.1's same
+	// "read once, hand over" rule catalog/history/System already follow).
+	// The zero value (no Skills, no Warn) is a legitimate "no skills
+	// configured", the ordinary case for any session with [tools].enabled
+	// = false or an empty/unset skills_dir — /skills reports that instead
+	// of an empty list with no explanation, the same "no hay catalogo" rule
+	// runModelsCommand already applies to a nil catalog.
+	skills skills.Result
 
 	// alias is [alias] from the configuration, keyed case-insensitively —
 	// the same map catalog.Resolve/Filter expect through ResolveOptions.
@@ -378,6 +391,14 @@ type Options struct {
 	// panicking on a nil receiver.
 	Catalog *catalog.Catalog
 
+	// Skills is the rung-0 prose capability listing (§19.2/§19.4, Step 19),
+	// already resolved once by internal/app.SystemPrompt's own
+	// skills.Discover(cfg.Tools.SkillsDir) call — see Root.skills' own
+	// comment for why this package never calls Discover itself. The zero
+	// value (skills.Result{}) is a legitimate "nothing configured", the
+	// same supported-empty rule Catalog above already follows.
+	Skills skills.Result
+
 	// Alias is [alias] from the configuration, keyed case-insensitively.
 	Alias map[string]string
 
@@ -520,6 +541,7 @@ func NewRoot(o Options) Root {
 		system:     o.System,
 		commands:   slash.Default(),
 		cat:        o.Catalog,
+		skills:     o.Skills,
 		alias:      o.Alias,
 		preferFree: o.PreferFree,
 		favorites:  o.Favorites,

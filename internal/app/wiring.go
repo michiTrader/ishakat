@@ -165,7 +165,7 @@ func SystemPrompt(cfg *config.Config) (string, string) {
 	}
 
 	if cfg.Tools.Enabled {
-		sk := skills.Discover(cfg.Tools.SkillsDir)
+		sk := DiscoverSkills(cfg)
 		if summary := skills.Summary(sk.Skills); summary != "" {
 			system = appendSystemBlock(system, "Available skills (call read_file on their path for the full content):\n"+summary)
 		}
@@ -175,6 +175,23 @@ func SystemPrompt(cfg *config.Config) (string, string) {
 	}
 
 	return system, warn
+}
+
+// DiscoverSkills resolves the rung-0 skills listing (§19.2/§19.4, Step 19),
+// gated behind cfg.Tools.Enabled exactly like SystemPrompt's own fold above —
+// a skill points the model at read_file to load its body, so discovering one
+// for a session with no tools at all would name a capability nothing can
+// reach. This is its own function, not inlined into SystemPrompt, because
+// app.go's tui.Options.Skills (internal/tui's /skills command, skills.go)
+// needs the same snapshot SystemPrompt already computed for the prompt
+// without a second, slightly different copy of the gate drifting from this
+// one — see Root.skills' own comment for why internal/tui never calls
+// skills.Discover itself.
+func DiscoverSkills(cfg *config.Config) skills.Result {
+	if !cfg.Tools.Enabled {
+		return skills.Result{}
+	}
+	return skills.Discover(cfg.Tools.SkillsDir)
 }
 
 // appendSystemBlock adds a block of rules to the end of the base system
