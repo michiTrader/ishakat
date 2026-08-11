@@ -134,6 +134,44 @@ type ResponseSpec struct {
 	Extract string `toml:"extract"`
 }
 
+// SelftestSpec is the `[selftest]` table: §19.5 rule 1's quarantine gate,
+// "an unverified tool cannot be used for anything. It must pass its own
+// self-test first." Step 20 accepted-and-ignored this table (see this
+// file's git history); Step 21's tool_probe is the first caller that
+// actually reads it, matching §19.2's own illustrative manifest
+// (`env = { BYBIT_TESTNET = "1" }`, `expect = "status_ok"`) verbatim.
+//
+// A manifest with no `[selftest]` table at all (Env nil, Expect "") is not
+// an error — tool_probe still runs the real request once (Args providing
+// whatever the endpoint needs) and simply has no Expect substring to check
+// the response against, matching rung 1's own "an empty [response].extract
+// is a safe default" leniency elsewhere in this file. A manifest author who
+// wants a real quarantine gate sets Expect explicitly.
+type SelftestSpec struct {
+	// Env names environment variables the probe run sets (in the running
+	// process, for the duration of that one Run call only — see
+	// tool_probe.go's own doc comment for why this is done by mutating and
+	// restoring os.Environ rather than any lower-level per-request
+	// override) before invoking the tool: rule 1's own worked example is
+	// "it uses BYBIT_TESTNET=1", diverting a manifest's real endpoint
+	// call onto a testnet or otherwise safe mode without needing a second,
+	// parallel manifest just for probing.
+	Env map[string]string `toml:"env"`
+	// Args supplies the parameter values the probe run invokes the tool
+	// with — a self-test needs concrete arguments the same way any other
+	// call does (Manifest.Params' own Required/Default rules still apply
+	// on top of whatever this supplies), and a probe author should not be
+	// forced to reuse the tool's own [params].default for what may need to
+	// be a deliberately narrow, safe-to-repeat probe value.
+	Args map[string]string `toml:"args"`
+	// Expect is a substring that must appear in the tool's own output text
+	// for the probe to pass. Empty means "no content check" — the probe
+	// still fails on a Go error or a Result.IsError from the real call,
+	// but places no constraint on what a successful response's text must
+	// contain.
+	Expect string `toml:"expect"`
+}
+
 // OriginSpec is the `[origin]` table §19.6/§19.8 make mandatory provenance:
 // who or what created this tool, and why. Step 20 only has to read and
 // preserve it — the governance that requires it to be present and accurate
@@ -149,12 +187,12 @@ type OriginSpec struct {
 }
 
 // Manifest is one parsed `tool.toml`. Note what is deliberately *not* a
-// field here: `[package]` (§20.11 item 1) and `[selftest]` (§19.2's
-// illustrative example, whose actual quarantine mechanism is Step 21's
-// `tool_probe`). Both are accepted and silently ignored simply by not
-// decoding them into anything — see parseManifest's own doc comment for why
-// that is enough, and why it is the *correct* way to satisfy "reserved
-// table, no 'ignored key' warning" rather than an accident of omission.
+// field here: `[package]` (§20.11 item 1) — accepted and silently ignored
+// simply by not decoding it into anything, the *correct* way to satisfy
+// "reserved table, no 'ignored key' warning" rather than an accident of
+// omission (see parseManifest's own doc comment). `[selftest]` (§19.2's
+// illustrative example) *is* now a field — Selftest, below — since Step
+// 21's tool_probe is the caller that finally reads it.
 type Manifest struct {
 	Name        string `toml:"name"`
 	Description string `toml:"description"`
@@ -171,6 +209,7 @@ type Manifest struct {
 	Params   map[string]ParamSpec `toml:"params"`
 	Request  RequestSpec          `toml:"request"`
 	Response ResponseSpec         `toml:"response"`
+	Selftest SelftestSpec         `toml:"selftest"`
 
 	// RequiresCaps and MinContext are §20.11 item 4's forward-compat pair:
 	// a declarative tool may name capabilities (from the fixed vocabulary
@@ -271,11 +310,11 @@ func DiscoverDeclarative(dir string) DeclarativeResult {
 // purpose: §20.11 item 1 asks that `[package]` be "accepted-and-ignored...
 // (no 'ignored key' warning)" so that a future community-layer field can be
 // added to the format without every existing hand-written manifest suddenly
-// producing warnings, and §19.2's own illustrative manifest already has a
-// `[selftest]` table this package does not need to understand yet (that is
-// Step 21's `tool_probe`, not Step 20's job). Simply not checking Undecoded
-// gives both of those exactly the silence they ask for, for free — no
-// special-cased "reserved" field needed for either.
+// producing warnings. Not checking Undecoded gives that exactly the silence
+// it asks for, for free — no special-cased "reserved" field needed.
+// `[selftest]` no longer needs this treatment now that Manifest.Selftest
+// decodes it directly (Step 21's tool_probe reads it); `[package]` remains
+// the one table this function still relies on Undecoded-blindness for.
 func parseManifest(body []byte) (Manifest, error) {
 	var m Manifest
 	if _, err := toml.Decode(string(body), &m); err != nil {
