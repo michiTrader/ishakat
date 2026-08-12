@@ -54,7 +54,7 @@ type Guard struct {
 	yolo        bool
 	reviewer    Reviewer
 
-	// tiers supplements tierFor's fixed switch (the seven native tools)
+	// tiers supplements tierFor's fixed switch (the eight native tools)
 	// for names it does not recognize -- Step 20's declarative tools chief
 	// among them. nil (the zero value, and every pre-Step-20 caller that
 	// never calls SetToolTiers) means "no supplement": tierForRequest then
@@ -75,7 +75,7 @@ type Guard struct {
 // may only ever raise its own risk tier, never lower it) -- so a Guard
 // never has to import internal/tools to reason about a tool it did not
 // itself define, preserving the package boundary between the two exactly
-// as before. Names tierFor's own switch already covers (the seven native
+// as before. Names tierFor's own switch already covers (the eight native
 // tools) are unaffected regardless of what this map says for them: a
 // manifest naming itself "bash" cannot reduce bash's own hardcoded High
 // tier by appearing here, because tierFor's fixed switch is always
@@ -138,24 +138,27 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 }
 
 // isNativeToolName reports whether name is one of tierFor's/mode's own
-// seven recognized names (layer 1, §19.1) -- the boundary (*Guard).tierFor
+// eight recognized names (layer 1, §19.1) -- the boundary (*Guard).tierFor
 // and (*Guard).mode use to decide whether a name may ever be supplemented
 // by g.tiers: a manifest naming itself "bash" must never reduce bash's own
 // hardcoded High tier by appearing in g.tiers, so both methods consult
-// g.tiers only for names this reports false for.
+// g.tiers only for names this reports false for. dispatch (Step 22) is
+// listed here for the identical reason bash is: a manifest or declarative
+// tool naming itself "dispatch" must never be able to reduce the tier a
+// sub-agent's own second tool-calling loop is treated with.
 func isNativeToolName(name string) bool {
 	switch name {
-	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash":
+	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash", "dispatch":
 		return true
 	default:
 		return false
 	}
 }
 
-// tierFor is the fixed switch over layer 1's seven native tools -- kept as
+// tierFor is the fixed switch over layer 1's eight native tools -- kept as
 // a free function, not a method, so guard_test.go's existing
 // TestGuardFetchTierIsLow (calling tierFor("fetch") directly) keeps
-// compiling unchanged, and so its own contract (these seven names, no
+// compiling unchanged, and so its own contract (these eight names, no
 // more) can never quietly depend on a Guard's tiers map.
 func tierFor(name string) Tier {
 	switch name {
@@ -165,6 +168,17 @@ func tierFor(name string) Tier {
 		return Medium
 	case "bash":
 		return High
+	case "dispatch":
+		// dispatch (Step 22) is explicit here for the same reason bash is,
+		// not because the fallthrough default would give a different
+		// answer: dispatch.go's own Danger() is already unconditionally
+		// DangerHigh (§19.5 rule #2 -- a tier is inferred from what a tool
+		// can do, and a sub-agent's own registry may itself contain bash,
+		// write_file or another dispatch), so spelling the case out here
+		// keeps this switch legible as the eight-tool table §19.1 actually
+		// documents, rather than relying on readers to know the default
+		// happens to agree.
+		return High
 	default:
 		// Unknown and future tools must be reviewed rather than accidentally
 		// inheriting a low-risk default.
@@ -173,7 +187,7 @@ func tierFor(name string) Tier {
 }
 
 // tierFor is tierFor(name) supplemented by g.tiers for any name outside
-// the fixed native seven -- Step 20's declarative tools chief among them.
+// the fixed native eight -- Step 20's declarative tools chief among them.
 // g.tiers == nil (no caller ever set it, matching every pre-Step-20 Guard
 // and every Guard a caller builds without SetToolTiers) falls through to
 // tierFor's own High default unchanged, so this method is a pure addition:
@@ -203,10 +217,10 @@ func (g *Guard) mode(req Request) string {
 		return g.permissions.Read
 	case "write_file", "edit_file":
 		return g.permissions.Write
-	case "bash":
+	case "bash", "dispatch":
 		return g.permissions.Shell
 	default:
-		// A name outside the native seven (Step 20's declarative tools
+		// A name outside the native eight (Step 20's declarative tools
 		// chief among them) reuses the policy knob matching req.Tier --
 		// itself already resolved through g.tierFor, which honors
 		// g.tiers/Tool.Danger() rather than assuming High. Low mirrors
