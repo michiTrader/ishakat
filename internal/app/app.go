@@ -240,9 +240,15 @@ func Run(version string, resume bool) int {
 		// catalog says cannot take them — instead of inheriting whatever
 		// the boot model happened to support.
 		EngineFor: NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
-		Model:     model,
-		System:    system,
-		Catalog:   &snap.Catalog,
+		// LoginFor drives /login's actual device-flow network calls
+		// (internal/tui/loginfactory.go's own §6.1 boundary comment) —
+		// see loginfactory.go's own doc comment for why every built-in
+		// preset hits its "no OAuth device flow configured" branch
+		// today, and why that is still correct infrastructure to ship.
+		LoginFor: NewLoginFactory(cfg),
+		Model:    model,
+		System:   system,
+		Catalog:  &snap.Catalog,
 		// DiscoverSkills reuses the exact same gate SystemPrompt (called
 		// inside BuildEngine, above) already applied when it built system:
 		// a second, disk-only call rather than threading the first result

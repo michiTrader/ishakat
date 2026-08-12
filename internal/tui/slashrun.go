@@ -120,6 +120,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runModelsCommand()
 	case slash.KindSkills:
 		return m.runSkillsCommand()
+	case slash.KindLogin:
+		return m.startLogin(args)
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}
@@ -131,14 +133,22 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 // an honest pending, not a silent no-op, until Step 18 gives them a real
 // in-session screen (§13, §17: "un pendiente marcado como hecho es una
 // funcion que nadie va a construir" applies just as much to a pending with
-// no remedy attached). Every other KindUnimplemented row (/theme, reserved
-// for Phase 3) keeps the generic message — it has no such stand-in.
+// no remedy attached). /login (Step 24) joins them for the same reason: the
+// OAuth device flow itself is real and tested (cmd/ishakat/login.go), just
+// not yet driven from inside a running TUI session — internal/tui cannot
+// import net/http (internal/arch_test.go's TestTUINoImportaHTTP), so a real
+// in-session wizard needs the HTTP-driving half injected via a factory the
+// way EngineFactory already is, not written here directly. Every other
+// KindUnimplemented row (/theme, reserved for Phase 3) keeps the generic
+// message — it has no such stand-in.
 func unimplementedNotice(cmd slash.Command) string {
 	switch cmd.Name {
 	case "config":
 		return cmd.Usage() + " todavia no: usa `ishakat config check` desde la terminal"
 	case "debug":
 		return cmd.Usage() + " todavia no: usa `ishakat doctor` desde la terminal"
+	case "login":
+		return cmd.Usage() + " todavia no dentro de la TUI: usa `ishakat login <proveedor>` desde la terminal"
 	default:
 		return cmd.Usage() + " todavia no esta implementado"
 	}

@@ -48,6 +48,14 @@ const (
 	// so, unlike every other overlay mode, closing it returns to ModeBusy
 	// rather than ModeChat: the turn itself is not over, only the pause is.
 	ModeToolApprove
+	// ModeLogin: /login's in-session OAuth device-flow wizard (§13, Step
+	// 24, login.go). Follows ModeCompact's own shape — an async network
+	// call started by startLogin, its result landing back as a message
+	// handled one layer up in updateDispatch — rather than ModeBusy's,
+	// because a login has two async legs in sequence (the quick device
+	// code request, then the slow poll-for-token wait) instead of
+	// ModeCompact's one.
+	ModeLogin
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -112,6 +120,14 @@ type Root struct {
 	// engineFor is the fix: every switch site now asks it for a fresh
 	// engine bound to the destination Ref before committing the switch.
 	engineFor EngineFactory
+
+	// loginFor drives the §13/Step 24 in-session /login wizard's actual
+	// network calls (loginfactory.go) — nil is a supported value
+	// (every test in this package, and any caller with nothing wired):
+	// startLogin reports that /login has nothing wired to it instead of
+	// opening ModeLogin with no way to ever finish, the same nil-factory
+	// discipline switchEngine already follows for engineFor above.
+	loginFor LoginFactory
 
 	// buf is the landing zone for the turn currently in flight: the engine's
 	// goroutine writes into it, and streamTickMsg drains it on the repaint
@@ -257,6 +273,14 @@ type Root struct {
 	// cancelCompact).
 	compactCancel context.CancelFunc
 
+	// login is Step 24's ModeLogin overlay's own state (login.go), live
+	// only while mode == ModeLogin.
+	login loginState
+
+	// loginCancel closes the in-flight device-flow request/poll's
+	// context — the same role compactCancel plays for startCompact.
+	loginCancel context.CancelFunc
+
 	// inputHistory, historyIdx and historyDraft are the up/down input
 	// history of Step 13 (§11), implemented in history.go. inputHistory
 	// holds every line submit/runRetry has actually sent, oldest first;
@@ -359,6 +383,11 @@ type Options struct {
 	// Engine above: every test in this package, and any caller with
 	// nothing wired, keeps the pre-existing "relabel only" behaviour.
 	EngineFor EngineFactory
+
+	// LoginFor drives /login's actual device-flow network calls
+	// (loginfactory.go) — see Root.loginFor's own comment for the §6.1
+	// boundary this crosses and why nil is a supported value.
+	LoginFor LoginFactory
 
 	// Model is the model reference to show and to send, in §4.2's Ref form
 	// ("provider/model" or a bare alias as the user typed it), never the
@@ -537,6 +566,7 @@ func NewRoot(o Options) Root {
 		cap:        o.Cap,
 		eng:        engineOr(o.Engine),
 		engineFor:  o.EngineFor,
+		loginFor:   o.LoginFor,
 		model:      model,
 		system:     o.System,
 		commands:   slash.Default(),
@@ -679,7 +709,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resolveToolApprove returns to ModeBusy, which would otherwise
 		// leave the rest of that same turn's spinner frozen after the
 		// first approval dialog closes.
-		if m.mode != ModeBusy && m.mode != ModeCompact && m.mode != ModeToolApprove {
+		if m.mode != ModeBusy && m.mode != ModeCompact && m.mode != ModeToolApprove && m.mode != ModeLogin {
 			return m, nil
 		}
 		m.animOffset++
@@ -726,6 +756,23 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.openToolApprove(msg)
 
+	case loginCodeMsg:
+		// Same "outlived its turn" guard compactDoneMsg's own case
+		// applies: cancelLogin already moved mode back to ModeChat
+		// (esc/ctrl+c during the brief device-code request), and a
+		// stale answer from that abandoned call has nothing left to
+		// update.
+		if m.mode != ModeLogin {
+			return m, nil
+		}
+		return m.finishLoginCode(msg.code, msg.waiter, msg.err)
+
+	case loginDoneMsg:
+		if m.mode != ModeLogin {
+			return m, nil
+		}
+		return m.finishLogin(msg.note, msg.err)
+
 	case agentTurnDoneMsg:
 		// Same "outlived its turn" reasoning as compactDoneMsg's own
 		// guard: cancelAgentTurn already moved mode back to ModeBusy (or
@@ -763,6 +810,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateResumeMenu(msg)
 	case ModeToolApprove:
 		return m.updateToolApprove(msg)
+	case ModeLogin:
+		return m.updateLogin(msg)
 	default:
 		return m.updateChat(msg)
 	}
