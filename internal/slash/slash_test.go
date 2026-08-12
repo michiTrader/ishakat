@@ -37,11 +37,11 @@ func TestLookupResolvesNameAndAliasCaseInsensitively(t *testing.T) {
 }
 
 func TestDefaultRegistryCoversTheFullPlanTable(t *testing.T) {
-	// §13 names fourteen commands by name; every one of them has to resolve,
+	// §13 names fifteen commands by name; every one of them has to resolve,
 	// or /help and the dropdown would silently disagree with the PLAN.
 	want := []string{
 		"help", "model", "models", "skills", "theme", "compact", "new", "resume",
-		"clear", "copy", "retry", "stats", "config", "debug", "exit",
+		"clear", "copy", "retry", "stats", "config", "debug", "login", "exit",
 	}
 	r := slash.Default()
 	if got := len(r.All()); got != len(want) {

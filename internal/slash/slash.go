@@ -125,6 +125,7 @@ var Commands = []Command{
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindUnimplemented},
 	{Name: "debug", Describe: "diagnostico", Kind: KindUnimplemented},
+	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindUnimplemented},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }
 

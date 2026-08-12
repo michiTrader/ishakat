@@ -63,7 +63,7 @@ process.
 | `dispatch` (sub-agents, §19.1) | ✅ parallel, context-isolated sub-agent turns via goroutines |
 | `ishakat serve` (NDJSON/WebSocket, §11 step 23) | ✅ the third door — a real `permissions.Reviewer` round-trips `permission_request`/`permission_response` over the socket, bearer-token auth, `MaxSessions`, idle timeout, graceful shutdown |
 | `--resume` | ❌ step 13, not written yet |
-| `/login` (OAuth device flow + API-key wizard) | ❌ step 24, not written yet |
+| `/login` (OAuth device flow + API-key wizard) | ✅ API-key wizard: `ishakat provider add\|list\|remove`. ✅ OAuth device flow (RFC 8628): `ishakat login <provider>` via `internal/oauth`, provider-agnostic — none of the five built-in presets enables it (no ToS-clean device flow exists for any of them; see `cmd/ishakat/login.go`'s own doc comment on why GitHub Copilot's undocumented endpoint was deliberately not wired in). Works today against any self-hosted/custom gateway's own device-flow endpoints via `--client-id`/`--device-code-url`/`--token-url`. ✅ `/login` has a row in `internal/slash`'s command table (`/help` and the dropdown both list it), reporting `KindUnimplemented` with a pointer at the CLI command — the same honest-pending pattern `/config`/`/debug` use. ⬜ no interactive TUI-side wizard yet |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly

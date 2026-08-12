@@ -49,13 +49,14 @@ func TestSlashModelsWithNoCatalogSaysSo(t *testing.T) {
 	}
 }
 
-func TestSlashConfigAndDebugPointAtTheirBinaryEquivalent(t *testing.T) {
+func TestSlashConfigDebugAndLoginPointAtTheirBinaryEquivalent(t *testing.T) {
 	cases := []struct {
 		line string
 		want string
 	}{
 		{"/config", "ishakat config check"},
 		{"/debug", "ishakat doctor"},
+		{"/login", "ishakat login <proveedor>"},
 	}
 	for _, tc := range cases {
 		var m tea.Model = newHeadlessRoot()

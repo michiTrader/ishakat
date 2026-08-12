@@ -38,6 +38,30 @@ type ProviderPreset struct {
 	// `provider add`. Empty when the dialect covers the service without
 	// compromise.
 	Notes string
+
+	// The four fields below are Step 24's OAuth device-flow half
+	// (docs/PLAN.md §11, `ishakat login`): when DeviceCodeURL and TokenURL
+	// are both set, `ishakat login <provider>` drives internal/oauth's RFC
+	// 8628 client instead of prompting for a pasted API key. All four are
+	// empty for every preset below on purpose — see login.go's own package
+	// comment for why none of the five presets in ProviderPresets() opts
+	// into this today, and why `ishakat login` still works for a
+	// self-hosted or third-party gateway that documents its own device-flow
+	// endpoints, via --client-id/--device-code-url/--token-url rather than
+	// a preset.
+	OAuthClientID      string
+	OAuthScope         string
+	OAuthDeviceCodeURL string
+	OAuthTokenURL      string
+}
+
+// SupportsDeviceFlow reports whether p declares enough of the four OAuth
+// fields above for RequestDeviceCode/PollForToken to be usable. ClientID
+// can legitimately be empty for a provider whose device-flow endpoint
+// does not require one; DeviceCodeURL and TokenURL cannot, since
+// internal/oauth has nowhere to POST without them.
+func (p ProviderPreset) SupportsDeviceFlow() bool {
+	return strings.TrimSpace(p.OAuthDeviceCodeURL) != "" && strings.TrimSpace(p.OAuthTokenURL) != ""
 }
 
 var providerPresets = map[string]ProviderPreset{
