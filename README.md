@@ -57,9 +57,13 @@ process.
 | Hot swap confirmation (§4.6/§9.5) | ✅ `engine.CheckSwap` plus the `internal/tui` conflict dialog: compact/drop-oldest for a context conflict, switch-anyway for a capability warning, cancel-only when the destination has no credential |
 | `/compact` client-side summarization (§9.8/§10) | ✅ `engine.Summarize` calls `compact_model` to replace older turns with a summary, kept auditable via `convo.ApplySummary`; falls back to `drop-oldest` per `[compact].on_error` if the call fails, and auto-triggers once `[compact].trigger_pct` is crossed |
 | Project `AGENTS.md` (§11 step 18) | ✅ `internal/agentsmd` merges global (`~/.config/ishakat/AGENTS.md`), project (`./AGENTS.md`) and local (`./AGENTS.local.md`, gitignored) rules into the system prompt, on by default (`app.agents_md`), reported by `ishakat doctor` |
+| Tool calling (§14/§15/§16/§17) | ✅ the full loop — `read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`, `fetch`, permissions/guard, tool-call rendering in TUI and headless |
+| `internal/tools.Registry` + declarative tools (§20) | ✅ hand-writable, testable `tool.toml` capabilities, no model involvement required |
+| Self-extension: `tool_create`/`probe`/`edit`/`archive`/`revive`/`delete` (§19.6/§19.7) | ✅ rung 1 (declarative manifests) closed under three governance gates; rung 2 (script tools) blocked on §16's Starlark/Python decision |
+| `dispatch` (sub-agents, §19.1) | ✅ parallel, context-isolated sub-agent turns via goroutines |
+| `ishakat serve` (NDJSON/WebSocket, §11 step 23) | ✅ the third door — a real `permissions.Reviewer` round-trips `permission_request`/`permission_response` over the socket, bearer-token auth, `MaxSessions`, idle timeout, graceful shutdown |
 | `--resume` | ❌ step 13, not written yet |
-| `[tools]` configuration (§19) | ⚠️ parsed and validated, but nothing runs it yet — step 14 |
-| Tool calling, skills, self-extension | ❌ Phase 2.5 (steps 14–25), designed in §19, not written |
+| `/login` (OAuth device flow + API-key wizard) | ❌ step 24, not written yet |
 
 The interactive mode now uses the same engine/provider pipeline as headless
 mode. Without a configured or reachable provider, it fails the turn visibly
@@ -81,7 +85,7 @@ truth and this table is only a map of it.
 | 1 | Research and architecture | ✅ closed |
 | 2 | Prototype: streaming chat, catalog, picker, hot swap, compaction | 🔨 12 of 13 |
 | 2 bis | Distribution: `curl \| sh` + release workflow (pulled forward) | ⬜ |
-| 2.5 | **The agent**: tool calling, permissions, skills, self-extension | 🔨 steps 14–18 of 14–25 closed |
+| 2.5 | **The agent**: tool calling, permissions, skills, self-extension | 🔨 steps 14–23 of 14–25 closed (step 21's rung 2/script tools deferred, blocked on §16) |
 | 3 | Internal and aesthetic improvements | ⬜ |
 | 4 | Robustness | ⬜ |
 | 5 | Distribution and packaging | ⬜ |
@@ -539,13 +543,16 @@ internal/catalog   normalized model registry, cache, three-source merge
 internal/theme     theme as data, Oklab gradients
 internal/tui       Bubble Tea v2 view layer (no net/http, ever)
 internal/engine    the turn loop: retries, cancellation, compaction
+internal/permissions  danger tiers, session grants, the Reviewer interface
+internal/tools     the eight built-in tools, declarative (rung 1) tools,
+                    self-extension meta-tools, dispatch (sub-agents)
+internal/evolve    self-extension gate 1 + usage-observation ledger (§19.6/§19.7)
+internal/skills    prose-capability discovery (`/skills`)
+internal/wsproto   minimal RFC 6455 WebSocket, stdlib only — the wire under `serve`
 internal/app       the wiring: config → catalog → provider → tui/headless/serve
 ```
 
-Planned for Phase 2.5: `internal/tools` (the eight built-ins plus the
-declarative and script runners) and `internal/skills`.
-
-Four boundary rules order everything, and they are tests rather than promises,
+Five boundary rules order everything, and they are tests rather than promises,
 in `internal/arch_test.go`:
 
 - `internal/tui` must never import `net/http`, not even transitively.
@@ -558,11 +565,12 @@ in `internal/arch_test.go`:
   single line. But `provider` pulls in `net/http`, so the moment `engine`
   imports it the TUI inherits HTTP and the first rule breaks somewhere nobody
   will connect to the cause. Hence a deliberately duplicated struct.
-
-A fifth rule (`internal/tools` must not import `internal/tui`) is written and
-skips until that package exists. It protects the property that makes the third
-front door possible: a tool has to behave identically with and without a
-terminal.
+- `internal/tools` must not import `internal/tui`. It protects the property
+  that makes the third front door (`ishakat serve`) possible: a tool has to
+  behave identically with and without a terminal — the TUI, headless and
+  serve all drive the exact same registry through the exact same
+  `permissions.Guard`, differing only in which `permissions.Reviewer`
+  implementation is wired behind it.
 
 ## Contributing
 
