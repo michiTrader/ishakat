@@ -335,6 +335,49 @@ func TestWithMetaToolsDirSetAddsSixAlwaysAvailableMetaTools(t *testing.T) {
 	}
 }
 
+// TestWithMetaToolsNilDispatchRunnerOmitsDispatch pins the "absent, not
+// merely denied" contract MetaToolsOptions.DispatchRunner's own doc comment
+// states: a nil Runner (the zero value, matching every install that has
+// not wired a sub-agent capability) means dispatch never appears in the
+// registry at all -- not even with a Dir configured, since dispatch's own
+// gate is DispatchRunner alone, not the layer-2 tools directory.
+func TestWithMetaToolsNilDispatchRunnerOmitsDispatch(t *testing.T) {
+	dir := t.TempDir()
+	reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir, EvolveMode: "suggest", HasTTY: true})
+	if _, ok := reg.Lookup("dispatch"); ok {
+		t.Error("dispatch must not be present with a nil DispatchRunner")
+	}
+}
+
+// TestWithMetaToolsDispatchRunnerAddsDispatchRegardlessOfDir proves
+// dispatch is added whenever DispatchRunner != nil, both with and without a
+// layer-2 tools directory configured -- dispatch has nothing to do with the
+// directory every meta-tool and declarative tool acts on.
+func TestWithMetaToolsDispatchRunnerAddsDispatchRegardlessOfDir(t *testing.T) {
+	runner := func(ctx context.Context, task string) (string, error) { return "ok: " + task, nil }
+
+	for _, dir := range []string{"", t.TempDir()} {
+		reg, warn := WithMetaTools(MetaToolsOptions{Dir: dir, DispatchRunner: runner})
+		if warn != "" {
+			t.Fatalf("unexpected warn for dir=%q: %q", dir, warn)
+		}
+		tool, ok := reg.Lookup("dispatch")
+		if !ok {
+			t.Fatalf("dispatch missing for dir=%q", dir)
+		}
+		if tool.Danger() != DangerHigh {
+			t.Errorf("dispatch.Danger() = %v, want DangerHigh (dir=%q)", tool.Danger(), dir)
+		}
+		res, err := reg.Run(context.Background(), "dispatch", json.RawMessage(`{"task":"x"}`))
+		if err != nil {
+			t.Fatalf("dispatch run failed for dir=%q: %v", dir, err)
+		}
+		if res.Text != "ok: x" {
+			t.Errorf("dispatch run text = %q for dir=%q, want %q", res.Text, dir, "ok: x")
+		}
+	}
+}
+
 // TestWithMetaToolsModeOffOmitsToolCreateEntirely is §19.7's own table,
 // quoted verbatim in MetaToolsOptions' doc comment: "off" means
 // "tool_create is absent from the registry", checked here with an

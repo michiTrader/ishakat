@@ -51,8 +51,13 @@ func NewRegistry(tools ...Tool) *Registry {
 // config.Tools value, for the same reason Fetch itself doesn't import
 // internal/config (see fetch.go's doc comment): this package's tools take
 // the minimal, purpose-built arguments a cross-cutting concern needs, not
-// whole configuration types. dispatch (Step 22) will be the eighth and last
-// to land.
+// whole configuration types. dispatch (Step 22, the eighth and last of the
+// eight) does not land here: unlike fetch's egress allowlist, dispatch's
+// injected capability (a SubAgentRunner) has nothing to do with Core's own
+// "engine-agnostic, network-agnostic native six" contract, so it is added
+// by WithMetaTools instead, gated on MetaToolsOptions.DispatchRunner rather
+// than on the layer-2 tools directory every other thing WithMetaTools adds
+// is gated on.
 //
 // NewRegistry itself stays general so tests (and the permission-gated
 // variants Step 16 already wires through internal/app) can build smaller
@@ -193,6 +198,20 @@ type MetaToolsOptions struct {
 	// ledger configured", matching every caller's behavior before this
 	// field existed.
 	LedgerPath string
+
+	// DispatchRunner is the sub-agent-turn capability Dispatch.Runner needs
+	// (Step 22, §19.1's eighth and last core tool) -- see dispatch.go's own
+	// doc comment for why this package cannot build that capability itself
+	// (it would need to import internal/engine/internal/app/internal/
+	// provider, which arch_test.go's boundary tests forbid). nil means
+	// "no sub-agent capability wired for this session": dispatch is not
+	// added to the returned Registry at all, the same "absent, not merely
+	// denied" shape §19.7 already uses for tool_create under Mode == "off"
+	// -- a model that never sees dispatch in its own tool list cannot be
+	// talked into asking for it. internal/app is the only real caller that
+	// sets this field, closing over its own *engine.Engine/provider and a
+	// fresh *convo.Conversation to build the closure.
+	DispatchRunner SubAgentRunner
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
@@ -224,6 +243,15 @@ type MetaToolsOptions struct {
 // already wrote", only "may it acquire a brand new capability", which is
 // tool_create's question alone.
 //
+// dispatch (Step 22, §19.1's eighth and last core tool) is added, ahead of
+// every meta-tool, whenever opts.DispatchRunner != nil -- regardless of
+// opts.Dir, since dispatch has nothing to do with the layer-2 tools
+// directory the meta-tools and declarative discovery both act on. Like
+// tool_create under Mode == "off", a nil DispatchRunner omits dispatch from
+// the registry entirely rather than adding a tool that would always fail:
+// see MetaToolsOptions.DispatchRunner's own doc comment for why this
+// package cannot build that capability itself.
+//
 // tool_create is added only when both of §19.6/§19.7's own conditions hold:
 // opts.EvolveMode != "off" (§19.7's table, verbatim: "off" means
 // "tool_create is absent from the registry", not merely refused), and a
@@ -241,6 +269,11 @@ type MetaToolsOptions struct {
 // invitation a sufficiently adversarial prompt could keep proposing.
 func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
 	reg, warn := WithDeclarative(opts.Allow, opts.AllowAll, opts.Dir)
+
+	if opts.DispatchRunner != nil {
+		reg = NewRegistry(append(reg.Tools(), Dispatch{Runner: opts.DispatchRunner})...)
+	}
+
 	if strings.TrimSpace(opts.Dir) == "" {
 		return reg, warn
 	}
