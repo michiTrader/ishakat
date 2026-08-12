@@ -44,6 +44,7 @@ SUBCOMMANDS
   models [--json] [--refresh] [--all] [filter]   the model catalog
   models clean             delete the cached catalog (catalog.json) on disk
   purge [--sessions] [--force]   delete ishakat's own config/cache/session files
+  serve [--addr] [--token] [--allow-tool-create]   the third door: NDJSON/WebSocket
   version                  prints the version
 
 FLAGS
@@ -71,7 +72,7 @@ EXIT CODES
 // reflection, because there's no cheap way to introspect a switch
 // statement). cmdUnknownSubcommand's "did you mean" suggestion walks this
 // list; keep it in sync with the switch below when a subcommand is added.
-var knownSubcommands = []string{"config", "provider", "doctor", "version", "models", "model", "purge", "help"}
+var knownSubcommands = []string{"config", "provider", "doctor", "version", "models", "model", "purge", "serve", "help"}
 
 func main() {
 	_ = netfix.Install()
@@ -86,6 +87,8 @@ func main() {
 			os.Exit(cmdModel(os.Args[2:]))
 		case "purge":
 			os.Exit(cmdPurge(os.Args[2:]))
+		case "serve":
+			os.Exit(cmdServe(os.Args[2:]))
 		case "doctor":
 			os.Exit(cmdDoctor())
 		case "version":
