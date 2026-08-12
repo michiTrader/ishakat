@@ -130,6 +130,26 @@ allow_without_tty = false
 allow = ["models.dev", "api.github.com", "raw.githubusercontent.com", "pkg.go.dev"]
 allow_all = false
 
+# ── La tercera puerta (§11 Paso 23) ─────────────────────────────────────────
+# `ishakat serve` abre un socket NDJSON-sobre-WebSocket local para que otro
+# programa (un modelo de voz, n8n, un plugin de editor, cron) maneje el mismo
+# bucle de agente que ya usan las puertas TUI y headless. Solo loopback por
+# defecto: exponer esto más allá de 127.0.0.1 es una edición deliberada, no
+# un accidente de correr el comando en una máquina con interfaz routable.
+[serve]
+addr = "127.0.0.1:20129"
+# Token clients must present. Required (and warned about at startup if
+# missing) as soon as addr points at something reachable from outside this
+# machine.
+token = ""
+# Mirrors --allow-tool-create (§19.7): lets tool_create appear in the
+# catalogue a serve session offers the model. Actually creating one still
+# needs an explicit permission_request/permission_response round trip over
+# the socket -- this only grants visibility.
+allow_tool_create = false
+max_sessions = 8
+idle_timeout_s = 600
+
 [favorites]
 list = ["omniroute/auto/coding", "omniroute/auto/fast"]
 

@@ -11,6 +11,7 @@ type Config struct {
 	Catalog   Catalog           `toml:"catalog"`
 	Compact   Compact           `toml:"compact"`
 	Tools     Tools             `toml:"tools"`
+	Serve     Serve             `toml:"serve"`
 	Favorites Favorites         `toml:"favorites"`
 	Alias     map[string]string `toml:"alias"`
 	Providers []Provider        `toml:"provider"`
@@ -271,6 +272,41 @@ type Egress struct {
 	// turning the safety off is a visible, single, greppable line in a config
 	// file rather than an emergent consequence of a long list.
 	AllowAll bool `toml:"allow_all"`
+}
+
+// Serve configures docs/PLAN.md §11 Step 23, the third door: `ishakat serve`,
+// an NDJSON-over-WebSocket socket another program (a voice model, n8n, an
+// editor plugin, cron) can drive the same agent loop through.
+type Serve struct {
+	// Addr is the listen address. Loopback by default ("127.0.0.1:20129"):
+	// exposing this socket beyond the local machine is a deliberate, visible
+	// edit to this one line, not an accidental consequence of running the
+	// command on a machine that happens to have a routable interface.
+	Addr string `toml:"addr"`
+
+	// Token is a bearer token clients must present to open a session. Empty
+	// is safe only together with a loopback Addr — validateServe warns
+	// loudly if Addr is ever pointed at anything reachable from outside this
+	// machine while Token is still empty.
+	Token string `toml:"token"`
+
+	// AllowToolCreate mirrors the CLI's --allow-tool-create (§19.7) for the
+	// serve door specifically: it only lets tool_create appear in the
+	// registry a session offers the model. Creation itself still requires an
+	// explicit permission_request answered over the socket — this flag never
+	// grants unattended approval, only visibility.
+	AllowToolCreate bool `toml:"allow_tool_create"`
+
+	// MaxSessions caps how many concurrent WebSocket sessions the door will
+	// accept. Without a cap, a misbehaving or adversarial caller opening
+	// connections in a loop is a resource-exhaustion vector it can trip
+	// without meaning any harm at all.
+	MaxSessions int `toml:"max_sessions"`
+
+	// IdleTimeoutS closes a session that has sent nothing for this many
+	// seconds, so a caller that vanished (crashed, network partition) does
+	// not hold a slot against MaxSessions forever.
+	IdleTimeoutS int `toml:"idle_timeout_s"`
 }
 
 type Favorites struct {

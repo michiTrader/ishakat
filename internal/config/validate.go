@@ -36,7 +36,59 @@ func Validate(c *Config) error {
 	if err := validateTools(c); err != nil {
 		return err
 	}
+	validateServe(c)
 	return nil
+}
+
+// validateServe checks docs/PLAN.md §11 Step 23's [serve] section. Unlike
+// validateTools, none of these are fatal: a bad value here can be repaired by
+// clamping it to a safe default and warning, because there is no unsafe
+// interpretation the way there is for an unrecognised permission mode — the
+// worst a bad serve setting can do is refuse connections or accept them
+// without a limit, both recoverable at runtime.
+func validateServe(c *Config) {
+	s := &c.Serve
+	if s.MaxSessions < 0 {
+		c.Warnings = append(c.Warnings, Warning{"serve",
+			"max_sessions cannot be negative; treated as 0 (no limit)"})
+		s.MaxSessions = 0
+	}
+	if s.IdleTimeoutS < 0 {
+		c.Warnings = append(c.Warnings, Warning{"serve",
+			"idle_timeout_s cannot be negative; treated as 0 (no timeout)"})
+		s.IdleTimeoutS = 0
+	}
+	if s.AllowToolCreate {
+		c.Warnings = append(c.Warnings, Warning{"serve",
+			"allow_tool_create = true: a serve session may propose tool_create. " +
+				"Creation still requires an explicit permission_request answer over the socket (§19.7)"})
+	}
+	if !isLoopback(s.Addr) && s.Token == "" {
+		c.Warnings = append(c.Warnings, Warning{"serve",
+			fmt.Sprintf("addr = %q is not loopback and token is empty: "+
+				"any host that can reach this address can open a session with no credential at all", s.Addr)})
+	}
+}
+
+// isLoopback reports whether addr's host part is a loopback address, so
+// validateServe can tell a local-only listener from one that might be
+// reachable off-machine. It errs toward treating an unparseable or empty host
+// as loopback (the shipped default has no host part before the colon does
+// not apply here — "127.0.0.1:20129" always has one), since the alternative
+// is warning on every malformed address on top of whatever already reported
+// the malformation.
+func isLoopback(addr string) bool {
+	host := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		host = addr[:i]
+	}
+	host = strings.Trim(host, "[]")
+	switch host {
+	case "127.0.0.1", "::1", "localhost", "":
+		return true
+	default:
+		return false
+	}
 }
 
 // validateTools checks the §19 agent layer. These are hard errors rather than
