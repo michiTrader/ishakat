@@ -102,6 +102,29 @@ type agentTurnDoneMsg struct {
 	err    error
 }
 
+// loginCodeMsg is startLogin's first async result (§13/Step 24,
+// login.go): the outcome of the one quick network call m.loginFor makes
+// up front (RFC 8628 §3.1's device authorization request) — the code and
+// URL to show the user, a LoginWaiter to poll for the rest, or the error
+// that made even that first call fail (an undeclared client_id, an
+// unreachable device-code endpoint). Exactly one of (code/waiter, err) is
+// meaningful, the same one-shot contract compactDoneMsg's own fields keep.
+type loginCodeMsg struct {
+	code   LoginDeviceCode
+	waiter LoginWaiter
+	err    error
+}
+
+// loginDoneMsg is waitLoginCmd's result: the outcome of LoginWaiter.Wait —
+// the (up to 15-minute) poll for the token, followed by the same
+// verify-then-write steps `ishakat login`'s CLI half performs. note is the
+// success line to show (mirroring runLogin's own "Configured X via OAuth
+// device flow." line) when err is nil.
+type loginDoneMsg struct {
+	note string
+	err  error
+}
+
 // There is deliberately no blink message here.
 //
 // There used to be one, re-armed every 500 ms from Init for the lifetime of the

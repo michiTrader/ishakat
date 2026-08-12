@@ -73,6 +73,14 @@ const (
 	// for the same reason skills.go's own package comment gives for not
 	// having a second tool that does what read_file already does.
 	KindSkills
+	// KindLogin opens the §9.6/Step 24 in-session OAuth device-flow wizard
+	// (ModeLogin, internal/tui/login.go): the same three-step dance
+	// `ishakat login <provider>` already drives from the terminal
+	// (RequestDeviceCode → show code/URL → PollForToken → verify → save),
+	// now reachable without leaving the running TUI. An argument names the
+	// provider preset (e.g. "/login openai"); no argument reports the
+	// same usage line the CLI's own `ishakat login` (no args) does.
+	KindLogin
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -125,7 +133,7 @@ var Commands = []Command{
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindUnimplemented},
 	{Name: "debug", Describe: "diagnostico", Kind: KindUnimplemented},
-	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindUnimplemented},
+	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }
 
