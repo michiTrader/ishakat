@@ -161,6 +161,18 @@ allow = [
 ]
 allow_all = false
 
+# Step 23: the third door. Loopback-only by default (addr) and no token
+# required, which is safe together — an empty token only skips checking a
+# secret that a non-loopback address would otherwise need. Changing addr to
+# anything routable without also setting token is exactly the case
+# validateServe warns loudly about.
+[serve]
+addr = "127.0.0.1:20129"
+token = ""
+allow_tool_create = false
+max_sessions = 8
+idle_timeout_s = 600
+
 [favorites]
 list = []
 

@@ -783,3 +783,89 @@ func TestRedacted(t *testing.T) {
 		t.Errorf("la clave redactada contiene partes sensibles: %s", redacted.Providers[0].APIKey)
 	}
 }
+
+// TestServeWarnings covers docs/PLAN.md §11 Step 23's [serve] validation: none
+// of these are fatal, but each describes a real risk a caller should see
+// spelled out at startup rather than discover later.
+func TestServeWarnings(t *testing.T) {
+	tests := []struct {
+		name      string
+		toml      string
+		wantMatch string
+	}{
+		{
+			name:      "allow_tool_create",
+			toml:      "schema=1\n[serve]\nallow_tool_create=true\n",
+			wantMatch: "tool_create",
+		},
+		{
+			name:      "non_loopback_addr_without_token",
+			toml:      "schema=1\n[serve]\naddr=\"0.0.0.0:20129\"\ntoken=\"\"\n",
+			wantMatch: "no credential at all",
+		},
+		{
+			name:      "negative_max_sessions",
+			toml:      "schema=1\n[serve]\nmax_sessions=-1\n",
+			wantMatch: "max_sessions cannot be negative",
+		},
+		{
+			name:      "negative_idle_timeout",
+			toml:      "schema=1\n[serve]\nidle_timeout_s=-5\n",
+			wantMatch: "idle_timeout_s cannot be negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			p := filepath.Join(tmpDir, "warn.toml")
+			if err := os.WriteFile(p, []byte(tt.toml), 0o600); err != nil {
+				t.Fatalf("could not write temp config: %v", err)
+			}
+			cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+			if err != nil {
+				t.Fatalf("should have loaded with a warning, not failed: %v", err)
+			}
+			found := false
+			for _, w := range cfg.Warnings {
+				if strings.Contains(w.Msg, tt.wantMatch) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("no warning containing %q was emitted; warnings: %+v",
+					tt.wantMatch, cfg.Warnings)
+			}
+		})
+	}
+}
+
+// TestServeDefaultsProduceNoWarnings pins the shipped [serve] defaults
+// (loopback addr, empty token, allow_tool_create off, positive limits) as
+// warning-free — the same property TestLoadExampleNoWarnings already checks
+// end-to-end via config.example.toml, asserted here directly against
+// defaults.toml alone so a future default change that breaks it fails next
+// to the other [serve] tests, not just in the example-file test.
+func TestServeDefaultsProduceNoWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "minimal.toml")
+	if err := os.WriteFile(p, []byte("schema=1\n"), 0o600); err != nil {
+		t.Fatalf("could not write temp config: %v", err)
+	}
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, w := range cfg.Warnings {
+		if w.Where == "serve" {
+			t.Errorf("shipped [serve] defaults produced an unexpected warning: %+v", w)
+		}
+	}
+	if cfg.Serve.Addr != "127.0.0.1:20129" {
+		t.Errorf("default serve.addr = %q, want 127.0.0.1:20129", cfg.Serve.Addr)
+	}
+	if cfg.Serve.MaxSessions != 8 {
+		t.Errorf("default serve.max_sessions = %d, want 8", cfg.Serve.MaxSessions)
+	}
+}
