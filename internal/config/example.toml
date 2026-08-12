@@ -138,14 +138,14 @@ allow_all = false
 # un accidente de correr el comando en una máquina con interfaz routable.
 [serve]
 addr = "127.0.0.1:20129"
-# Token que los clientes deben presentar. Requerido (y advertido al arrancar
-# si falta) en cuanto addr apunte a algo alcanzable desde fuera de esta
-# máquina.
+# Token clients must present. Required (and warned about at startup if
+# missing) as soon as addr points at something reachable from outside this
+# machine.
 token = ""
-# Espeja --allow-tool-create (§19.7): permite que tool_create aparezca en el
-# catálogo que una sesión de serve le ofrece al modelo. Crearla sigue
-# necesitando una respuesta explícita a permission_request por el socket —
-# esto solo concede visibilidad.
+# Mirrors --allow-tool-create (§19.7): lets tool_create appear in the
+# catalogue a serve session offers the model. Actually creating one still
+# needs an explicit permission_request/permission_response round trip over
+# the socket -- this only grants visibility.
 allow_tool_create = false
 max_sessions = 8
 idle_timeout_s = 600
