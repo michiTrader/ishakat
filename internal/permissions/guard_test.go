@@ -132,6 +132,25 @@ func TestGuardFetchTierIsLow(t *testing.T) {
 	}
 }
 
+// TestGuardDispatchTierIsHighAndNative pins dispatch's (Step 22) explicit
+// case in tierFor/isNativeToolName: High like bash, and a manifest naming
+// itself "dispatch" cannot reduce that tier via SetToolTiers, the same
+// guarantee TestGuardSetToolTiersCannotLowerNativeToolTier already checks
+// for bash.
+func TestGuardDispatchTierIsHighAndNative(t *testing.T) {
+	if got := tierFor("dispatch"); got != High {
+		t.Fatalf("tierFor(%q) = %v, want High", "dispatch", got)
+	}
+	if !isNativeToolName("dispatch") {
+		t.Fatal("isNativeToolName(\"dispatch\") = false, want true")
+	}
+	guard := New(testPermissions(), false, &recordingReviewer{})
+	guard.SetToolTiers(map[string]Tier{"dispatch": Low})
+	if got := guard.tierFor("dispatch"); got != High {
+		t.Fatalf("guard.tierFor(%q) after SetToolTiers(Low) = %v, want High (native tier cannot be lowered)", "dispatch", got)
+	}
+}
+
 func TestGuardSetToolTiersLowSkipsReview(t *testing.T) {
 	reviewer := &recordingReviewer{}
 	guard := New(testPermissions(), false, reviewer)

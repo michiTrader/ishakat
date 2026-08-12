@@ -298,7 +298,7 @@ url = "https://example.com/greet"
 		Enabled: true,
 		Dir:     toolsDir,
 	}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false, nil)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -330,7 +330,7 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	}
 
 	cfgTools := config.Tools{Enabled: true, Dir: toolsDir}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false, nil)
 	if warn == "" {
 		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
 	}
@@ -440,7 +440,7 @@ func TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue(t *testing
 // an install that has not created a tools directory of its own.
 func TestBuildAgentOptionsEmptyDirBehavesAsBefore(t *testing.T) {
 	cfgTools := config.Tools{Enabled: true}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, false)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, false, nil)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -492,7 +492,7 @@ func TestBuildAgentOptionsThreadsLedgerPathIntoToolCreate(t *testing.T) {
 		t.Errorf("LedgerPath %q does not respect the overridden XDG_STATE_HOME %q", tc.LedgerPath, stateHome)
 	}
 
-	opts, warn2 := buildAgentOptions(cfgTools, nil, nil, true)
+	opts, warn2 := buildAgentOptions(cfgTools, nil, nil, true, nil)
 	if warn2 != "" {
 		t.Fatalf("unexpected warn: %q", warn2)
 	}

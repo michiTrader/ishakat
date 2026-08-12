@@ -160,7 +160,12 @@ func Run(version string, resume bool) int {
 		// already carries into the interface for unrelated (rendering)
 		// reasons — this reuses that one source of truth rather than
 		// asking the terminal a second time.
-		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, !noTTY)
+		// Same eng, ref.WireID and system a sub-agent's own turn should
+		// answer with -- see newSubAgentRunner's own doc comment (dispatch.go)
+		// on why a sub-agent reuses the parent's already-resolved
+		// provider/model rather than re-resolving one of its own.
+		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, !noTTY)
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, !noTTY, dispatchRunner)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}
 

@@ -32,10 +32,12 @@ import (
 
 // buildAgentOptions translates config.Tools into engine.AgentOptions,
 // binding tools.WithMetaTools — layer 1's seven native tools (the six from
-// Step 15 plus fetch from Step 19), every layer-2 declarative tool (rung 1,
-// Step 20) found under cfgTools.Dir, and whichever of §19.5's five
-// meta-tools cfgTools.Dir/Evolve/hasTTY currently allow (Step 21) — as the
-// catalogue and runner. fetch's egress allowlist comes straight from
+// Step 15 plus fetch from Step 19), dispatch (Step 22, gated on
+// dispatchRunner below rather than on cfgTools at all), every layer-2
+// declarative tool (rung 1, Step 20) found under cfgTools.Dir, and
+// whichever of §19.5's five meta-tools cfgTools.Dir/Evolve/hasTTY currently
+// allow (Step 21) — as the catalogue and runner. fetch's egress allowlist
+// comes straight from
 // cfgTools.Egress, the same config.Tools already threaded through this
 // function; no new parameter is needed, and the same allowlist governs
 // every declarative tool's own [origin] check (see
@@ -62,7 +64,19 @@ import (
 // term.IsTerminal would report for a script piping through a real
 // terminal's stdin/stdout — see runAgentTurnHeadless's own comment on why
 // that is deliberate, not merely unwired yet).
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, hasTTY bool) (engine.AgentOptions, string) {
+//
+// dispatchRunner is Step 22's own addition: tools.MetaToolsOptions.
+// DispatchRunner, passed straight through. nil (every call site before
+// Step 22, and every call this function's own tests still make) means
+// dispatch is absent from the returned registry, exactly as before this
+// parameter existed. The two real call sites (below, and app.go's Run)
+// build it via newSubAgentRunner (dispatch.go) closed over their own
+// already-resolved *engine.Engine/model/system — this function itself
+// stays the one place that turns cfgTools into a Registry, so it is also
+// the one place dispatch's own capability slots in, rather than a third
+// copy of "call WithMetaTools" appearing wherever a caller wants dispatch
+// too.
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, hasTTY bool, dispatchRunner tools.SubAgentRunner) (engine.AgentOptions, string) {
 	reg, warn := tools.WithMetaTools(tools.MetaToolsOptions{
 		Dir:             cfgTools.Dir,
 		Allow:           cfgTools.Egress.Allow,
@@ -72,6 +86,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		HasTTY:          hasTTY,
 		Thresholds:      evolveThresholds(cfgTools, cfgTools.Evolve),
 		LedgerPath:      xdg.UsageFile(),
+		DispatchRunner:  dispatchRunner,
 	})
 	if guard != nil {
 		// Every tool beyond the native seven (declarative tools chief
@@ -181,7 +196,15 @@ func runAgentTurnHeadless(
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, allowToolCreate)
+	// Same eng, req.Model and req.System a sub-agent's own turn should
+	// answer with -- see newSubAgentRunner's own doc comment on why a
+	// sub-agent reuses the parent's already-resolved provider/model rather
+	// than re-resolving one of its own. hasTTY (allowToolCreate here, same
+	// value this call site already passes to buildAgentOptions for its own
+	// registry) is threaded through identically, so a sub-agent sees the
+	// exact same tool_create visibility rule the parent turn does.
+	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, allowToolCreate)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, allowToolCreate, dispatchRunner)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}
