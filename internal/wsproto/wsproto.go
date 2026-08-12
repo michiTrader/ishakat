@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
 )
 
 // Opcode identifies a WebSocket frame's payload type (RFC 6455 §5.2).
@@ -73,7 +75,30 @@ type Conn struct {
 	bw     *bufio.Writer
 	server bool // server frames are never masked; client frames always are
 
-	closed bool
+	// closed is an atomic.Bool, not a plain bool, because Close() can run
+	// concurrently with ReadMessage() on the same *Conn: serve.go's own
+	// closeAll() calls Close() from the shutdown goroutine while a
+	// session's own read loop is blocked inside ReadMessage() on another
+	// goroutine, and ReadMessage() itself sets this field on the
+	// close-frame path. Two unsynchronized writes to a plain bool from
+	// different goroutines is a data race go test -race catches
+	// immediately once both call sites are ever exercised in the same
+	// process, which serve_test.go's shutdown path (Step 23) is the
+	// first test in this repo to actually do.
+	closed atomic.Bool
+
+	// writeMu serializes writeFrame calls. This package's own doc comment
+	// above documents "not safe for concurrent writers among themselves"
+	// as a deliberate simplification for Step 23's own call sites -- but
+	// Close() is the one write path that does NOT honor that rule by
+	// construction: serve.go's closeAll() (shutdown) and the connection's
+	// own read loop (echoing a peer's Close frame, or a ping's pong) can
+	// both reach writeFrame concurrently on the same *Conn, independent
+	// of whatever discipline a caller one level up (serveSession.writeMu
+	// in internal/app/serve.go) applies to its own sendEvent calls. This
+	// mutex is scoped to protect exactly that one accidental overlap, not
+	// to promise this package supports arbitrary concurrent writers.
+	writeMu sync.Mutex
 }
 
 // newConn wraps an already-upgraded net.Conn. server selects the masking
@@ -87,9 +112,8 @@ func newConn(nc net.Conn, server bool) *Conn {
 // reported, since the connection is going away regardless) and closes the
 // underlying net.Conn.
 func (c *Conn) Close() error {
-	if !c.closed {
+	if c.closed.CompareAndSwap(false, true) {
 		_ = c.writeFrame(OpClose, closePayload(1000, ""))
-		c.closed = true
 	}
 	return c.nc.Close()
 }
@@ -139,7 +163,7 @@ func (c *Conn) ReadMessage() (Opcode, []byte, error) {
 			// closePayload(1000, "") is close enough for a peer that will
 			// tear the socket down either way.
 			_ = c.writeFrame(OpClose, closePayload(1000, ""))
-			c.closed = true
+			c.closed.Store(true)
 			return 0, nil, ErrClosed
 		}
 
@@ -175,6 +199,9 @@ func closePayload(code int, reason string) []byte {
 // well under MaxMessageSize, so there is no reason to pay for the
 // complexity of a segmented sender.
 func (c *Conn) writeFrame(op Opcode, payload []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	var header [14]byte
 	header[0] = 0x80 | byte(op) // FIN=1, RSV=0, opcode
 
