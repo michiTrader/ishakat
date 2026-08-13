@@ -81,6 +81,15 @@ const (
 	// provider preset (e.g. "/login openai"); no argument reports the
 	// same usage line the CLI's own `ishakat login` (no args) does.
 	KindLogin
+	// KindTheme switches the live TUI theme (§8/§11 Fase 3, first
+	// increment): no argument lists the themes available (embedded default
+	// plus anything found under xdg.ThemesDir()); a name argument that
+	// resolves via theme.Load applies it immediately (Root.styles is
+	// rebuilt from the new Theme) and persists the choice to [ui].theme so
+	// it survives a restart. This is the runner /theme's row in Commands
+	// used to lack — §9.7's wireframe and keys.go's ThemePicker ("ctrl+t")
+	// both already reserved the slot; this Kind is what finally answers it.
+	KindTheme
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -123,7 +132,7 @@ var Commands = []Command{
 	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
 	{Name: "models", Describe: "explorar catalogo", Kind: KindModels},
 	{Name: "skills", Describe: "capacidades cargadas", Kind: KindSkills},
-	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindUnimplemented},
+	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindTheme},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
 	{Name: "resume", Describe: "reabrir una sesion", Kind: KindResume},
