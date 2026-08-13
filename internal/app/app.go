@@ -276,6 +276,17 @@ func Run(version string, resume bool) int {
 
 		ToolsEnabled: cfg.Tools.Enabled,
 		AgentOptions: agentOpts,
+
+		// EvolveStore is §19.7's own suggestion overlay's persistence seam
+		// (Step 25) — see NewEvolveStore's own comment for why most runs
+		// still get nil here (tools disabled, no TTY, or a configured mode
+		// other than "suggest") and EvolveThresholds/the three budget
+		// scalars mirror evolveThresholds' own comment above.
+		EvolveStore:       NewEvolveStore(cfg.Tools, !noTTY),
+		EvolveThresholds:  evolveThresholds(cfg.Tools, cfg.Tools.Evolve),
+		SuggestPerSession: cfg.Tools.Evolve.SuggestPerSession,
+		SuggestPerWeek:    cfg.Tools.Evolve.SuggestPerWeek,
+		DecayAfterRejects: cfg.Tools.Evolve.DecayAfterRejects,
 	})
 
 	p := tea.NewProgram(root)
