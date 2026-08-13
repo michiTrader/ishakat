@@ -2338,79 +2338,81 @@ Commit: `feat(engine): tool-calling loop (Step 14, §19)`
 
 ---
 
-## 13. Comandos y atajos definitivos
+## 13. Definitive commands and shortcuts
 
-Esta sección es el índice canónico de la superficie de usuario: si algo se
-invoca escribiéndolo, aparece aquí. La columna de estado existe porque la lista
-mezcla lo que funciona hoy con lo que las fases 2.5 y siguientes van a añadir, y
-confundir ambas cosas es cómo se documenta una función que no existe.
+This section is the canonical index of the user-facing surface: if something
+is invoked by typing it, it appears here. The status column exists because the
+list mixes what works today with what Phase 2.5 and later phases are going to
+add, and confusing the two is how a feature that does not exist gets
+documented.
 
-**Comandos de la sesión:**
+**Session commands:**
 
-| Comando | Qué hace | Estado |
+| Command | What it does | Status |
 |---|---|---|
-| `/help` | ayuda | ✅ |
-| `/model` | cambiar de modelo (selector difuso) | ✅ |
-| `/models` | explorar el catálogo dentro de la sesión | ✅ |
-| `/theme` | cambiar de tema | ⬜ fase 3 · `[ui] theme` ya se respeta al arrancar |
-| `/clear`, `/new` | limpiar pantalla, empezar conversación | ✅ |
-| `/compact` | resumir el historial (§9.8) | ✅ |
-| `/copy`, `/retry`, `/stats` | copiar, reintentar, uso y costo | ✅ |
-| `/resume` | recuperar una sesión anterior | ✅ |
-| `/config`, `/debug` | ver la config con secretos redactados, diagnóstico | ⬜ paso 18 · hoy `KindUnimplemented` apunta a `ishakat config check`/`ishakat doctor` en vez de un no-op silencioso |
-| `/login` | autenticar via OAuth device flow | ✅ paso 24 cerrado 2026-08-12 · wizard completo dentro de la TUI (`ModeLogin`) con `internal/app.NewLoginFactory` manejando el flujo HTTP real (device code → poll → verificar → guardar), sin que `internal/tui` importe `net/http` |
-| `/exit` | salir | ✅ |
-| `/tools` | listar herramientas: estado, origen, veces usada, última vez | ⬜ paso 20 |
-| `/tools code <nombre>` | ver el manifiesto y el script completos | ⬜ paso 20 |
-| `/tools audit` | procedencia de cada herramienta: `sources`, `session_id`, SHA-256 | ⬜ paso 21 |
-| `/tools create [--force]` | crear una a mano; `--force` salta la puerta 1 y lo anota (§19.6) | ⬜ paso 21 |
-| `/tools edit`, `/tools delete` | corregir (degrada a `unverified`), borrar | ⬜ paso 21 |
-| `/tools revive <nombre>` | devolver al prompt una herramienta archivada (§19.5) | ⬜ paso 21 |
-| `/skills` | listar las capacidades en prosa cargadas | ✅ |
-| `/tools install <ref>` | instalar una capacidad publicada por otra persona | ⬜ **propuesta, fase 6 · §20.9** — solo con TTY, nunca por `serve` |
+| `/help` | help | ✅ |
+| `/model` | switch model (fuzzy picker) | ✅ |
+| `/models` | browse the catalog inside the session | ✅ |
+| `/theme` | switch theme | ⬜ phase 3 · `[ui] theme` is already honored at startup |
+| `/clear`, `/new` | clear the screen, start a new conversation | ✅ |
+| `/compact` | summarize history (§9.8) | ✅ |
+| `/copy`, `/retry`, `/stats` | copy, retry, usage and cost | ✅ |
+| `/resume` | reopen a previous session | ✅ |
+| `/config`, `/debug` | view config with secrets redacted, diagnostics | ⬜ step 18 · today `KindUnimplemented` points at `ishakat config check`/`ishakat doctor` instead of a silent no-op |
+| `/login` | authenticate via OAuth device flow | ✅ step 24 closed 2026-08-12 · full wizard inside the TUI (`ModeLogin`) with `internal/app.NewLoginFactory` driving the real HTTP flow (device code → poll → verify → save), with `internal/tui` never importing `net/http` |
+| `/exit` | quit | ✅ |
+| `/tools` | list tools: status, origin, times used, last used | ⬜ step 20 |
+| `/tools code <name>` | view the full manifest and script | ⬜ step 20 |
+| `/tools audit` | each tool's provenance: `sources`, `session_id`, SHA-256 | ⬜ step 21 |
+| `/tools create [--force]` | create one by hand; `--force` skips gate 1 and logs it (§19.6) | ⬜ step 21 |
+| `/tools edit`, `/tools delete` | fix (demotes to `unverified`), delete | ⬜ step 21 |
+| `/tools revive <name>` | return an archived tool to the prompt (§19.5) | ⬜ step 21 |
+| `/skills` | list the loaded prose capabilities | ✅ |
+| `/tools install <ref>` | install a capability published by someone else | ⬜ **proposal, phase 6 · §20.9** — TTY only, never via `serve` |
 
-`/tools` es la contrapartida de la autoextensión, no un adorno: la garantía de
-§19.8 es que todo lo que ishakat escribe se puede inspeccionar, y sin estos
-comandos esa garantía no tiene dónde ejercerse.
+`/tools` is autoextension's counterpart, not a decoration: §19.8's guarantee is
+that everything ishakat writes can be inspected, and without these commands
+that guarantee has nowhere to be exercised.
 
-> **La columna de estado se verifica contra el código, no contra la memoria.**
-> Cuando se corrigió, cuatro filas estaban mal en las dos direcciones: `/copy`,
-> `/retry` y `/stats` figuraban como pendientes y ya estaban implementados
-> (paso 13, PR #29), mientras `/theme`, `/config`, `/debug` y `/models`
-> figuraban como ✅ y son `KindUnimplemented` en `internal/slash/slash.go`.
-> **La segunda dirección es la peligrosa:** un pendiente marcado como hecho es
-> una función que nadie va a construir porque el documento dice que ya existe.
-> La fuente de verdad es la tabla `Commands` más el `switch` de
-> `internal/tui/slashrun.go`; un `Kind` que no tiene `case` allí no está
-> implementado, diga lo que diga esta sección.
+> **The status column is checked against the code, not against memory.**
+> When it was fixed, four rows were wrong in both directions: `/copy`,
+> `/retry` and `/stats` were listed as pending and were already implemented
+> (step 13, PR #29), while `/theme`, `/config`, `/debug` and `/models` were
+> listed as ✅ and are `KindUnimplemented` in `internal/slash/slash.go`.
+> **The second direction is the dangerous one:** a pending item marked as
+> done is a feature nobody is going to build, because the document says it
+> already exists. The source of truth is the `Commands` table plus the
+> `switch` in `internal/tui/slashrun.go`; a `Kind` with no `case` there is not
+> implemented, no matter what this section says.
 
-**Atajos:** `Tab` autocompletar, `Ctrl+P` selector de modelos, `Ctrl+O` rotar favoritos, `Ctrl+T` selector de temas, `Ctrl+J` salto de línea, `Esc` cancelar generación, `Ctrl+C` dos veces para salir, `Ctrl+L` limpiar pantalla, `Ctrl+Y` copiar última respuesta.
+**Shortcuts:** `Tab` autocomplete, `Ctrl+P` model picker, `Ctrl+O` rotate favorites, `Ctrl+T` theme picker, `Ctrl+J` newline, `Esc` cancel generation, `Ctrl+C` twice to quit, `Ctrl+L` clear screen, `Ctrl+Y` copy last response.
 
-`Esc` gana un significado nuevo en la fase 2.5: cancela también a mitad del
-bucle agéntico, y el paso 14 exige que hacerlo no deje un archivo a medio
-escribir (de ahí el escribir-y-renombrar de §12bis).
+`Esc` gains a new meaning in Phase 2.5: it also cancels mid-agentic-loop, and
+step 14 requires that doing so never leaves a file half-written (hence
+§12bis's write-and-rename).
 
-**Subcomandos del binario:** `ishakat` (TUI), `ishakat -p "texto"` (headless), `ishakat --resume`, `ishakat models [--json]`, `ishakat config init|path|check`, `ishakat doctor`, `ishakat version`. La fase 2.5 añade `ishakat serve` (paso 23) y `ishakat login` (paso 24). `ishakat install|uninstall|update|search|publish` son **propuesta, no compromiso** (§20.9): no existen, y no se implementan sin cerrar §20 primero.
+**Binary subcommands:** `ishakat` (TUI), `ishakat -p "text"` (headless), `ishakat --resume`, `ishakat models [--json]`, `ishakat config init|path|check`, `ishakat doctor`, `ishakat version`. Phase 2.5 adds `ishakat serve` (step 23) and `ishakat login` (step 24). `ishakat install|uninstall|update|search|publish` are **a proposal, not a commitment** (§20.9): they do not exist, and are not implemented without closing §20 first.
 
-**Flags de permisos**, que son los únicos que pueden causar daño y por eso se
-listan aparte:
+**Permission flags**, the only ones that can cause damage and are therefore
+listed separately:
 
-| Flag | Qué concede | Qué **no** concede |
+| Flag | What it grants | What it does **not** grant |
 |---|---|---|
-| `--yolo` | ejecutar `bash` y escribir archivos sin preguntar | **no** concede crear herramientas |
-| `--allow-tool-create` | crear herramientas sin TTY (`-p`, `serve`, cron, CI) | nada más; no implica `--yolo` |
-| `--no-anim` | — | (apaga animaciones; no es un permiso) |
+| `--yolo` | run `bash` and write files without asking | does **not** grant creating tools |
+| `--allow-tool-create` | create tools without a TTY (`-p`, `serve`, cron, CI) | nothing else; does not imply `--yolo` |
+| `--no-anim` | — | (turns off animations; not a permission) |
 
-Que sean dos flags y no uno es deliberado. `--yolo` se escribe cuando alguien
-está cansado de confirmar cada comando, y ese estado de ánimo no debería poder
-autorizar que el agente se instale capacidades nuevas de forma permanente
-(§19.7). Conceder autoextensión tiene que ser una frase aparte, escrita a
-propósito en el script concreto que la necesita.
+That these are two flags and not one is deliberate. `--yolo` gets typed when
+someone is tired of confirming every command, and that state of mind should
+not be able to authorize the agent installing new capabilities permanently
+(§19.7). Granting autoextension has to be a separate, deliberate line, written
+into the specific script that needs it.
 
-Si algún día se acepta §20, `ishakat install` hereda exactamente esa regla y por
-el mismo motivo, no por analogía: traer una capacidad permanente desde internet
-es estrictamente más peligroso que escribir una en local, así que tampoco lo
-concede `--yolo` ni funciona sin TTY sin un flag propio escrito a mano.
+If §20 is ever accepted, `ishakat install` inherits exactly that rule and for
+the same reason, not by analogy: bringing in a permanent capability from the
+internet is strictly more dangerous than writing one locally, so it is not
+granted by `--yolo` either, nor does it work without a TTY without its own
+hand-written flag.
 
 ---
 
