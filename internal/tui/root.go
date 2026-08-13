@@ -203,6 +203,14 @@ type Root struct {
 	quitting bool
 
 	cfgBanner bool
+	// cfgSyntax is ui.syntax (config/schema.go's UI.Syntax, defaults.toml's
+	// syntax = true, unread by anything until codeblock.go): whether fenced
+	// code blocks in the transcript get Chroma's tokeniser run over them at
+	// all. false still draws the §9.3 rail — that is a layout choice, not a
+	// colour one — it only skips the highlighting itself, the same way
+	// theme.CapNone already does inside syntaxStyleFor for a terminal that
+	// cannot show colour regardless of what the config says.
+	cfgSyntax bool
 	fps       int
 
 	// animMode and cap are ui.animations.mode and the terminal's colour
@@ -674,6 +682,7 @@ func NewRoot(o Options) Root {
 		input:      NewInput(lay.InputPrefix()),
 		fps:        fps,
 		cfgBanner:  o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:  o.Cfg == nil || o.Cfg.UI.Syntax,
 		animMode:   anim.Mode,
 		cap:        o.Cap,
 		eng:        engineOr(o.Engine),
@@ -1586,7 +1595,7 @@ func (m Root) evictOverflow() (Root, tea.Cmd) {
 		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
 			break
 		}
-		cmds = append(cmds, commitEntryCmd(g, width, m.transcript[m.printedUpTo]))
+		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax))
 		m.printedUpTo++
 	}
 	return m, tea.Batch(cmds...)
