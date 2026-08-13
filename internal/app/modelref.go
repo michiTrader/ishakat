@@ -65,6 +65,34 @@ func ResolveModel(cfg *config.Config, text string) (ModelRef, error) {
 	}, nil
 }
 
+// ResolveFallbackModel resolves app.fallback_model (§4.2's Ref form) to its
+// canonical Ref for tui.Options.FallbackModel, or reports why it could not.
+// This is app.go's own Run split out so it is unit-testable without the
+// rest of Run's startup sequence (config.Load, theme.Detect, a live
+// *tea.Program) — the same reason SystemPrompt/DiscoverSkills are their own
+// functions rather than inline blocks in Run.
+//
+// raw == "" (defaults.toml's documented "no separate fallback") returns ""
+// with no error and, deliberately, without ever calling ResolveModel: an
+// empty text there falls back to app.default_model (lookupModelProvider's
+// own empty-string rule, meant for compact_model's "same as default"
+// convenience), which would silently turn "no fallback configured" into
+// "fall back to the model that just failed" — exactly the infinite loop
+// tui.Root.checkFallback's own from == m.fallbackModel guard exists to
+// avoid, and this is the one call site that must never let it happen by
+// resolving something that was never meant to resolve to anything.
+func ResolveFallbackModel(cfg *config.Config) (string, error) {
+	raw := strings.TrimSpace(cfg.App.FallbackModel)
+	if raw == "" {
+		return "", nil
+	}
+	ref, err := ResolveModel(cfg, raw)
+	if err != nil {
+		return "", fmt.Errorf("fallback_model %q: %w", raw, err)
+	}
+	return ref.Ref, nil
+}
+
 // lookupModelProvider is ResolveModel's actual resolution logic, split out
 // so ResolveModelForBoot (P2) can inspect the config.Provider a reference
 // pointed at even when it turns out to be unusable — ResolveModel itself

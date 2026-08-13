@@ -195,6 +195,18 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
 	})
 
+	// checkFallback's own counter (§11 Phase 4, root.go's finishTurn has
+	// the full comment): a real provider failure extends the streak, and
+	// nothing else does — result.Aborted is the user's own cancellation,
+	// and result.Stopped is a cap/budget/loop-detection stop the loop chose
+	// on purpose, neither of which says anything about whether the
+	// provider itself is working.
+	if err != nil {
+		m.consecutiveFailures++
+	} else {
+		m.consecutiveFailures = 0
+	}
+
 	m.releaseTurn()
 	m.live = liveTurn{}
 	m.mode = ModeChat

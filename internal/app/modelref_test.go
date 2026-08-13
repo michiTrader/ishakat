@@ -113,6 +113,63 @@ func TestResolveModelNoModel(t *testing.T) {
 	}
 }
 
+// TestResolveFallbackModelEmptyIsANoOp covers defaults.toml's documented
+// meaning of fallback_model = "": ResolveFallbackModel must return "" with
+// no error, and — the actual regression this pins — never fall through to
+// ResolveModel's own empty-string rule (which would silently resolve "" to
+// app.default_model, exactly the model checkFallback would then be asked
+// to fall back to from itself).
+func TestResolveFallbackModelEmptyIsANoOp(t *testing.T) {
+	cfg := cfgWithProviders()
+	cfg.App.FallbackModel = ""
+
+	got, err := ResolveFallbackModel(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("ResolveFallbackModel(\"\") = %q, want empty (never app.default_model)", got)
+	}
+}
+
+// TestResolveFallbackModelResolvesAConfiguredRef is the ordinary case: a
+// real fallback_model resolves through the same ResolveModel path as any
+// other reference (§4.2), to the canonical Ref form checkFallback's own
+// string comparison against m.model needs.
+func TestResolveFallbackModelResolvesAConfiguredRef(t *testing.T) {
+	cfg := cfgWithProviders()
+	cfg.App.FallbackModel = "smart" // alias for omniroute/auto/coding
+
+	got, err := ResolveFallbackModel(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "omniroute/auto/coding" {
+		t.Fatalf("ResolveFallbackModel(%q) = %q, want the resolved alias", cfg.App.FallbackModel, got)
+	}
+}
+
+// TestResolveFallbackModelReportsAnUnresolvableRef covers the warning path
+// app.go's own Run takes when fallback_model names a disabled or unknown
+// provider: the interactive session must still start (a warning, not a
+// fatal error, same rule compact_model's own resolution failure follows),
+// but the caller needs a non-nil error to know to print one.
+func TestResolveFallbackModelReportsAnUnresolvableRef(t *testing.T) {
+	cfg := cfgWithProviders()
+	cfg.App.FallbackModel = "openai/gpt-5" // openai is Enabled: false above
+
+	got, err := ResolveFallbackModel(cfg)
+	if err == nil {
+		t.Fatal("a fallback_model naming a disabled provider must report an error")
+	}
+	if got != "" {
+		t.Fatalf("got = %q, want empty on error", got)
+	}
+	if !strings.Contains(err.Error(), "fallback_model") {
+		t.Errorf("the error must name fallback_model, it says: %v", err)
+	}
+}
+
 func TestSettingsPerProviderTimeout(t *testing.T) {
 	cfg := cfgWithProviders()
 	cfg.App.TimeoutS = 120

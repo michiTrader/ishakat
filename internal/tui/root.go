@@ -311,6 +311,25 @@ type Root struct {
 	compactStrategy      string
 	compactOnError       string
 
+	// fallbackModel mirrors [app].fallback_model (config.App.FallbackModel,
+	// §4.2's Ref form, same as compactModel above), already resolved by
+	// internal/app before NewRoot ever runs — this package never reads
+	// config itself (§6.1). Empty means "no separate fallback": the
+	// documented meaning of an empty fallback_model in defaults.toml, and
+	// checkFallback below is a no-op whenever this is "" or already equal
+	// to m.model, so a session with nothing configured behaves exactly as
+	// it did before this field existed.
+	fallbackModel string
+
+	// consecutiveFailures counts turns that ended in finishTurn/
+	// finishAgentTurn with err != nil, back to back. A turn that ends
+	// without an error (including one aborted by the user, §7.4 — a
+	// cancellation is not the model's fault) resets this to zero: the
+	// Phase 4 contract this exists for is "the active model failed twice
+	// in a row", not "failed twice ever", so a single stray error
+	// surrounded by working turns must never trip the switch below.
+	consecutiveFailures int
+
 	// compact is the Step 12 overlay's own state (§9.8), live only while
 	// mode == ModeCompact.
 	compact compactState
@@ -564,6 +583,15 @@ type Options struct {
 	CompactStrategy      string
 	CompactOnError       string
 
+	// FallbackModel mirrors [app].fallback_model (config.App.FallbackModel,
+	// §4.2's Ref form, same shape as Model/CompactModel above) — Phase 4's
+	// "automatic fallback to fallback_model if the active one fails twice
+	// in a row" (docs/PLAN.md §11). Empty is the documented default
+	// ("no separate fallback"): checkFallback (root.go) never fires with
+	// nothing configured, the same "nothing wired, nothing happens" rule
+	// EvolveStore/Recorder/SessionLister above already establish.
+	FallbackModel string
+
 	// Recorder persists completed messages (§10). nil means this session is
 	// not saved — [session] save = false, or a store internal/app could not
 	// open — and is a supported value, not a bug: the interface must work
@@ -714,6 +742,8 @@ func NewRoot(o Options) Root {
 		compactKeepLastTurns: compactKeepLastTurns,
 		compactStrategy:      compactStrategy,
 		compactOnError:       compactOnError,
+
+		fallbackModel: o.FallbackModel,
 
 		// Recorder was documented on Options as the persistence seam (§10,
 		// Step 13) but never actually assigned here — every real session
@@ -1466,6 +1496,19 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
 	})
 
+	// checkFallback's own counter (§11 Phase 4): a real provider failure
+	// (err != nil) extends the streak; anything else — a clean answer, or
+	// the user's own esc/ctrl+c (aborted, never the model's fault) — resets
+	// it. See checkFallback's doc comment for why this lives here instead
+	// of inside it: the streak has to reflect every turn that ever closed
+	// through finishTurn, not just the ones checkEndOfTurn happens to run
+	// a fallback check after.
+	if err != nil {
+		m.consecutiveFailures++
+	} else {
+		m.consecutiveFailures = 0
+	}
+
 	// The history keeps the model's actual words — not the "[cancelado]"
 	// suffix or the error line, which are presentation. A cancelled turn is
 	// still recorded (with Aborted set) because the user saw it and may well
@@ -1498,22 +1541,78 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 }
 
 // checkEndOfTurn is finishTurn's and finishAgentTurn's actual shared
-// tail: run §10's auto-compact check first, and only offer §19.7's
-// crystallization suggestion (checkSuggest, suggest.go) if that check
-// left the turn fully settled in ModeChat — never behind checkAutoCompact's
-// own async ModeCompact overlay. Order matters here for the same reason
-// it matters in confirmOptionsFor's own priority comment: a suggestion
-// dialog opening on top of (or racing) an in-flight compaction would be
-// asking the user to read two unrelated things at once, and compaction is
-// the one of the two that must not be delayed — an over-full context
-// window breaks the very next request, while a crystallization offer can
-// always wait for the next turn that ends cleanly.
+// tail: run §11 Phase 4's automatic-fallback check first, then §10's
+// auto-compact check, and only offer §19.7's crystallization suggestion
+// (checkSuggest, suggest.go) if that second check left the turn fully
+// settled in ModeChat — never behind checkAutoCompact's own async
+// ModeCompact overlay. Order matters here for the same reason it matters
+// in confirmOptionsFor's own priority comment: a suggestion dialog opening
+// on top of (or racing) an in-flight compaction would be asking the user
+// to read two unrelated things at once, and compaction is the one of the
+// two that must not be delayed — an over-full context window breaks the
+// very next request, while a crystallization offer can always wait for
+// the next turn that ends cleanly.
+//
+// checkFallback runs first, ahead of both, because it can change m.model:
+// checkAutoCompact's own window lookup (m.cat.Get(m.model)) has to see
+// whatever model is active by the end of this turn, not the one that just
+// failed twice and is about to be abandoned. checkFallback is always
+// synchronous (a plain relabel-and-rebuild, exactly like commitModelSwitch)
+// and its own tea.Cmd is always nil — there is nothing to wait on, so
+// discarding it here rather than batching it with checkAutoCompact's is
+// not a bug, only a simplification checkFallback's own doc comment repeats.
 func (m Root) checkEndOfTurn() (tea.Model, tea.Cmd) {
-	next, cmd := m.checkAutoCompact()
-	if r, ok := next.(Root); ok && r.mode == ModeChat {
-		return r.checkSuggest()
+	next, _ := m.checkFallback()
+	r, ok := next.(Root)
+	if !ok {
+		return next, nil
+	}
+	next, cmd := r.checkAutoCompact()
+	if r2, ok := next.(Root); ok && r2.mode == ModeChat {
+		return r2.checkSuggest()
 	}
 	return next, cmd
+}
+
+// checkFallback is checkEndOfTurn's own first half, implementing §11 Phase
+// 4's "automatic fallback to fallback_model if the active one fails twice
+// in a row — OmniRoute already does this internally, but a user pointing
+// directly at a provider needs it." consecutiveFailures is finishTurn's/
+// finishAgentTurn's own streak (see their comments on why an aborted or
+// successful turn resets it to zero): reaching 2 fires the switch exactly
+// once and resets the counter immediately, so a fallback_model that itself
+// keeps failing is not retried on every subsequent turn — it only fires
+// again after two more failures against whatever model ends up active.
+//
+// fallbackModel == "" (defaults.toml's documented meaning: "no separate
+// fallback") or already equal to m.model (nothing to switch to, e.g. the
+// fallback itself is the one that just failed twice) both leave this a
+// no-op — the same "nothing configured, nothing happens" rule checkSuggest's
+// own evolveStore == nil guard already follows for §19.7.
+//
+// The switch itself reuses switchEngine (engine.go), the exact seam
+// commitModelSwitch already calls for /model and the picker — see its own
+// comment for why relabelling m.model without rebuilding m.eng was the
+// original bug this whole mechanism has to avoid repeating. This does not
+// call commitModelSwitch directly because that function's own confirmLine
+// notice ("── now: X ──") reads as a choice the user just made; an
+// automatic recovery has to say plainly that it was automatic and why, or
+// the switch would look like an unexplained ctrl+p the user never pressed.
+func (m Root) checkFallback() (tea.Model, tea.Cmd) {
+	if m.fallbackModel == "" || m.fallbackModel == m.model || m.consecutiveFailures < 2 {
+		return m, nil
+	}
+	from := m.model
+	m.consecutiveFailures = 0
+	next, err := switchEngine(m, m.fallbackModel)
+	m = next
+	m.model = m.fallbackModel
+	m.footer.Model = m.fallbackModel
+	notice := m.lay.glyphs().warnMark + " " + from + " falló dos veces seguidas; cambiando automáticamente al fallback " + m.fallbackModel
+	if err != nil {
+		notice += ", pero no se pudo preparar ese proveedor tampoco: " + err.Error()
+	}
+	return m.slashNotice(notice)
 }
 
 // checkAutoCompact is checkEndOfTurn's own first half: the §10

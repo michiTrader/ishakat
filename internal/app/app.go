@@ -128,6 +128,22 @@ func Run(version string, resume bool) int {
 	}
 	warnp.Warn(os.Stderr, compactWarn)
 
+	// fallback_model (§11 Phase 4, root.go's checkFallback): resolved to
+	// its canonical Ref once here, via ResolveFallbackModel (modelref.go —
+	// see its own comment for why "" is never passed through ResolveModel).
+	// Unlike CompactModel this does NOT go through BuildEngine: checkFallback
+	// rebuilds its own engine lazily, only once a switch actually fires, via
+	// the exact same EngineFor factory below — building (and immediately
+	// discarding) a second *engine.Engine for a fallback that may never be
+	// needed this session would be wasted work on every single launch. A
+	// resolution failure is a warning, not fatal — exactly like compactErr
+	// above, since the interactive session still works with no fallback at
+	// all.
+	fallbackRef, fallbackErr := ResolveFallbackModel(cfg)
+	if fallbackErr != nil {
+		warnp.Warn(os.Stderr, fallbackErr.Error())
+	}
+
 	// Step 16's tool layer, interactive side: when cfg.Tools.Enabled, every
 	// turn runs through engine.RunAgentTurn (tui.Root.startAgentTurn)
 	// instead of eng.Start's plain stream drain, and any tool call that
@@ -277,6 +293,8 @@ func Run(version string, resume bool) int {
 		CompactKeepLastTurns: cfg.Compact.KeepLastTurns,
 		CompactStrategy:      cfg.Compact.Strategy,
 		CompactOnError:       cfg.Compact.OnError,
+
+		FallbackModel: fallbackRef,
 
 		Recorder:      recorder,
 		History:       history,
