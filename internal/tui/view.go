@@ -116,12 +116,12 @@ func (m Root) head() string {
 	// terminal's height (see commitEntryCmd's comment).
 	width := m.lay.ContentWidth()
 	for _, e := range m.transcript[m.printedUpTo:] {
-		b.WriteString(renderTranscriptLine(m.styles, g, width, e.role, e.name, e.text, e.ts, m.cfgSyntax))
+		b.WriteString(renderTranscriptLine(m.styles, g, width, e.role, e.name, e.text, e.ts, m.cfgSyntax, m.cfgMarkdown))
 		b.WriteString("\n\n")
 	}
 
 	if m.live.active {
-		b.WriteString(renderLiveTurn(m.styles, g, width, m.live, CrushFrame(m.lay, m.animOffset), " esc cancela\n", m.cfgSyntax))
+		b.WriteString(renderLiveTurn(m.styles, g, width, m.live, CrushFrame(m.lay, m.animOffset), " esc cancela\n", m.cfgSyntax, m.cfgMarkdown))
 		b.WriteString("\n")
 	}
 

@@ -113,25 +113,25 @@ func (t liveTurn) elapsed() time.Duration {
 // Fenced code blocks are no longer deferred either (codeblock.go, Fase 3):
 // the body is handed to renderMessageBody, which draws §9.3's own rail for
 // any ``` fence it finds and, when highlightCode is true, colours the code
-// inside it with Chroma. Everything else — bold, headers, links, the rest of
-// what Glamour would add — is still out of scope for this increment.
-func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode bool) string {
+// inside it with Chroma. Prose outside a fence — bold, headers, links,
+// lists — goes through Glamour (markdown.go) when renderProse is true.
+func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse bool) string {
 	marker := g.userMark
 	if role == "assistant" {
 		marker = g.assistantMark
 	}
 	header := fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04"))
-	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode)
+	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse)
 }
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
 // (§9.3) y, si está en curso, la línea de animación con tiempo/tokens.
-func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode bool) string {
+func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode, renderProse bool) string {
 	if !t.active {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode))
+	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode, renderProse))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokenCount()))
 	b.WriteString(plainCancelHint)
@@ -158,6 +158,6 @@ func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush 
 // The trailing "\n" is not tea.Println's own line break (it supplies that):
 // it is the blank separator line the old inline loop in head() used to leave
 // between bubbles, kept here so scrollback looks the same as it always did.
-func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode bool) tea.Cmd {
-	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode) + "\n")
+func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode, renderProse bool) tea.Cmd {
+	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode, renderProse) + "\n")
 }

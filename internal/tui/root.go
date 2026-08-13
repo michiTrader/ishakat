@@ -211,7 +211,16 @@ type Root struct {
 	// theme.CapNone already does inside syntaxStyleFor for a terminal that
 	// cannot show colour regardless of what the config says.
 	cfgSyntax bool
-	fps       int
+
+	// cfgMarkdown is ui.markdown (config/schema.go's UI.Markdown, defaults.toml's
+	// markdown = true, unread by anything until markdown.go): whether prose
+	// outside a fenced code block is handed to Glamour for bold/headers/
+	// links/lists, or left as the plain wrapText output every message got
+	// before this increment. It is a separate flag from cfgSyntax because
+	// the two gate two different renderers over two different kinds of text
+	// (see renderMessageBody's own comment).
+	cfgMarkdown bool
+	fps         int
 
 	// animMode and cap are ui.animations.mode and the terminal's colour
 	// capability, kept so a resize can re-resolve Layout.AnimationsOff rather
@@ -672,30 +681,31 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:    o.Version,
-		cwd:        o.CWD,
-		mode:       ModeChat,
-		lay:        lay,
-		styles:     styles,
-		themesDir:  o.ThemesDir,
-		themeStore: o.ThemeStore,
-		input:      NewInput(lay.InputPrefix()),
-		fps:        fps,
-		cfgBanner:  o.Cfg == nil || o.Cfg.UI.Banner,
-		cfgSyntax:  o.Cfg == nil || o.Cfg.UI.Syntax,
-		animMode:   anim.Mode,
-		cap:        o.Cap,
-		eng:        engineOr(o.Engine),
-		engineFor:  o.EngineFor,
-		loginFor:   o.LoginFor,
-		model:      model,
-		system:     o.System,
-		commands:   slash.Default(),
-		cat:        o.Catalog,
-		skills:     o.Skills,
-		alias:      o.Alias,
-		preferFree: o.PreferFree,
-		favorites:  o.Favorites,
+		version:     o.Version,
+		cwd:         o.CWD,
+		mode:        ModeChat,
+		lay:         lay,
+		styles:      styles,
+		themesDir:   o.ThemesDir,
+		themeStore:  o.ThemeStore,
+		input:       NewInput(lay.InputPrefix()),
+		fps:         fps,
+		cfgBanner:   o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:   o.Cfg == nil || o.Cfg.UI.Syntax,
+		cfgMarkdown: o.Cfg == nil || o.Cfg.UI.Markdown,
+		animMode:    anim.Mode,
+		cap:         o.Cap,
+		eng:         engineOr(o.Engine),
+		engineFor:   o.EngineFor,
+		loginFor:    o.LoginFor,
+		model:       model,
+		system:      o.System,
+		commands:    slash.Default(),
+		cat:         o.Catalog,
+		skills:      o.Skills,
+		alias:       o.Alias,
+		preferFree:  o.PreferFree,
+		favorites:   o.Favorites,
 
 		compactEng:           o.CompactEngine,
 		compactModel:         o.CompactModel,
@@ -1595,7 +1605,7 @@ func (m Root) evictOverflow() (Root, tea.Cmd) {
 		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
 			break
 		}
-		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax))
+		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown))
 		m.printedUpTo++
 	}
 	return m, tea.Batch(cmds...)
