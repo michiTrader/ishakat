@@ -1036,7 +1036,7 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     case streamTickMsg:
         chunk, usage, done, err := m.buf.Drain()
         if chunk != "" {
-            m.live.Append(chunk)   // re-envuelve solo el bloque vivo
+            m.live.Append(chunk)   // re-wraps only the live block
         }
         if usage != nil {
             m.live.Usage = usage
@@ -1044,7 +1044,7 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         if !done {
             return m, tickStream(m.lay.StreamInterval) // 50ms normal, 100ms battery saver
         }
-        return m.finishTurn(err)   // commit a scrollback + volver a ModeChat
+        return m.finishTurn(err)   // commit to scrollback + return to ModeChat
 
     case tea.KeyPressMsg:
         if m.mode == ModeBusy && msg.String() == m.keys.Cancel {
@@ -1057,21 +1057,21 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 ```
 
-Veinte repintados por segundo se leen perfectamente fluidos y cuestan una fracción del CPU. Y como el tick solo se re-emite mientras hay un turno vivo, la aplicación en reposo consume exactamente cero: no hay ticker global de fondo, que es el pecado clásico de los TUIs con animaciones. El spinner y la carita corren en un tick independiente a `ui.animations.fps`, también activo solo en `ModeBusy`. Dos relojes, dos presupuestos.
+Twenty repaints per second read as perfectly smooth and cost a fraction of the CPU. And since the tick only re-emits while there is a live turn, the idle application consumes exactly zero: there is no global background ticker, which is the classic sin of TUIs with animations. The spinner and the (currently unused) face run on a tick independent of `ui.animations.fps`, also active only in `ModeBusy`. Two clocks, two budgets.
 
-### 7.4 Cancelación y cierre del turno
+### 7.4 Cancellation and closing the turn
 
-`esc` llama al `context.CancelFunc`. El engine ve el contexto muerto, cierra el cuerpo de la respuesta, escribe `done = true` en el buffer y termina la goroutine. El siguiente `streamTickMsg` drena lo que quedó y llama a `finishTurn`, que guarda el parcial como mensaje del asistente con `Aborted: true`.
+`esc` calls `context.CancelFunc`. The engine sees the dead context, closes the response body, writes `done = true` in the buffer and ends the goroutine. The next `streamTickMsg` drains what was left and calls `finishTurn`, which saves the partial as an assistant message with `Aborted: true`.
 
-`ctrl+c` una vez en `ModeBusy` equivale a `esc`. Dos veces en menos de un segundo, sale. Nunca salir con un solo `ctrl+c` durante generación: es demasiado fácil perder una respuesta larga por reflejo.
+`ctrl+c` once in `ModeBusy` is equivalent to `esc`. Twice within a second, it quits. Never quit on a single `ctrl+c` during generation: it is too easy to lose a long response by reflex.
 
-### 7.5 Commit al scrollback
+### 7.5 Commit to scrollback
 
-Mientras hace streaming, el turno vive en el modelo. Al terminar se renderiza a texto definitivo, se emite con `tea.Printf` —que escribe por encima de la región dinámica sin pelearse con el renderer— y se borra del estado vivo. Ese es el equivalente exacto del `<Static>` de Ink.
+While streaming, the turn lives in the model. When it finishes it is rendered to final text, emitted with `tea.Printf` — which writes above the dynamic region without fighting the renderer — and cleared from live state. That is the exact equivalent of Ink's `<Static>`.
 
 ---
 
-## 8. Contrato 4: el tema como datos
+## 8. Contract 4: theme-as-data
 
 ```toml
 # ~/.config/ishakat/themes/ascua.toml
@@ -1079,7 +1079,7 @@ name = "ascua"
 dark = true
 
 [gradient]
-space  = "oklab"                          # oklab | oklch | hsl — nunca rgb lineal
+space  = "oklab"                          # oklab | oklch | hsl — never linear rgb
 stops  = ["#ff6a3d", "#ffa63d", "#ffe0a3"]
 scroll = true
 
@@ -1101,27 +1101,27 @@ string  = "#8ec07c"
 comment = "#6b655f"
 number  = "#d3869b"
 
-# Overrides opcionales. Bubble Tea v2 hace downsampling automático;
-# esto solo se declara cuando el resultado automático no convence.
+# Optional overrides. Bubble Tea v2 does automatic downsampling;
+# this is only declared when the automatic result is not convincing.
 [fallback.256]
 accent = 209
 [fallback.16]
 accent = "yellow"
 ```
 
-Los degradados se interpolan en espacio perceptual (Oklab) y no en RGB lineal, porque en RGB los pasos intermedios se ven sucios y grisáceos. La detección de capacidades lee `COLORTERM`, `TERM` y `NO_COLOR`, con override por `[ui] color`. Termux reporta truecolor correctamente.
+Gradients are interpolated in perceptual space (Oklab), not linear RGB, because in RGB the intermediate steps look dirty and greyish. Capability detection reads `COLORTERM`, `TERM` and `NO_COLOR`, with an override via `[ui] color`. Termux reports truecolor correctly.
 
 ---
 
-## 9. Interfaz: wireframes a 40 columnas
+## 9. Interface: 40-column wireframes
 
 ### 9.1 Breakpoints
 
-Cuatro modos, recalculados en cada `WindowSizeMsg`. Bajo 40 columnas es mínimo: sin cajas, sin banner, sin animaciones, prefijos de un carácter, footer de una línea recortada. De 40 a 59 es estrecho, que es Termux en vertical y es el que hay que hacer bien. De 60 a 99 es normal: bordes completos, dropdown de autocompletado, footer de dos secciones. De 100 en adelante es ancho: el selector pasa a dos columnas con panel de detalle y el texto se limita a `max_width`.
+Four modes, recalculated on every `WindowSizeMsg`. Under 40 columns is minimal: no boxes, no banner, no animations, single-character prefixes, a trimmed one-line footer. From 40 to 59 is narrow, which is Termux held vertically and the one that has to be done right. From 60 to 99 is normal: full borders, autocomplete dropdown, two-section footer. From 100 up is wide: the picker becomes two columns with a detail panel and text is capped at `max_width`.
 
-Todos los wireframes siguientes miden exactamente 40 columnas.
+All the following wireframes measure exactly 40 columns.
 
-### 9.2 Arranque
+### 9.2 Startup
 
 ```
 1...5....0....5....0....5....0....5....0
