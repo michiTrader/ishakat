@@ -752,7 +752,7 @@ Error messages name the provider by its `id`, not by its index, and carry an exa
 
 ### 5.4 Provider adapter contract
 
-Para que ese TOML sea suficiente, el código expone una sola interfaz:
+For that TOML to be enough, the code exposes a single interface:
 
 ```go
 // internal/provider/provider.go
@@ -779,35 +779,35 @@ type Event struct {
 }
 ```
 
-`kind = "openai"` cubre OmniRoute, OpenAI, Groq, Together, OpenRouter, Ollama, LM Studio y DeepSeek. Los otros dos adaptadores existen únicamente para hablar directo con Anthropic y Google sin pasar por gateway, y por eso se posponen a la Fase 4.
+`kind = "openai"` covers OmniRoute, OpenAI, Groq, Together, OpenRouter, Ollama, LM Studio and DeepSeek. The other two adapters exist solely to talk directly to Anthropic and Google without going through a gateway, and are therefore postponed to Phase 4.
 
 ---
 
-## 6. Estructura del repositorio
+## 6. Repository structure
 
-### 6.1 La regla que ordena todo
+### 6.1 The rule that orders everything
 
-El TUI no sabe qué es HTTP y el proveedor no sabe qué es un color. Todo lo que cruza esa frontera pasa por `convo` y `catalog`, que son tipos puros sin dependencias externas.
+The TUI does not know what HTTP is and the provider does not know what a color is. Everything that crosses that boundary goes through `convo` and `catalog`, which are pure types with no external dependencies.
 
-Esa frontera se prueba, no se promete: un test de CI que corra `go list -deps ./internal/tui` y falle si aparece `net/http`, y el simétrico para `provider` contra `lipgloss`, cuesta veinte líneas y evita el acoplamiento que después hace imposible testear.
+That boundary is tested, not just promised: a CI test that runs `go list -deps ./internal/tui` and fails if `net/http` shows up, and the symmetric one for `provider` against `lipgloss`, costs twenty lines and avoids the coupling that later makes testing impossible.
 
-**Con una advertencia que costó descubrir.** Esos cuatro tests existieron durante meses sin comprobar nada. Un test de Go corre con el directorio de trabajo puesto en el de su propio paquete, así que `deps(t, "./internal/tui")` desde `internal/arch_test.go` resolvía a `internal/internal/tui`, que no existe; `go list` salía con error, y el ayudante interpretaba *cualquier* fallo como "no hay toolchain en el PATH" y llamaba a `t.Skipf`. Cuatro garantías arquitectónicas reportando verde sin mirar nada — peor que no tener test, porque el verde también compraba confianza. La lección general, aplicable a cualquier guardia futuro:
+**With a warning that was costly to discover.** Those four tests existed for months without checking anything. A Go test runs with its working directory set to its own package's, so `deps(t, "./internal/tui")` from `internal/arch_test.go` resolved to `internal/internal/tui`, which does not exist; `go list` exited with an error, and the helper interpreted *any* failure as "no toolchain on PATH" and called `t.Skipf`. Four architectural guarantees reporting green without looking at anything — worse than having no test, because the green also bought false confidence. The general lesson, applicable to any future guard:
 
-- Los paquetes se nombran por su ruta de módulo completa, no relativa, porque la ruta relativa depende de desde dónde corra el test.
-- **Un guardia nunca debe poder saltarse por la misma vía por la que fallaría.** «No hay `go` en el PATH» es un salto legítimo; «`go list` existe y devolvió error» es un fallo, porque significa que la pregunta no se pudo hacer. Fundirlos en un solo `Skipf` fue el bug.
-- Todo test que exista para impedir algo se verifica por mutación: se rompe la propiedad a mano una vez y se comprueba que el test se pone rojo. Si no se ha visto fallar, no se sabe si funciona.
+- Packages are named by their full module path, not a relative one, because the relative path depends on where the test runs from.
+- **A guard must never be able to be skipped by the same path through which it would fail.** "There is no `go` on PATH" is a legitimate skip; "`go list` exists and returned an error" is a failure, because it means the question could not be asked. Merging them into a single `Skipf` was the bug.
+- Every test that exists to prevent something is verified by mutation: break the property by hand once and check that the test turns red. If it has never been seen to fail, you don't know it works.
 
-Los límites de la fase 2.5 (§19) se escriben con estas reglas ya aplicadas, y el de `internal/tools` salta explícitamente mientras el paquete no exista, en vez de fingir que pasa.
+Phase 2.5's boundaries (§19) are written with these rules already applied, and `internal/tools`'s boundary explicitly skips while the package does not yet exist, instead of pretending to pass.
 
-### 6.2 Árbol
+### 6.2 Tree
 
 ```
 ishakat/
 ├── cmd/ishakat/main.go        # flags, subcomandos, elige TUI o headless
 ├── internal/
 │   ├── app/                   # the three front doors (§1), all thin
-│   │   ├── app.go             # door 1: cableado config → catálogo → engine → TUI
-│   │   ├── headless.go        # door 2: ishakat -p "..."  (pipeline sin TUI)
+│   │   ├── app.go             # door 1: wiring config → catalog → engine → TUI
+│   │   ├── headless.go        # door 2: ishakat -p "..."  (pipeline with no TUI)
 │   │   └── serve.go           # door 3: NDJSON/WS for another agent (Step 23)
 │   ├── config/
 │   │   ├── config.go  schema.go  merge.go  load.go
@@ -815,24 +815,24 @@ ishakat/
 │   │   └── defaults.toml      # go:embed
 │   ├── catalog/
 │   │   ├── model.go           # Model, Ref/WireID, Cost, Caps
-│   │   ├── store.go           # caché JSON atómico + TTL
+│   │   ├── store.go           # atomic JSON cache + TTL
 │   │   ├── merge.go           # discovery ∪ models.dev ∪ config
-│   │   ├── resolve.go         # exacto → alias → sufijo → difuso
-│   │   ├── seed.go            # catálogo semilla embebido (go:embed)
-│   │   └── modelsdev.go       # cliente con If-None-Match
+│   │   ├── resolve.go         # exact → alias → suffix → fuzzy
+│   │   ├── seed.go            # embedded seed catalog (go:embed)
+│   │   └── modelsdev.go       # client with If-None-Match
 │   ├── provider/
 │   │   ├── provider.go        # interface Provider + Event + Request
 │   │   ├── registry.go        # kind → constructor
-│   │   ├── openai/            # dialecto OpenAI + parser SSE
-│   │   └── fake/              # httptest.Server y proveedor de pruebas
+│   │   ├── openai/            # OpenAI dialect + SSE parser
+│   │   └── fake/              # httptest.Server and a test provider
 │   ├── convo/
-│   │   ├── message.go         # Message, Block, Role, Usage (tipos puros)
-│   │   ├── store.go           # JSONL append-only, listar, resume
-│   │   ├── tokens.go          # estimador + corrección con usage real
+│   │   ├── message.go         # Message, Block, Role, Usage (pure types)
+│   │   ├── store.go           # JSONL append-only, listing, resume
+│   │   ├── tokens.go          # estimator + correction with real usage
 │   │   └── compact.go         # summarize / drop-oldest
 │   ├── engine/
 │   │   ├── engine.go  turn.go  retry.go  hotswap.go  streambuf.go
-│   │   └── agentloop.go       # tool_call → result → repeat, cap + loop guard (Paso 14)
+│   │   └── agentloop.go       # tool_call → result → repeat, cap + loop guard (Step 14)
 │   ├── tools/                 # §19 layer 1: the eight core tools. stdlib ONLY.
 │   │   ├── tool.go            # Tool interface, Schema, Result, Danger tier
 │   │   ├── registry.go        # native ∪ declarative ∪ script; progressive disclosure
@@ -840,51 +840,51 @@ ishakat/
 │   │   ├── shell.go           # bash (os/exec) + deny-list of obvious shapes
 │   │   ├── fetch.go           # URL → text/markdown, egress allowlist
 │   │   ├── dispatch.go        # sub-agent as a goroutine, isolated context (Paso 22)
-│   │   ├── permission.go      # danger tiers, session allowlist, budget (Paso 16)
+│   │   ├── permission.go      # danger tiers, session allowlist, budget (Step 16)
 │   │   ├── declarative.go     # §19.2 rung 1: tool.toml interpreter + auth schemes
 │   │   ├── script.go          # §19.2 rung 2: run.py / run.sh executor
-│   │   ├── meta.go            # tool_list/create/probe/edit/delete (Paso 21)
+│   │   ├── meta.go            # tool_list/create/probe/edit/delete (Step 21)
 │   │   ├── lifecycle.go       # unverified→verified→archived/broken, hash pinning
 │   │   └── govern.go          # §19.6 gate 1: repetition, dedup, budget, origin
 │   ├── skills/                # §19.2 rung 0: SKILL.md discovery + frontmatter
 │   │   └── skills.go
 │   ├── tui/
-│   │   ├── root.go            # modelo raíz de Bubble Tea
-│   │   ├── msgs.go            # TODOS los tea.Msg propios, en un solo archivo
-│   │   ├── keys.go            # keymap desde config
-│   │   ├── chat.go            # transcript vivo + commit a scrollback
-│   │   ├── input.go           # textarea + dropdown de slash commands
+│   │   ├── root.go            # Bubble Tea root model
+│   │   ├── msgs.go            # ALL our own tea.Msg types, in a single file
+│   │   ├── keys.go            # keymap from config
+│   │   ├── chat.go            # live transcript + commit to scrollback
+│   │   ├── input.go           # textarea + slash-command dropdown
 │   │   ├── footer.go
-│   │   ├── picker.go          # selector de modelos (overlay)
-│   │   ├── confirm.go         # diálogo de cambio con conflicto
-│   │   ├── spinner.go         # animación tipo Crush + carita
-│   │   ├── banner.go          # logo ASCII con degradado
-│   │   └── layout.go          # breakpoints, ancho, recorte
-│   ├── theme/                 # Fase 2: un tema embebido y la interfaz
-│   ├── slash/                 # registro de comandos, parseo, autocompletado
-│   ├── netfix/                # shim de DNS para Android
-│   └── xdg/                   # rutas config/cache/data/state
-├── testdata/                  # fixtures: /v1/models real, recorte api.json, SSE grabado
+│   │   ├── picker.go          # model picker (overlay)
+│   │   ├── confirm.go         # swap dialog with conflict
+│   │   ├── spinner.go         # Crush-style animation + face (reserved, §11 Phase 3)
+│   │   ├── banner.go          # ASCII logo with gradient
+│   │   └── layout.go          # breakpoints, width, truncation
+│   ├── theme/                 # Phase 2: an embedded theme and the interface
+│   ├── slash/                 # command registry, parsing, autocomplete
+│   ├── netfix/                # DNS shim for Android
+│   └── xdg/                   # config/cache/data/state paths
+├── testdata/                  # fixtures: real /v1/models, trimmed api.json, recorded SSE
 ├── themes/ascua.toml
-├── examples/skills/           # Fase 2.5, paso 19: skills de ejemplo (prosa, no sensibles)
-│                              # NO va aquí ninguna herramienta que toque dinero (§16.1)
-├── docs/PLAN.md               # este archivo
-├── docs/ARCHITECTURE.md       # números del spike + decisiones fechadas
+├── examples/skills/           # Phase 2.5, Step 19: example skills (prose, non-sensitive)
+│                              # NO tool that touches money goes here (§16.1)
+├── docs/PLAN.md               # this file
+├── docs/ARCHITECTURE.md       # spike numbers + dated decisions
 ├── config.example.toml
 ├── AGENTS.md
 ├── Makefile
-├── install.sh                 # Paso 13bis: detecta Termux ($PREFIX), instala el binario
+├── install.sh                 # Step 13bis: detects Termux ($PREFIX), installs the binary
 └── .github/workflows/         # release.yml (13bis) + ci.yml
 ```
 
-**Dos entradas de ese árbol todavía no existen y es deliberado:**
-`examples/skills/` aparece en el paso 19 e `install.sh` en el 13bis. Están
-listadas aquí porque el sitio donde alguien busca «dónde va esto» es el árbol, no
-la fase — y porque `examples/` es donde la regla de §16.1 tiene que estar visible:
-lo que entra ahí demuestra el mecanismo, no hace trabajo con las credenciales de
-nadie.
+**Two entries in that tree do not exist yet, and that is deliberate:**
+`examples/skills/` shows up in Step 19 and `install.sh` in 13bis. They are
+listed here because the place someone looks for "where does this go" is the
+tree, not the phase — and because `examples/` is where §16.1's rule has to be
+visible: what goes in there demonstrates the mechanism, it does not do work
+with anyone's credentials.
 
-### 6.3 Comandos de arranque
+### 6.3 Bootstrap commands
 
 ```bash
 mkdir ishakat && cd ishakat && git init
@@ -900,11 +900,11 @@ mkdir -p internal/tui testdata themes docs .github/workflows
 printf 'bin/\ndist/\n*.jsonl\n' > .gitignore
 ```
 
-Las dependencias de Charm entran en el Paso 3, no antes.
+Charm's dependencies come in at Step 3, not before.
 
-### 6.4 Presupuesto de dependencias (Fase 2: seis, máximo)
+### 6.4 Dependency budget (Phase 2: six, maximum)
 
-Bubble Tea v2, Lip Gloss v2, Bubbles v2, un parser TOML (`BurntSushi/toml`), `sahilm/fuzzy` solo como referencia de scoring —lo más probable es terminar con matcher propio porque se necesitan las bonificaciones por dígitos y por uso reciente— y `charmbracelet/x/exp/teatest` solo en tests. Glamour (Markdown) y Chroma (resaltado) se quedan afuera hasta la Fase 3: pesan varios MB y no aportan a "que funcione". Nada de cobra: flag de la stdlib y despacho manual.
+Bubble Tea v2, Lip Gloss v2, Bubbles v2, a TOML parser (`BurntSushi/toml`), `sahilm/fuzzy` only as a scoring reference — the likely outcome is ending up with our own matcher because the digit and recent-use bonuses are needed — and `charmbracelet/x/exp/teatest` only in tests. Glamour (Markdown) and Chroma (highlighting) stay out until Phase 3: they weigh several MB and do not contribute to "it works". No cobra: stdlib flag and manual dispatch.
 
 **Phase 2.5 adds zero dependencies. This is a rule, not an aspiration.** The
 entire agent and self-extension layer (§19) is standard library:
@@ -926,82 +926,82 @@ arranged so it cannot: capabilities are files on disk, not linked code (§3, §1
 library, a headless browser, an MCP client — is a §16 open question that needs an
 explicit decision, not a commit.
 
-### 6.5 El shim de DNS
+### 6.5 The DNS shim
 
 ```go
 // internal/netfix/android.go
-// Instala un resolver propio cuando detecta Android sin /etc/resolv.conf.
-// Lee getprop net.dns1 / net.dns2, cae a 1.1.1.1 y 8.8.8.8 como último recurso.
+// Installs a custom resolver when it detects Android with no /etc/resolv.conf.
+// Reads getprop net.dns1 / net.dns2, falls back to 1.1.1.1 and 8.8.8.8 as a last resort.
 func Install() (active string, err error)
 ```
 
-`ishakat doctor` debe reportar qué resolver está activo, porque diagnosticar esto a ciegas es horrible. Verificación en el dispositivo: `GODEBUG=netdns=go+1 ./ishakat doctor`.
+`ishakat doctor` must report which resolver is active, because diagnosing this blind is horrible. On-device verification: `GODEBUG=netdns=go+1 ./ishakat doctor`.
 
 ---
 
-## 7. El loop de Bubble Tea v2
+## 7. The Bubble Tea v2 loop
 
-### 7.1 Modelo raíz y máquina de estados
+### 7.1 Root model and state machine
 
 ```go
 type Mode int
 const (
-    ModeChat Mode = iota // input enfocado, se puede escribir
-    ModeBusy             // generando; solo esc y ctrl+c
-    ModePicker           // overlay de modelos
-    ModeConfirm          // diálogo de cambio con conflicto
+    ModeChat Mode = iota // input focused, can type
+    ModeBusy             // generating; only esc and ctrl+c
+    ModePicker           // model overlay
+    ModeConfirm          // swap dialog with conflict
     ModeHelp
 )
 
 type Root struct {
     cfg  *config.Config
-    cat  *catalog.Catalog   // snapshot inmutable; se reemplaza entero al refrescar
+    cat  *catalog.Catalog   // immutable snapshot; fully replaced on refresh
     eng  *engine.Engine
     conv *convo.Conversation
 
     mode Mode
-    lay  layout.Layout      // ancho, alto, breakpoint, animaciones on/off
+    lay  layout.Layout      // width, height, breakpoint, animations on/off
     keys keys.Map
 
     input  textarea.Model
-    live   liveTurn         // turno en curso: texto parcial, tokens, inicio
+    live   liveTurn         // turn in progress: partial text, tokens, start
     picker picker.Model
     footer footer.Model
     spin   spinner.Model
 
     buf    *engine.StreamBuf
-    cancel context.CancelFunc // no-nil solo en ModeBusy
+    cancel context.CancelFunc // non-nil only in ModeBusy
     err    *uierr.Item
 }
 ```
 
-`Mode` es una sola variable y todas las decisiones de teclado y render cuelgan de ella. La alternativa —booleanos `showPicker`, `isStreaming`, `confirmOpen`— produce en dos semanas estados imposibles como picker abierto durante streaming con diálogo encima. Un enum, un switch, y se acabó.
+`Mode` is a single variable and every keyboard and render decision hangs off it. The alternative — booleans `showPicker`, `isStreaming`, `confirmOpen` — produces impossible states within two weeks, like a picker open during streaming with a dialog on top. One enum, one switch, done.
 
-El despacho en `Update` va en tres capas y en este orden: mensajes globales que aplican en cualquier modo (`tea.WindowSizeMsg`, ticks, eventos de stream, refresco de catálogo); teclas globales (`ctrl+c`, `ctrl+l`); y solo al final el switch `m.mode` que delega al componente enfocado. Invertir el orden hace que `esc` deje de cancelar cuando hay un overlay abierto.
+Dispatch in `Update` goes in three layers, in this order: global messages that apply in any mode (`tea.WindowSizeMsg`, ticks, stream events, catalog refresh); global keys (`ctrl+c`, `ctrl+l`); and only at the end the `m.mode` switch that delegates to the focused component. Reversing the order makes `esc` stop cancelling when an overlay is open.
 
-### 7.2 La vista declarativa de v2
+### 7.2 v2's declarative view
 
-En v2 `View()` devuelve `tea.View`, no `string`. El modo inline es simplemente no activar `AltScreen`:
+In v2, `View()` returns `tea.View`, not `string`. Inline mode is simply not enabling `AltScreen`:
 
 ```go
 func (m Root) View() tea.View {
     var v tea.View
-    v.SetContent(m.render())        // solo la región viva
-    v.AltScreen = false             // inline: conservamos el scrollback del terminal
-    v.MouseMode = m.mouseMode()     // tea.MouseModeCellMotion solo si cfg.ui.mouse
-    v.Cursor = m.cursorFor()        // posición real del cursor dentro del textarea
+    v.SetContent(m.render())        // only the live region
+    v.AltScreen = false             // inline: we keep the terminal's scrollback
+    v.MouseMode = m.mouseMode()     // tea.MouseModeCellMotion only if cfg.ui.mouse
+    v.Cursor = m.cursorFor()        // real cursor position inside the textarea
     return v
 }
 ```
 
-Las teclas se capturan con `tea.KeyPressMsg` (no `tea.KeyMsg`, que ahora es la interfaz que agrupa press y release), y `msg.String()` sigue siendo la forma cómoda de hacer match. Tres funciones nativas de v2 que se aprovechan directo: `tea.SetClipboard` implementa `/copy` y `ctrl+y` vía OSC52, funcionando incluso sobre SSH; el downsampling de color es automático, así que los bloques `[fallback.256]` del tema pasan de obligatorios a overrides opcionales; y `tea.EnvMsg` entrega el entorno real del cliente, útil para detectar Termux.
+Keys are captured with `tea.KeyPressMsg` (not `tea.KeyMsg`, which is now the interface grouping press and release), and `msg.String()` is still the convenient way to match. Three v2-native features used directly: `tea.SetClipboard` implements `/copy` and `ctrl+y` via OSC52, working even over SSH; color downsampling is automatic, so the theme's `[fallback.256]` blocks go from mandatory to optional overrides; and `tea.EnvMsg` delivers the client's real environment, useful for detecting Termux.
 
-### 7.3 El puente de streaming: coalescing, no un mensaje por token
+### 7.3 The streaming bridge: coalescing, not one message per token
 
-Este es el punto donde la mayoría de los TUIs de IA se ponen lentos en el celular. El patrón canónico —un `Cmd` que lee un evento del canal, lo devuelve como `Msg` y se re-emite— significa un ciclo Update+View completo por token, o sea 80–150 repintados por segundo. La solución es desacoplar la llegada de datos del repintado:
+This is the point where most AI TUIs get slow on a phone. The canonical pattern — a `Cmd` that reads an event from the channel, returns it as a `Msg`, and re-emits — means a full Update+View cycle per token, i.e. 80–150 repaints per second. The solution is to decouple data arrival from repainting:
 
 ```go
-// internal/engine/streambuf.go — vive fuera de Bubble Tea
+// internal/engine/streambuf.go — lives outside Bubble Tea
 type StreamBuf struct {
     mu    sync.Mutex
     text  strings.Builder
