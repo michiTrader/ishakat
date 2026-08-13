@@ -282,13 +282,13 @@ models.dev publishes three endpoints, not one. `api.json` (provider+model combin
 
 **Per-platform compilation.** `CGO_ENABLED=0` for linux and darwin. For android/arm64, `CGO_ENABLED=1` with the NDK, pointing CC at `aarch64-linux-android24-clang`. This is mandatory and non-negotiable: a Go binary without CGO uses Go's pure DNS resolver, which reads `/etc/resolv.conf`, a file Android does not have. The binary starts, prints `--version`, looks perfect, and dies on the first HTTP request with `lookup api.example.com on [::1]:53: connection refused`. The symptom stays hidden for weeks because the default path is `localhost:20128`, which does not go through DNS. As a safety net, `internal/netfix` is implemented (§6.5).
 
-**Modo inline, nunca alt-screen.** En alt-screen se pierde el scrollback del terminal y hay que reimplementar el scroll —que con dedos en un teléfono es peor que el nativo— y se rompe la selección de texto para copiar. En modo inline, lo que ya terminó se imprime una vez con `tea.Printf` y jamás se repinta; lo vivo ocupa las últimas líneas. Es el equivalente del `<Static>` de Ink que usa gemini-cli. Contrapartida aceptada: las líneas ya impresas no se re-envuelven al cambiar el ancho del terminal.
+**Inline mode, never alt-screen.** In alt-screen you lose the terminal's scrollback and have to reimplement scroll — which with fingers on a phone is worse than native — and it breaks text selection for copying. In inline mode, whatever already finished is printed once with `tea.Printf` and never repainted; the live region occupies the last lines. It is the equivalent of Ink's `<Static>`, which gemini-cli uses. Accepted trade-off: already-printed lines do not re-wrap when the terminal width changes.
 
-**Persistencia en JSONL, jamás SQLite.** Un archivo por sesión, append-only. Sin base de datos, sin índice, sin CGO. Sobrevive a un `kill -9` y se inspecciona con `tail`.
+**Persistence in JSONL, never SQLite.** One file per session, append-only. No database, no index, no CGO. Survives a `kill -9` and can be inspected with `tail`.
 
-**No se inventa ningún protocolo nuevo.** Tres adaptadores de dialecto cubren el mercado: OpenAI (`chat/completions`), Anthropic (`messages`) y Google (`generateContent`). El 95% de los proveedores hablan OpenAI. Lo que sí se construye es un adaptador declarativo por configuración: agregar un proveedor es pegar cinco líneas de TOML, no escribir código.
+**No new protocol is invented.** Three dialect adapters cover the market: OpenAI (`chat/completions`), Anthropic (`messages`) and Google (`generateContent`). 95% of providers speak OpenAI. What *is* built is a declarative, config-driven adapter: adding a provider is pasting five lines of TOML, not writing code.
 
-**No Go plugins. CERRADA, and it is not a compromise — it is the decision that
+**No Go plugins. CLOSED, and it is not a compromise — it is the decision that
 makes self-extension auditable.** The obvious design for §19 would be "the agent
 writes `bybit.go`, compiles it, loads it". That path is closed on the merits:
 
@@ -307,7 +307,7 @@ language model would be an opaque blob executing inside the process — the wors
 possible security property for a program that also reaches your exchange
 account. The platform limitation forced the right architecture.
 
-**The agentic loop is reactive, single-loop. CERRADA.** No `Planner`,
+**The agentic loop is reactive, single-loop. CLOSED.** No `Planner`,
 `Scheduler` or `Memory` modules. The model sees the accumulated context —
 including the stderr of the command that just failed, as a `BlockToolResult` —
 and picks the next tool, one step at a time, until it answers without a tool
@@ -317,7 +317,7 @@ work anyway, only with extra ceremony on top. "Planning" is the model thinking
 in text before it calls a tool; it is not a package. Sub-agents (`dispatch`,
 Step 22) are goroutines with isolated context, not a scheduler.
 
-**Inline rendering stays, as-is, with no reflow. CERRADA — confirmed
+**Inline rendering stays, as-is, with no reflow. CLOSED — confirmed
 2026-08-03.** Committed transcript lines are printed once and never repainted,
 which is what buys native phone scrolling and native text selection — both worth
 more on Termux than perfect reflow. **Accepted consequence: already-printed lines
@@ -328,7 +328,7 @@ reopened as a "small improvement":
 
 | Option | Verdict |
 |---|---|
-| **(a) Inline as-is, no reflow** | ✅ **CERRADA.** Preserves the terminal's native behaviour and adds no state |
+| **(a) Inline as-is, no reflow** | ✅ **CLOSED.** Preserves the terminal's native behaviour and adds no state |
 | (b) Reflow only the live region in Phase 3 | ❌ rejected — half the benefit for a permanent complication |
 | (c) Full alt-screen repaint | ❌ rejected outright — costs native scroll and copy/paste |
 
@@ -346,19 +346,19 @@ immutable by contract. If you find yourself wanting to re-render a committed
 line, the answer is no — and if the underlying need is real, it belongs in the
 live region, which is repainted anyway.
 
-**Five contracts govern the whole system:** el modelo de conversación agnóstico
-(§4), el catálogo de modelos (§4bis), el esquema de configuración (§5), el tema
-como datos (§8), and **the tool contract with its lifecycle and governance
+**Five contracts govern the whole system:** the agnostic conversation model
+(§4), the model catalog (§4bis), the config schema (§5), theme-as-data
+(§8), and **the tool contract with its lifecycle and governance
 (§19)**.
 
 ---
 
-## 4. Contrato 1: modelo de conversación agnóstico
+## 4. Contract 1: agnostic conversation model
 
-Es la pieza que hace posible todo lo demás. El historial nunca se guarda en el formato JSON de un proveedor; se guarda en estructura propia y se serializa al dialecto correspondiente en el momento exacto de la petición.
+This is the piece that makes everything else possible. History is never stored in a provider's JSON format; it is stored in our own structure and serialized to the corresponding dialect at the exact moment of the request.
 
 ```go
-// internal/convo/message.go — tipos puros, cero dependencias externas
+// internal/convo/message.go — pure types, zero external dependencies
 type Role string // "system" | "user" | "assistant" | "tool"
 
 type BlockKind int
@@ -368,91 +368,91 @@ const (
     BlockToolCall
     BlockToolResult
     BlockReasoning
-    BlockSummary   // producido por /compact
+    BlockSummary   // produced by /compact
 )
 
 type Block struct {
     Kind       BlockKind
     Text       string
-    Data       []byte          // imágenes y adjuntos
+    Data       []byte          // images and attachments
     Mime       string
-    Name       string          // nombre de herramienta
+    Name       string          // tool name
     Args       json.RawMessage
-    ToolCallID string          // correlaciona un resultado con su llamada
-    IsError    bool            // solo BlockToolResult: el fallo es dato, no excepción
-    Replaces   []int           // solo BlockSummary: índices de mensajes resumidos
+    ToolCallID string          // correlates a result with its call
+    IsError    bool            // BlockToolResult only: failure is data, not an exception
+    Replaces   []int           // BlockSummary only: indices of summarized messages
 }
 
 type Message struct {
     Role    Role
     Blocks  []Block
-    Model   string     // Ref del modelo que generó este mensaje
+    Model   string     // Ref of the model that generated this message
     Usage   *Usage
-    Aborted bool       // true si el usuario canceló a mitad de streaming
+    Aborted bool       // true if the user cancelled mid-stream
     Ts      time.Time
 }
 
 type Usage struct{ In, Out, CacheRead, CacheWrite, Reasoning int }
 ```
 
-Dos campos que parecen menores y no lo son. `Model` guarda qué modelo generó cada mensaje, lo que permite pintar el transcript con atribución correcta cuando cambiaste tres veces de modelo en la misma sesión, y sirve de auditoría de costos. `Aborted` marca las respuestas cortadas: si botas el parcial, el usuario pierde tokens que ya pagó; si lo guardas sin marcar, el modelo cree que se expresó completo. Marcado, `/retry` sabe qué hacer y el serializador puede añadir "(respuesta interrumpida por el usuario)" al convertir el historial.
+Two fields that look minor and are not. `Model` stores which model generated each message, which lets the transcript be painted with correct attribution when you switched models three times in the same session, and doubles as a cost audit trail. `Aborted` flags cut-off responses: if you discard the partial, the user loses tokens they already paid for; if you save it unmarked, the model thinks it expressed itself completely. Marked, `/retry` knows what to do and the serializer can append "(response interrupted by the user)" when converting the history.
 
-Y dos que el paso 14 vuelve obligatorios. **`ToolCallID`** parece redundante hasta que un turno trae dos llamadas a la vez: el dialecto OpenAI exige un `tool_call_id` en cada mensaje `role: "tool"`, y sin él el proveedor no sabe qué resultado corresponde a qué llamada. Emparejar por posición en el array parece funcionar y falla en cuanto una herramienta responde antes que otra. El id lo trae el proveedor en el stream; `convo` solo lo transporta, igual que con `Args`, para no saber nada del dialecto. **`IsError`** implementa la decisión de §3 de que el fallo de una herramienta es dato y no excepción: un `exit status 1` sigue siendo un `BlockToolResult` normal que entra al contexto para que el modelo lo lea y reaccione — es el mecanismo entero por el que el bucle reactivo maneja lo imprevisto, y la razón por la que no hace falta un planificador. Se guarda aparte del texto porque el TUI lo pinta distinto y porque el modelo no debería tener que adivinar si `permission denied` es una salida o un fallo.
+And two that Step 14 makes mandatory. **`ToolCallID`** looks redundant until a turn brings two calls at once: the OpenAI dialect requires a `tool_call_id` on every `role: "tool"` message, and without it the provider does not know which result corresponds to which call. Matching by array position seems to work and fails the moment one tool responds before another. The provider supplies the id in the stream; `convo` only carries it, same as with `Args`, so as to know nothing about the dialect. **`IsError`** implements §3's decision that a tool's failure is data, not an exception: an `exit status 1` is still a normal `BlockToolResult` that enters the context for the model to read and react to — it is the entire mechanism by which the reactive loop handles the unforeseen, and the reason a planner is unnecessary. It is stored apart from the text because the TUI paints it differently and because the model should not have to guess whether `permission denied` is an output or a failure.
 
-Los constructores son `ToolCallBlock`, `ToolResultBlock` y `ToolErrorBlock`. El tercero existe en vez de un booleano en el segundo para que quien construye el bloque tenga que decir cuál de los dos casos es, en lugar de pasar un `false` que nadie lee.
+The constructors are `ToolCallBlock`, `ToolResultBlock` and `ToolErrorBlock`. The third exists instead of a boolean on the second so that whoever builds the block has to say which of the two cases it is, instead of passing a `false` nobody reads.
 
 ---
 
-## 4bis. Contrato 2: el catálogo de modelos
+## 4bis. Contract 2: the model catalog
 
-### 4.1 El problema en una frase
+### 4.1 The problem in one sentence
 
-Tres fuentes dicen cosas distintas y ninguna sola alcanza: el proveedor sabe qué se puede llamar ahora mismo, models.dev sabe cuánto cuesta y qué ventana tiene, y el usuario sabe qué quiere corregir. El catálogo las funde en un registro único y garantiza que el arranque nunca dependa de la red.
+Three sources say different things and none alone is enough: the provider knows what can be called right now, models.dev knows the cost and the window, and the user knows what they want to override. The catalog merges them into a single registry and guarantees that startup never depends on the network.
 
-### 4.2 Registro normalizado
+### 4.2 Normalized registry
 
 ```go
 // internal/catalog/model.go
 type Model struct {
-    Ref       string    // "omniroute/anthropic/claude-sonnet-4-5" ← clave única, lo que ve el usuario
+    Ref       string    // "omniroute/anthropic/claude-sonnet-4-5" ← unique key, what the user sees
     Provider  string    // "omniroute"
-    WireID    string    // "anthropic/claude-sonnet-4-5" ← lo que va en el JSON de la petición
+    WireID    string    // "anthropic/claude-sonnet-4-5" ← what goes in the request JSON
     Name      string    // "Claude Sonnet 4.5"
-    Family    string    // "claude" — para agrupar y para fallback de metadatos
+    Family    string    // "claude" — for grouping and metadata fallback
 
-    Context   int       // 0 = desconocido
+    Context   int       // 0 = unknown
     MaxOutput int
 
-    Cost      *Cost     // nil = DESCONOCIDO, que no es lo mismo que gratis
+    Cost      *Cost     // nil = UNKNOWN, which is not the same as free
     Caps      Caps      // Tools, Vision, Reasoning, Streaming, JSONSchema, Attachments
     Tags      []string  // free | virtual | local | deprecated | beta
 
     Source    Source    // bitmask: Discover | ModelsDev | Config
     Health    Health    // ok | cooling | unauthenticated | unreachable
 
-    // estadísticas locales; viven en el caché y alimentan el ranking difuso
+    // local stats; live in the cache and feed the fuzzy ranking
     UseCount   int
     LastUsed   time.Time
     P50Latency time.Duration
     FailStreak int
 }
 
-type Cost struct{ In, Out, CacheRead, CacheWrite float64 } // USD por millón de tokens
+type Cost struct{ In, Out, CacheRead, CacheWrite float64 } // USD per million tokens
 ```
 
-Dos decisiones no obvias. `Ref` y `WireID` son campos separados porque el identificador que el usuario escribe lleva prefijo de proveedor y el que va al cable no. Y como OmniRoute sirve modelos cuyo propio ID ya contiene barras, `strings.Split(ref, "/")` es un bug: hay que partir únicamente en la primera barra, con `strings.Cut`. Segundo, `Cost == nil` significa "no sé", y el selector muestra `—` en vez de `$0`, porque marcar como gratis algo que cobra es la peor mentira que puede decir esa pantalla.
+Two non-obvious decisions. `Ref` and `WireID` are separate fields because the identifier the user types carries a provider prefix and the one that goes on the wire does not. And since OmniRoute serves models whose own ID already contains slashes, `strings.Split(ref, "/")` is a bug: you must split only on the first slash, with `strings.Cut`. Second, `Cost == nil` means "I don't know", and the picker shows `—` instead of `$0`, because labelling something that charges as free is the worst lie that screen can tell.
 
-### 4.3 Fusión de las tres fuentes
+### 4.3 Merging the three sources
 
-La fusión es campo por campo, no registro por registro. La existencia de un modelo la define discovery: si el proveedor no lo lista, no se puede llamar. Los metadatos los aporta models.dev cuando discovery no los trae. La config del usuario gana siempre. Un modelo declarado a mano que discovery no reporta se mantiene visible pero marcado, que es exactamente el caso de los virtuales de OmniRoute.
+The merge is field by field, not record by record. A model's existence is defined by discovery: if the provider does not list it, it cannot be called. Metadata is supplied by models.dev when discovery does not bring it. The user's config always wins. A manually declared model that discovery does not report stays visible but flagged, which is exactly the case for OmniRoute's virtual models.
 
-El emparejamiento con models.dev se intenta en cascada: primero `provider/wire_id` exacto contra `api.json`; si falla, se normaliza el `wire_id` (minúsculas, quitar `-latest`, sufijos de fecha tipo `-20250219`, prefijos de vendor duplicados) y se reintenta; si falla, se busca por familia en `models.json` —la base agnóstica del proveedor, que existe justo para esto— resolviendo el caso del gateway que sirve Claude bajo otro nombre. Si nada empata, el modelo queda con metadatos desconocidos y la interfaz lo dice en vez de inventar.
+Matching against models.dev is tried in a cascade: first an exact `provider/wire_id` match against `api.json`; if that fails, the `wire_id` is normalized (lowercase, strip `-latest`, date suffixes like `-20250219`, duplicated vendor prefixes) and retried; if that fails, it is looked up by family in `models.json` — the provider-agnostic base that exists exactly for this — which resolves the case of a gateway that serves Claude under another name. If nothing matches, the model is left with unknown metadata and the interface says so instead of inventing one.
 
-Cuando falta la ventana de contexto tras toda esa cascada, no se adivina 128k. Se marca desconocida, se asume un piso conservador de 32k solo para las alertas de compactación, y la primera respuesta con usage real corrige el dato en el caché.
+When the context window is missing after that whole cascade, it is not guessed as 128k. It is marked unknown, a conservative 32k floor is assumed just for compaction alerts, and the first response with real usage corrects the value in the cache.
 
-### 4.4 Caché y secuencia de arranque
+### 4.4 Cache and startup sequence
 
-Un solo archivo JSON en `$XDG_CACHE_HOME/ishakat/catalog.json`, escrito de forma atómica (temporal + rename) para que un Ctrl+C a media escritura no lo corrompa.
+A single JSON file at `$XDG_CACHE_HOME/ishakat/catalog.json`, written atomically (temp file + rename) so that a Ctrl+C mid-write does not corrupt it.
 
 ```json
 {
@@ -472,23 +472,23 @@ Un solo archivo JSON en `$XDG_CACHE_HOME/ishakat/catalog.json`, escrito de forma
 }
 ```
 
-La secuencia es lo que hace que se sienta rápido. Se lee el caché y se pinta la interfaz de inmediato, sin tocar la red ni una vez, incluso con el caché vencido. En paralelo, si el TTL expiró, una goroutine hace discovery contra cada proveedor habilitado con timeout de 2 segundos y refresca models.dev con `If-None-Match`. Al terminar, el catálogo se reemplaza en caliente y, si el selector está abierto, la lista se reordena sin cerrarse. Sin red no pasa nada visible salvo una franja `⚠ catálogo de hace 3 días`. En primera ejecución sin caché y sin red se usa un catálogo semilla embebido en el binario con los virtuales de OmniRoute y los diez modelos más comunes.
+The sequence is what makes it feel fast. The cache is read and the interface is painted immediately, without touching the network even once, even with an expired cache. In parallel, if the TTL expired, a goroutine runs discovery against each enabled provider with a 2-second timeout and refreshes models.dev with `If-None-Match`. When it finishes, the catalog is hot-swapped and, if the picker is open, the list re-sorts without closing. With no network, nothing visible happens except a `⚠ catalog from 3 days ago` banner. On the first run with no cache and no network, a seed catalog embedded in the binary is used, with OmniRoute's virtual models and the ten most common models.
 
-**Presupuesto no negociable:** el arranque no toca la red en el camino crítico.
+**Non-negotiable budget:** startup does not touch the network on the critical path.
 
-### 4.5 Resolución de referencias y búsqueda difusa
+### 4.5 Reference resolution and fuzzy search
 
-El corazón del requisito "no tener que escribir el ID exacto". La resolución pasa por cuatro etapas en orden y se detiene en la primera que produce un ganador claro: coincidencia exacta con un `Ref`; coincidencia exacta con un alias de la config; coincidencia única de sufijo (escribir `claude-sonnet-4-5` y que resuelva porque solo un proveedor lo sirve); y por último puntaje difuso.
+The heart of the "never have to type the exact ID" requirement. Resolution goes through four stages in order and stops at the first one that produces a clear winner: exact match against a `Ref`; exact match against a config alias; unique suffix match (typing `claude-sonnet-4-5` and having it resolve because only one provider serves it); and finally a fuzzy score.
 
-El puntaje difuso es una subsecuencia con penalización por hueco, sobre ambos strings normalizados a minúsculas y sin los separadores `- _ / . :`. Sobre el puntaje base se aplican bonificaciones por coincidencia al inicio de palabra, por prefijo de proveedor, por dígitos en el mismo orden —esto es lo que hace que `son45` gane contra `sonnet-4-0`— y por uso reciente y frecuencia leídos de las estadísticas locales. Se penaliza `deprecated`. Si `prefer_free = true`, se bonifica `free`.
+The fuzzy score is a gap-penalized subsequence match, over both strings normalized to lowercase and stripped of the `- _ / . :` separators. On top of the base score, bonuses are applied for a match at the start of a word, for a provider prefix, for digits in the same order — this is what makes `son45` win against `sonnet-4-0` — and for recent use and frequency read from local stats. `deprecated` is penalized. If `prefer_free = true`, `free` is bonused.
 
-Traza del caso `/model son45`: normaliza a `son45`; contra `omniroute/anthropic/claude-sonnet-4-5` → `omniroutanthropicclaudesonnet45` encuentra `son` contiguo dentro de una palabra y `4,5` en orden al final, puntaje alto; contra `claude-sonnet-4-0` los dígitos no empatan y baja; contra `gpt-5-nano` no hay `son` y queda fuera.
+Trace of the `/model son45` case: normalizes to `son45`; against `omniroute/anthropic/claude-sonnet-4-5` → `omniroutanthropicclaudesonnet45` it finds `son` contiguous inside a word and `4,5` in order at the end, high score; against `claude-sonnet-4-0` the digits do not match and it drops; against `gpt-5-nano` there is no `son` and it is excluded.
 
-**Regla de desempate:** si el mejor supera al segundo por más del 20%, cambia directo e imprime una línea de confirmación. Si no, abre el selector prefiltrado con `son45` ya escrito. Nunca, bajo ninguna circunstancia, un "modelo no encontrado" a secas.
+**Tie-break rule:** if the best beats the second by more than 20%, it switches directly and prints a confirmation line. If not, it opens the picker prefiltered with `son45` already typed. Never, under any circumstance, a bare "model not found".
 
-### 4.6 Cambio en caliente: las tres verificaciones
+### 4.6 Hot swap: the three checks
 
-Cambiar de modelo a mitad de conversación no es reasignar una variable. Antes de aceptar se corren tres chequeos, implementados como función pura testeable sin terminal:
+Switching models mid-conversation is not reassigning a variable. Before accepting, three checks run, implemented as a pure, terminal-free testable function:
 
 ```go
 // internal/engine/hotswap.go
@@ -509,39 +509,39 @@ type Plan struct {
 func CheckSwap(c *convo.Conversation, from, to catalog.Model) Plan
 ```
 
-El chequeo de contexto compara los tokens estimados contra `Context` del modelo destino y, si no caben, ofrece compactar. El de capacidades detecta bloques que el modelo nuevo no soporta —imágenes hacia un modelo sin visión, resultados de herramientas hacia uno sin tool calling— y advierte que se degradarán a texto descriptivo en vez de romper la petición. El de autenticación verifica que el proveedor destino tenga credencial resuelta antes de dejarte cambiar, no cuando mandes el mensaje.
+The context check compares estimated tokens against the destination model's `Context` and, if they do not fit, offers to compact. The capabilities check detects blocks the new model does not support — images toward a model with no vision, tool results toward one with no tool calling — and warns that they will degrade to descriptive text instead of breaking the request. The authentication check verifies the destination provider has resolved credentials before letting you switch, not when you send the message.
 
-Si `Plan.OK`, el cambio es instantáneo y lo único visible es una línea `── ahora: gpt-5-mini ──` en el transcript. El diálogo de conflicto aparece solo cuando hay una decisión real que tomar.
+If `Plan.OK`, the switch is instant and the only visible thing is a `── now: gpt-5-mini ──` line in the transcript. The conflict dialog appears only when there is a real decision to make.
 
-Ctrl+O (rotar favoritos) corre exactamente el mismo `CheckSwap`. Sin atajos por debajo.
+Ctrl+O (cycle favorites) runs exactly the same `CheckSwap`. No shortcuts underneath.
 
 ---
 
-## 5. Contrato 3: configuración
+## 5. Contract 3: configuration
 
-### 5.1 Ubicación y precedencia
+### 5.1 Location and precedence
 
-Un archivo de usuario en `$XDG_CONFIG_HOME/ishakat/config.toml` (en Termux resuelve a `~/.config/ishakat/config.toml`). Opcionalmente `./.ishakat.toml` por proyecto, que se fusiona encima, pensado para fijar modelo y prompt de sistema por repositorio.
+A user file at `$XDG_CONFIG_HOME/ishakat/config.toml` (on Termux this resolves to `~/.config/ishakat/config.toml`). Optionally `./.ishakat.toml` per project, merged on top, meant to pin a model and system prompt per repository.
 
-Precedencia de menor a mayor: valores compilados (`defaults.toml` embebido), config de usuario, config de proyecto, variables de entorno con prefijo `ISHAKAT_`, flags de línea de comandos. La fusión es profunda para tablas y de reemplazo total para arrays, con una excepción: los `[[provider]]` se fusionan por `id`, para que un proyecto pueda sobrescribir el `base_url` de omniroute sin redeclarar todo el bloque.
+Precedence from lowest to highest: compiled-in values (embedded `defaults.toml`), user config, project config, environment variables prefixed `ISHAKAT_`, command-line flags. The merge is deep for tables and full-replace for arrays, with one exception: `[[provider]]` entries merge by `id`, so a project can override omniroute's `base_url` without redeclaring the whole block.
 
-Cualquier string admite `$VAR` o `${VAR}`, expandido contra el entorno al cargar. Si la variable no existe, el proveedor no desaparece: se marca `unauthenticated` y sus modelos salen en gris con la nota "falta $X". El archivo se crea con permisos 0600 y el directorio con 0700; si al arrancar tiene permisos más laxos y contiene claves literales, se advierte una sola vez.
+Any string accepts `$VAR` or `${VAR}`, expanded against the environment at load time. If the variable does not exist, the provider does not disappear: it is marked `unauthenticated` and its models show greyed out with the note "missing $X". The file is created with 0600 permissions and the directory with 0700; if at startup it has looser permissions and contains literal keys, it warns once.
 
-### 5.2 Archivo completo comentado (config.example.toml)
+### 5.2 Full annotated file (config.example.toml)
 
 ```toml
 # ~/.config/ishakat/config.toml
-schema = 1                       # versión del esquema; habilita migraciones automáticas
+schema = 1                       # schema version; enables automatic migrations
 
 # ─────────────────────────────────────────────────────────────
 [app]
 default_model      = "omniroute/auto/coding"
-compact_model      = "omniroute/auto/cheap"   # modelo barato para /compact y títulos
-fallback_model     = "omniroute/auto"         # si el activo falla 2 veces seguidas
+compact_model      = "omniroute/auto/cheap"   # cheap model for /compact and titles
+fallback_model     = "omniroute/auto"         # if the active one fails 2 times in a row
 stream             = true
 system_prompt      = ""
-system_prompt_file = ""                       # el archivo gana si ambos existen
-agents_md          = true                     # paso 18: AGENTS.md global -> proyecto -> local
+system_prompt_file = ""                       # the file wins if both exist
+agents_md          = true                     # Step 18: AGENTS.md global -> project -> local
 timeout_s          = 120
 connect_timeout_s  = 10
 max_retries        = 3
@@ -551,19 +551,19 @@ locale             = "auto"                   # auto | es | en
 [session]
 save        = true
 dir         = "$XDG_DATA_HOME/ishakat/sessions"
-autoname    = true          # titula la sesión con compact_model tras el primer turno
+autoname    = true          # titles the session with compact_model after the first turn
 keep_last   = 50
 resume_last = false
 
 # ─────────────────────────────────────────────────────────────
 [ui]
-theme      = "ascua"        # tema embebido o archivo en themes/
+theme      = "ascua"        # embedded theme or a file in themes/
 banner     = true
 markdown   = true
 syntax     = true
 reasoning  = "collapsed"    # off | collapsed | full
 timestamps = false
-mouse      = false          # off por defecto: en Termux estorba al seleccionar texto
+mouse      = false          # off by default: on Termux it gets in the way of selecting text
 layout     = "auto"         # auto | minimal | narrow | wide
 max_width  = 100
 color      = "auto"         # auto | truecolor | 256 | 16 | off
@@ -579,12 +579,12 @@ gradient_scroll = true
 battery_saver   = "auto"    # auto = drops to 6 fps on detecting Android/Termux
 
 [ui.footer]
-items = ["model", "context", "tokens", "cost", "git", "cwd"]  # se recortan de derecha a izquierda
+items = ["model", "context", "tokens", "cost", "git", "cwd"]  # trimmed from right to left
 
 # ─────────────────────────────────────────────────────────────
 [keys]
 submit       = "enter"
-newline      = "ctrl+j"     # y shift+enter donde el terminal lo distinga
+newline      = "ctrl+j"     # and shift+enter where the terminal distinguishes it
 cancel       = "esc"
 quit         = "ctrl+c ctrl+c"
 clear_screen = "ctrl+l"
@@ -617,26 +617,26 @@ strategy        = "summarize"   # summarize | drop-oldest
 on_error        = "drop-oldest"
 
 # ─────────────────────────────────────────────────────────────
-# Contrato 5 (§19). Esta sección gobierna dos cosas distintas que conviene no
-# confundir: qué puede hacer ishakat en la máquina (permissions) y qué puede
-# aprender a hacer solo (evolve). La primera existe desde el paso 14; la segunda
-# desde el 18.
+# Contract 5 (§19). This section governs two different things that are worth
+# not confusing: what ishakat can do on the machine (permissions) and what it
+# can learn to do on its own (evolve). The first exists since Step 14; the
+# second since Step 18.
 [tools]
 enabled            = true
 dir                = "$XDG_DATA_HOME/ishakat/tools"
 skills_dir         = "$XDG_DATA_HOME/ishakat/skills"
-max_tools          = 40      # tope de catálogo, no de disco: ver más abajo
-archive_days       = 90      # sin usar 90 días → fuera del prompt, no del disco
-max_calls_per_turn = 25      # freno del bucle agéntico
-max_output_bytes   = 32_768  # recorte de salida de una herramienta
-budget_usd         = 0.0     # 0 = sin límite
+max_tools          = 40      # catalog cap, not a disk cap: see below
+archive_days       = 90      # unused for 90 days → out of the prompt, not off disk
+max_calls_per_turn = 25      # brake on the agentic loop
+max_output_bytes   = 32_768  # truncation of a tool's output
+budget_usd         = 0.0     # 0 = no limit
 timeout_s          = 120
 
 [tools.permissions]
-read          = "allow"      # leer no rompe nada; no interrumpe
+read          = "allow"      # reading breaks nothing; does not interrupt
 write         = "ask"
 shell         = "ask"
-allow_session = true         # "permitir en esta sesión" para un comando ya aprobado
+allow_session = true         # "allow for this session" for an already-approved command
 shell_deny    = ["rm -rf /", "rm -rf ~", "mkfs*", "curl * | sh", "git push --force*"]
 write_deny    = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "**/.env", "**/id_rsa"]
 
@@ -665,17 +665,17 @@ cheap = "omniroute/auto/cheap"
 local = "ollama/qwen2.5-coder:7b"
 
 # ─────────────────────────────────────────────────────────────
-# PROVEEDORES. Agregar uno = pegar 5 líneas, sin tocar código.
+# PROVIDERS. Adding one = paste 5 lines, no code touched.
 # ─────────────────────────────────────────────────────────────
 [[provider]]
 id        = "omniroute"
 name      = "OmniRoute"
 kind      = "openai"                    # openai | anthropic | gemini
 base_url  = "http://localhost:20128/v1"
-api_key   = "$OMNIROUTE_API_KEY"        # vacío = se envía sin Authorization
-discover  = true                        # llena el catálogo con GET /models
+api_key   = "$OMNIROUTE_API_KEY"        # empty = sent with no Authorization
+discover  = true                        # fills the catalog with GET /models
 enabled   = true
-timeout_s = 180                         # los combos tardan más
+timeout_s = 180                         # combos take longer
 
   [provider.headers]
   "X-Title" = "ishakat"
@@ -683,7 +683,7 @@ timeout_s = 180                         # los combos tardan más
   [provider.params]
   temperature = 0.7
 
-  # Declarados a mano: se suman a los descubiertos y ganan sobre ellos.
+  # Manually declared: these add to the discovered ones and win over them.
   [[provider.model]]
   id      = "auto/coding"
   name    = "Auto · Coding"
@@ -703,7 +703,7 @@ kind     = "openai"
 base_url = "https://api.openai.com/v1"
 api_key  = "$OPENAI_API_KEY"
 discover = true
-enabled  = false          # declarado pero apagado
+enabled  = false          # declared but off
 
 [[provider]]
 id       = "anthropic"
@@ -724,33 +724,33 @@ discover = true
 enabled  = false
 ```
 
-`internal/config/defaults.toml` es esta misma estructura sin comentarios, con un solo `[[provider]]` (omniroute). Los demás son sugerencias que viven únicamente en el ejemplo.
+`internal/config/defaults.toml` is this same structure with no comments, with a single `[[provider]]` (omniroute). The others are suggestions that live only in the example.
 
-Dos archivos y una trampa: `config.example.toml` en la raíz es el que la gente lee, e `internal/config/example.toml` es el que `ishakat config init` escribe de verdad, porque va embebido en el binario. Son copias, y las copias sin verificación divergen siempre — de hecho ya divergieron una vez, y el embebido perdió la documentación de `glyphs`, justo la opción que un usuario de Windows necesita. `TestExampleTOMLInSync` es lo que impide que vuelva a pasar. Al editar uno, se copia sobre el otro.
+Two files and one trap: `config.example.toml` at the repo root is the one people read, and `internal/config/example.toml` is the one `ishakat config init` actually writes, because it is embedded in the binary. They are copies, and unverified copies always drift — in fact they already drifted once, and the embedded one lost the `glyphs` documentation, precisely the option a Windows user needs. `TestExampleTOMLInSync` is what keeps that from happening again. When you edit one, copy it over the other.
 
-**Los valores de `[tools]` que no son obvios.** Cada uno responde a una pregunta concreta, y vale la pena dejar escrita la pregunta y no solo el número:
+**The non-obvious `[tools]` values.** Each answers a concrete question, and it is worth writing down the question, not just the number:
 
-- `max_tools = 40` no es un límite de disco; los archivos son de kilobytes. Es un límite de *discriminación*: cada herramienta gasta unos 15 tokens de nombre y descripción en el prompt, pero el costo real es que cuantas más opciones parecidas haya, peor elige el modelo entre ellas. Cuarenta entra en el prompt y sigue siendo distinguible. Un catálogo de doscientas herramientas es un catálogo inservible, y el fallo no se ve como un error sino como un agente que "se ha vuelto tonto".
-- `max_calls_per_turn = 25` existe porque el bucle del paso 14 no tiene planificador que lo detenga (§3): el modelo llama, ve el resultado y reacciona. Un ciclo — leer un archivo, editarlo, volver a leerlo — no se autocorta. Veinticinco es holgado para trabajo real y estrecho para un bucle infinito.
-- `max_output_bytes = 32_768` protege contra el fallo más aburrido y más frecuente: un `cat` de un archivo de 2 MB que se lleva la ventana de contexto entera. Se recorta con marca visible, para que el modelo sepa que hay más y pueda pedir el resto acotado.
-- `min_repeats = 3` en `[tools.evolve]`: tres veces es un patrón, dos es una coincidencia. Pero es un piso para el *agente*, no para el usuario. Si tú ya sabes que vas a repetir algo cien veces, no tienes que enseñárselo repitiéndolo tres: lo pides y tu intención cuenta como evidencia (§19.6, los tres orígenes).
-- `dedup_threshold = 0.8` es lo único que separa un catálogo de un vertedero. Sin este umbral se acaba con nueve variantes de "consultar precio", todas casi iguales, y el problema de discriminación de `max_tools` llega mucho antes de las cuarenta.
-- `require_selftest = true` es la puerta 3 de §19.6. Una herramienta escrita por un modelo no está verificada por haberse escrito; nace en estado `unverified` y solo pasa a `verified` si su propia prueba pasa.
-- `allow_without_tty = false` es la puerta 2. Sin terminal no hay humano que autorice, así que crear herramientas se deniega en `-p`, en `serve`, en cron y en CI. `--yolo` **no** lo concede: existe `--allow-tool-create` para el script concreto que lo necesite, porque conceder autoextensión no debe ser un efecto secundario de pedir "no me preguntes tanto".
+- `max_tools = 40` is not a disk limit; the files are kilobytes. It is a *discrimination* limit: each tool spends about 15 tokens of name and description in the prompt, but the real cost is that the more similar options there are, the worse the model picks among them. Forty fits in the prompt and stays distinguishable. A catalog of two hundred tools is an unusable catalog, and the failure does not look like an error — it looks like an agent that "got dumb".
+- `max_calls_per_turn = 25` exists because Step 14's loop has no planner to stop it (§3): the model calls, sees the result, and reacts. A cycle — read a file, edit it, read it again — does not self-terminate. Twenty-five is generous for real work and tight for an infinite loop.
+- `max_output_bytes = 32_768` protects against the most boring and most frequent failure: a `cat` of a 2 MB file that eats the entire context window. It is truncated with a visible marker, so the model knows there is more and can request the bounded rest.
+- `min_repeats = 3` in `[tools.evolve]`: three times is a pattern, two is a coincidence. But it is a floor for the *agent*, not for the user. If you already know you are going to repeat something a hundred times, you do not have to teach it by repeating it three times: you ask for it, and your intent counts as evidence (§19.6, the three origins).
+- `dedup_threshold = 0.8` is the only thing that separates a catalog from a dump. Without this threshold you end up with nine variants of "check price", all nearly identical, and `max_tools`'s discrimination problem arrives long before forty.
+- `require_selftest = true` is gate 3 of §19.6. A tool written by a model is not verified just by being written; it is born in `unverified` state and only moves to `verified` if its own test passes.
+- `allow_without_tty = false` is gate 2. With no terminal there is no human to authorize, so creating tools is denied under `-p`, under `serve`, in cron and in CI. `--yolo` does **not** grant it: `--allow-tool-create` exists for the specific script that needs it, because granting self-extension must not be a side effect of asking to "stop asking me so much".
 
-La asimetría entre `shell_deny` y `write_deny` también es deliberada. `shell_deny` rechaza formas de comando con una explicación en vez de ofrecerlas para confirmar, porque un diálogo que se aprueba en automático no es una defensa. `write_deny` va más lejos: son rutas que no se leen ni se escriben *con o sin aprobación*. Es la defensa estructural de §19.8 contra la exfiltración, y su valor está justamente en que nada del contexto puede convencerla de decir sí.
+The asymmetry between `shell_deny` and `write_deny` is also deliberate. `shell_deny` rejects command shapes with an explanation instead of offering them for confirmation, because a dialog that gets auto-approved is not a defense. `write_deny` goes further: these are paths that are neither read nor written *with or without approval*. It is §19.8's structural defense against exfiltration, and its value lies precisely in the fact that nothing in the context can talk it into saying yes.
 
-### 5.3 Validación
+### 5.3 Validation
 
-El cargador falla en arranque por cuatro cosas: schema desconocido, TOML sintácticamente inválido, un `[[provider]]` sin `id`/`kind`/`base_url`, y un valor inválido en `[tools]`. Todo lo demás degrada con advertencia visible en `/config`: un `kind` no soportado desactiva el proveedor; un `default_model` que no resuelve cae al primer proveedor habilitado; un tema inexistente cae a `ascua`; y las claves desconocidas se reportan como "clave ignorada" en vez de reventar, lo cual es esencial para no romper configs viejas al agregar funciones.
+The loader fails at startup for four things: unknown schema, syntactically invalid TOML, a `[[provider]]` missing `id`/`kind`/`base_url`, and an invalid value in `[tools]`. Everything else degrades with a visible warning in `/config`: an unsupported `kind` disables the provider; a `default_model` that does not resolve falls back to the first enabled provider; a nonexistent theme falls back to `ascua`; and unknown keys are reported as "ignored key" instead of blowing up, which is essential to avoid breaking old configs when adding features.
 
-La cuarta es la excepción a esa política de degradar, y tiene una razón: **un permiso mal escrito no tiene interpretación segura.** Si `write = "alow"` degradara a "deny" el usuario se quedaría sin escritura sin entender por qué; si degradara a "allow", ishakat escribiría sin preguntar en la máquina de alguien que creía haber pedido lo contrario. No hay opción prudente, solo una moneda al aire que se resuelve en el peor momento. Lo mismo vale para `mode` en `[tools.evolve]` y para un `dedup_threshold` fuera de `(0, 1]`, que apagaría el filtro anti-duplicados en silencio. En estos casos negarse a arrancar es la única respuesta honesta, y el mensaje dice qué valores son válidos.
+The fourth is the exception to that degrade policy, and there is a reason: **a misspelled permission has no safe interpretation.** If `write = "alow"` degraded to "deny" the user would lose write access without understanding why; if it degraded to "allow", ishakat would write without asking on the machine of someone who thought they had asked for the opposite. There is no prudent option, only a coin flip that resolves at the worst possible moment. The same applies to `mode` in `[tools.evolve]` and to a `dedup_threshold` outside `(0, 1]`, which would silently turn off the anti-duplicate filter. In these cases refusing to start is the only honest answer, and the message says which values are valid.
 
-Cuatro ajustes son legales pero peligrosos, y esos sí advierten y arrancan, porque son decisiones que el usuario tiene derecho a tomar — pero no a tomar sin darse cuenta: `max_calls_per_turn = 0` con las herramientas activas (ningún turno agéntico podría avanzar), `allow_without_tty`, `require_selftest = false` y `egress.allow_all`. Con `mode = "off"` la advertencia de `require_selftest` se calla, porque una advertencia solo se gana su sitio cuando el riesgo que nombra es alcanzable.
+Four settings are legal but dangerous, and those do warn and still start, because they are decisions the user has a right to make — but not to make without noticing: `max_calls_per_turn = 0` with tools active (no agentic turn could proceed), `allow_without_tty`, `require_selftest = false`, and `egress.allow_all`. With `mode = "off"` the `require_selftest` warning stays quiet, because a warning only earns its place when the risk it names is reachable.
 
-Los mensajes de error nombran el proveedor por su `id`, no por su índice, y traen el ejemplo de la línea que falta.
+Error messages name the provider by its `id`, not by its index, and carry an example of the missing line.
 
-### 5.4 Contrato del adaptador de proveedor
+### 5.4 Provider adapter contract
 
 Para que ese TOML sea suficiente, el código expone una sola interfaz:
 
