@@ -70,6 +70,14 @@ const (
 	// case, the same "the turn is not over, only the pause is" rule
 	// ModeToolApprove already follows.
 	ModeSuggest
+	// ModeThemePicker: the §9.7 ctrl+t overlay (themepicker.go) — /theme
+	// [nombre]'s own second access path, a flat list with no grouping
+	// (themes have no provider/tier split, unlike ModePicker's catalog),
+	// following resumeMenu/confirmDialog's simpler shape. Closes back to
+	// ModeChat either way — unlike ModeToolApprove/ModeSuggest's one
+	// async branch, applying a theme (switchTheme) is synchronous, so
+	// there is no "turn not over" case to preserve here.
+	ModeThemePicker
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -339,6 +347,10 @@ type Root struct {
 	// resume is the §13 /resume overlay's own state, live only while
 	// mode == ModeResume.
 	resume resumeMenu
+
+	// themePicker is the §9.7 ctrl+t overlay's own state (themepicker.go),
+	// live only while mode == ModeThemePicker.
+	themePicker themePickerState
 
 	// toolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false is
 	// the pre-Step-16 behaviour: startEngineTurn always takes the plain
@@ -924,6 +936,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLogin(msg)
 	case ModeSuggest:
 		return m.updateSuggest(msg)
+	case ModeThemePicker:
+		return m.updateThemePicker(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -983,6 +997,17 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			return true, m, nil
 		}
 		next, cmd := m.openPicker("")
+		return true, next, cmd
+
+	case m.keys.ThemePicker:
+		// Same ModeChat-only gating as ModelPicker above: ModeBusy is
+		// generating (§7.4 already reserves esc/ctrl+c there) and every
+		// overlay mode owns the keyboard outright, so a second ctrl+t is
+		// swallowed rather than reopening an overlay already open.
+		if m.mode != ModeChat {
+			return true, m, nil
+		}
+		next, cmd := m.openThemePicker()
 		return true, next, cmd
 
 	case m.keys.CopyLast:
