@@ -200,7 +200,7 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 	m.mode = ModeChat
 	m.animOffset = 0
 
-	return m.checkAutoCompact()
+	return m.checkEndOfTurn()
 }
 
 // cancelAgentTurn implements §7.4 for a tools-enabled turn: closing m.cancel
