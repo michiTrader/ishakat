@@ -1143,40 +1143,40 @@ All the following wireframes measure exactly 40 columns.
 
 El banner aparece solo si `ui.banner`, hay TTY y el alto es de al menos 20 líneas.
 
-### 9.3 Conversación en streaming
+### 9.3 Streaming conversation
 
 ```
 1...5....0....5....0....5....0....5....0
- ▌ tú                            14:02
- ¿cómo optimizo esta consulta que
- hace full scan sobre events?
+ ▌ you                            14:02
+ how do I optimize this query that
+ does a full scan on events?
 
  ◆ claude-sonnet-4-5              14:02
- El problema es que el filtro por
- fecha no puede usar el índice
- existente. Un índice compuesto:
+ The problem is that the date
+ filter can't use the existing
+ index. A composite index:
 
  │ sql
  │ CREATE INDEX idx_events_user
  │   ON events (user_id, created_at);
 
- Con eso el planner hace index scan▊
+ With that the planner does an index scan▊
 
- ▚▞▘▝▚▗▘▚▞ pensando 3.4s · 412 tok
- esc cancela
+ ▚▞▘▝▚▗▘▚▞ thinking 3.4s · 412 tok
+ esc cancels
 ╭──────────────────────────────────────╮
 │ >                                    │
 ╰──────────────────────────────────────╯
  ◍ sonnet-4-5  ▍▓░ 18%  36k  $0.04  ⎇ma
 ```
 
-Detalles que no son decorativos. Los bloques de código usan riel izquierdo `│` en vez de caja completa: a 40 columnas una caja roba 4 columnas útiles y hace que el código se envuelva feo, y además el riel deja el código copiable de un tirón, mientras que con caja se copian los bordes pegados. La línea `▚▞▘▝▚▗▘▚▞` es la animación tipo Crush: caracteres de un charset ciclando con el degradado desplazándose, a 12 fps máximo, solo en la línea de estado, nunca sobre el texto ya emitido. El `▊` es el cursor de streaming. El footer recorta el nombre del modelo de izquierda a derecha (`claude-sonnet-4-5` → `sonnet-4-5`) y elimina ítems de derecha a izquierda según `ui.footer.items`.
+Details that are not decorative. Code blocks use a left rail `│` instead of a full box: at 40 columns a box steals 4 useful columns and makes the code wrap ugly, and the rail also leaves the code copyable in one go, whereas with a box the borders get copied along with it. The line `▚▞▘▝▚▗▘▚▞` is the Crush-style animation: characters from a charset cycling with the gradient scrolling, at 12 fps max, only on the status line, never over text already emitted. The `▊` is the streaming cursor. The footer trims the model name from left to right (`claude-sonnet-4-5` → `sonnet-4-5`) and drops items from right to left according to `ui.footer.items`.
 
-### 9.4 Selector de modelos (`/model` sin argumentos, o Ctrl+P)
+### 9.4 Model picker (`/model` with no arguments, or Ctrl+P)
 
 ```
 1...5....0....5....0....5....0....5....0
-╭─ modelos ──────────────────── 517 ─╮
+╭─ models ──────────────────── 517 ─╮
 │ 🔍 son45▊                          │
 ├────────────────────────────────────┤
 │ OMNIROUTE                          │
@@ -1189,45 +1189,45 @@ Detalles que no son decorativos. Los bloques de código usan riel izquierdo `│
 │   anthropic/claude-sonnet-4.5      │
 │   200k · $3.3/$16.5 · 🔧👁         │
 ├────────────────────────────────────┤
-│ ↑↓ mover  ⏎ usar  tab detalle      │
-│ ctrl+f solo gratis   esc salir     │
+│ ↑↓ move  ⏎ use  tab detail         │
+│ ctrl+f free only   esc exit        │
 ╰────────────────────────────────────╯
 ```
 
-Dos líneas por modelo: identificador arriba, metadatos abajo. A 40 columnas meterlo todo en una línea obliga a truncar el ID, que es justamente el dato que hay que leer. Grupos por proveedor, colapsables con `←/→`. El contador de arriba baja mientras filtras. El activo lleva `●` en vez de `▸`, los favoritos llevan `★`, los gratis van en verde con la etiqueta `FREE` reemplazando al precio. La latencia sale de `P50Latency` local y solo aparece si has usado ese modelo antes: nada de números inventados. `ctrl+f` cicla filtros: todos → gratis → con herramientas → con visión → favoritos. Con catálogo vencido y sin red aparece la franja `⚠ catálogo de hace 3 días` bajo el buscador.
+Two lines per model: identifier on top, metadata below. At 40 columns fitting everything on one line forces the ID to be truncated, which is exactly the data that needs to be readable. Groups by provider, collapsible with `←/→`. The counter at the top drops as you filter. The active one carries `●` instead of `▸`, favorites carry `★`, free ones show in green with the `FREE` label replacing the price. Latency comes from local `P50Latency` and only shows if you have used that model before: no invented numbers. `ctrl+f` cycles filters: all → free → with tools → with vision → favorites. With an expired catalog and no network, a `⚠ catalog from 3 days ago` banner appears under the search box.
 
-### 9.5 Confirmación de cambio con contexto insuficiente
+### 9.5 Swap confirmation with insufficient context
 
 ```
 1...5....0....5....0....5....0....5....0
-╭─ cambiar modelo ───────────────────╮
+╭─ switch model ─────────────────────╮
 │                                    │
-│  de  claude-sonnet-4-5   200k      │
-│  a   gpt-5-mini          128k      │
+│  from  claude-sonnet-4-5   200k    │
+│  to    gpt-5-mini          128k    │
 │                                    │
-│  ⚠ la conversación usa 142k tok    │
-│    y no cabe en 128k.              │
+│  ⚠ the conversation uses 142k tok  │
+│    and doesn't fit in 128k.        │
 │                                    │
-│  ▸ compactar y cambiar  (~38k)     │
-│    cambiar y recortar los turnos   │
-│      más viejos                    │
-│    cancelar                        │
+│  ▸ compact and switch  (~38k)      │
+│    switch and drop the oldest      │
+│      turns                         │
+│    cancel                          │
 │                                    │
 ╰────────────────────────────────────╯
 ```
 
-Aparece solo cuando hay conflicto real. El 95% de las veces el cambio es instantáneo y lo único visible es `── ahora: gpt-5-mini ──` con degradado tenue. Ese contraste es el punto: la fricción aparece únicamente cuando hay una decisión que tomar.
+Appears only when there is a real conflict. 95% of the time the switch is instant and the only visible thing is `── now: gpt-5-mini ──` with a faint gradient. That contrast is the point: friction appears only when there is a decision to make.
 
-### 9.6 Autocompletado de slash commands
+### 9.6 Slash-command autocomplete
 
 ```
 1...5....0....5....0....5....0....5....0
  ┌────────────────────────────────────┐
- │ /model    cambiar de modelo        │
- │ /models   listar catálogo          │
- │ /compact  resumir la conversación  │
- │ /config   ver configuración        │
- │ /copy     copiar última respuesta  │
+ │ /model    switch model             │
+ │ /models   list catalog             │
+ │ /compact  summarize the conversation│
+ │ /config   view configuration       │
+ │ /copy     copy last response       │
  └────────────────────────────────────┘
 ╭──────────────────────────────────────╮
 │ > /co▊                               │
@@ -1235,71 +1235,71 @@ Aparece solo cuando hay conflicto real. El 95% de las veces el cambio es instant
  ◍ auto/coding  ▍▓░ 18%  36k  $0.04
 ```
 
-El dropdown se dibuja encima de la caja de input, no debajo, porque abajo está el footer y en una terminal corta no hay espacio. Cinco filas visibles con scroll, activado con `/` en la primera columna.
+The dropdown is drawn above the input box, not below, because the footer is below and there is no room on a short terminal. Five visible rows with scroll, activated by `/` in the first column.
 
-### 9.7 Ayuda
+### 9.7 Help
 
 ```
 1...5....0....5....0....5....0....5....0
- ── ishakat · comandos ────────────────
+ ── ishakat · commands ────────────────
 
- /help              esta pantalla
- /model [texto]     cambiar modelo
- /models            explorar catálogo
- /theme [nombre]    cambiar tema
- /compact           resumir contexto
- /new               conversación nueva
- /resume            reabrir una sesión
- /clear             limpiar pantalla
- /copy [n]          copiar respuesta
- /retry             reintentar último
- /stats             tokens y costo
- /config            config efectiva
- /debug             diagnóstico
- /exit              salir
+ /help              this screen
+ /model [text]      switch model
+ /models            browse catalog
+ /theme [name]      switch theme
+ /compact           summarize context
+ /new               new conversation
+ /resume            reopen a session
+ /clear             clear screen
+ /copy [n]          copy a response
+ /retry             retry the last one
+ /stats             tokens and cost
+ /config            effective config
+ /debug             diagnostics
+ /exit              quit
 
- ── atajos ────────────────────────────
+ ── shortcuts ─────────────────────────
 
- ctrl+p   selector de modelos
- ctrl+o   rotar favoritos
- ctrl+t   selector de temas
- ctrl+j   salto de línea
- esc      cancelar generación
- ctrl+c×2 salir
- ctrl+l   limpiar pantalla
- ctrl+y   copiar última respuesta
+ ctrl+p   model picker
+ ctrl+o   cycle favorites
+ ctrl+t   theme picker
+ ctrl+j   line break
+ esc      cancel generation
+ ctrl+c×2 quit
+ ctrl+l   clear screen
+ ctrl+y   copy last response
 
- ↑↓ desplazar · esc volver
+ ↑↓ scroll · esc back
 ```
 
-El registro de comandos es una tabla de datos, no un switch, para que esta pantalla y el autocompletado se generen solos.
+The command registry is a data table, not a switch, so that this screen and the autocomplete generate themselves.
 
-### 9.8 Errores y compactación
+### 9.8 Errors and compaction
 
 ```
 1...5....0....5....0....5....0....5....0
  ◆ auto/coding
- ⚠ límite de tasa (429). Reintento 2
-   de 3 en 4s…  esc cancela
+ ⚠ rate limit (429). Retry 2
+   of 3 in 4s…  esc cancels
 
- ⚠ omniroute no responde en :20128.
-   ¿está corriendo? `omniroute start`
-   ▸ reintentar   cambiar modelo
+ ⚠ omniroute not responding on :20128.
+   is it running? `omniroute start`
+   ▸ retry   switch model
 
- ⟳ compactando 18 turnos con
+ ⟳ compacting 18 turns with
    auto/cheap…  ▚▞▘▝▚
 
- ✓ compactado: 142k → 38k tokens
-   (18 turnos → 1 resumen + 4 turnos)
+ ✓ compacted: 142k → 38k tokens
+   (18 turns → 1 summary + 4 turns)
 ```
 
-Ningún error muestra JSON crudo en la superficie. El volcado completo queda en `/debug` y en `$XDG_STATE_HOME/ishakat/last-error.json`, siempre con claves redactadas.
+No error shows raw JSON on the surface. The full dump stays in `/debug` and in `$XDG_STATE_HOME/ishakat/last-error.json`, always with redacted keys.
 
 ---
 
-## 10. Persistencia
+## 10. Persistence
 
-Un archivo por sesión en `$XDG_DATA_HOME/ishakat/sessions/2026-07-30T14-02-11-a3f9.jsonl`. Primera línea: objeto de cabecera con `id`, `título`, `timestamps`, `modelo inicial` y `versión de esquema`. Después, un `convo.Message` serializado por línea, anexado cuando el mensaje se completa, nunca durante el streaming. `/resume` lista los archivos, lee solo la primera línea de cada uno para armar el menú, y carga el archivo completo únicamente al elegir.
+One file per session at `$XDG_DATA_HOME/ishakat/sessions/2026-07-30T14-02-11-a3f9.jsonl`. First line: a header object with `id`, `title`, `timestamps`, `initial model` and `schema version`. After that, one serialized `convo.Message` per line, appended when the message completes, never during streaming. `/resume` lists the files, reads only the first line of each to build the menu, and loads the full file only once you pick one.
 
 `/compact` no reescribe el archivo: anexa un mensaje con un `BlockSummary` que declara qué rangos reemplaza, de modo que el historial completo queda auditable y compactar es reversible.
 
