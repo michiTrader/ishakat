@@ -1,17 +1,17 @@
-# ISHAKAT — Documento maestro del proyecto
+# ISHAKAT — Project master document
 
-**Versión:** 1.2 · **Última actualización:** 2026-08-13
-**Estado:** Fase 1 y Fase 2.5 cerradas (Pasos 0–25) · Fase 3 en curso · `/theme [nombre]` + overlay `ctrl+t` + resaltado de sintaxis/Chroma cerrados · **siguiente: Markdown/Glamour, o las animaciones de "idea visual"**
-**Naturaleza del proyecto:** ishakat es un **runtime de agente de propósito general** para el terminal; el chat es su interfaz, no el producto (§0.1, CERRADA).
-**Naturaleza de este archivo:** fuente única de verdad. Contiene todo lo concebido y nada de lo descartado. Quien lo lea —persona o IA— puede ejecutar el proyecto completo sin necesitar contexto previo ni conversaciones anteriores.
+**Version:** 1.2 · **Last updated:** 2026-08-13
+**Status:** Phase 1 and Phase 2.5 closed (Steps 0–25) · Phase 3 in progress · `/theme [name]` + `ctrl+t` overlay + syntax highlighting/Chroma closed · **next: Markdown/Glamour** (the cursor-following-eyes animation is cancelled, deferred indefinitely — see §11 Phase 3)
+**Nature of the project:** ishakat is a **general-purpose agent runtime** for the terminal; the chat is its interface, not the product (§0.1, CLOSED).
+**Nature of this file:** single source of truth. It contains everything conceived and nothing discarded. Whoever reads it — person or AI — can execute the whole project without needing prior context or previous conversations.
 
 ---
 
-## 0. Instrucciones para el agente que lee esto
+## 0. Instructions for the agent reading this
 
-Si eres una IA trabajando en este repositorio, lee este documento entero antes de escribir código y respeta estas reglas:
+If you are an AI working in this repository, read this whole document before writing code and follow these rules:
 
-### 0.1 Qué es ishakat, antes que cualquier otra cosa
+### 0.1 What ishakat is, before anything else
 
 **Ishakat is a general-purpose agent runtime that lives in a terminal** — one
 static binary that reads, writes and runs things on the user's machine, and that
@@ -47,11 +47,11 @@ launch a rewrite of the whole document to chase the wording.
    below, now with its reason: a prettier transcript of a model that cannot *do*
    anything is the product this pivot exists to stop building.
 
-### 0.2 Reglas de trabajo
+### 0.2 Working rules
 
 Read these before writing code:
 
-- Las decisiones marcadas como **CERRADA** no se rediscuten, se implementan. Si crees que una está equivocada, dilo explícitamente antes de cambiar nada, no la cambies por iniciativa propia.
+- Decisions marked **CLOSED** are not up for re-discussion, they get implemented. If you think one is wrong, say so explicitly before changing anything — do not change it on your own initiative.
 - **Scope discipline cuts both ways.** When this document says "out of scope in
   this phase", that is a deliberate constraint, not an oversight — do not widen
   it on your own initiative. But the converse is equally binding: **an agent
@@ -59,14 +59,15 @@ Read these before writing code:
   Never postpone agent capability (§19) in favour of polish. If you have to
   choose between a feature that makes ishakat *do* more and one that makes it
   *look* better, the first one wins every time.
-- Implementa un paso a la vez, en el orden dado. Cada paso tiene un criterio de cierre verificable. No empieces el siguiente hasta que el actual pase su criterio. Al terminar un paso, actualiza la bitácora de la §17 de este mismo archivo y haz commit.
-- No agregues dependencias sin justificarlo contra el presupuesto de la §6.4. El presupuesto es parte del producto, no una sugerencia. **The tool layer of §19 is stdlib-only: it adds zero dependencies, ever.**
-- Escribe los tests indicados en cada paso antes o junto con el código, especialmente el del matcher difuso (Paso 7), que es el contrato con el requisito central del producto.
+- Implement one step at a time, in the given order. Each step has a verifiable closing criterion. Do not start the next one until the current one passes its criterion. When a step closes, update the §17 changelog in this same file and commit.
+- Do not add dependencies without justifying them against §6.4's budget. The budget is part of the product, not a suggestion. **The tool layer of §19 is stdlib-only: it adds zero dependencies, ever.**
+- Write the tests named in each step before or alongside the code, especially the fuzzy-matcher one (Step 7), which is the contract with the product's central requirement.
 - **Language: everything new is written in English** — code, comments, godoc,
   identifiers, user-facing strings, tests, commit messages and new sections of
   this document. See `AGENTS.md` for the full policy. (An earlier version of
   this section mandated Spanish; that rule is superseded. Pre-existing Spanish
-  content stays until a dedicated migration pass.)
+  content stays until a dedicated migration pass — that pass is what this
+  document itself went through on 2026-08-13; see §17.)
 
 ---
 
