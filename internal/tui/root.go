@@ -56,6 +56,19 @@ const (
 	// code request, then the slow poll-for-token wait) instead of
 	// ModeCompact's one.
 	ModeLogin
+	// ModeSuggest: §19.7's "crystallization by observation" suggestion
+	// dialog (Step 25, suggest.go) — "[t] crearla  [v] ver el código
+	// [n] no, ni ahora ni después". Opens only at the end of a turn
+	// (checkSuggest, called alongside checkAutoCompact from finishTurn
+	// and finishAgentTurn), never mid-task, per civility rule 1. Unlike
+	// every other overlay this one is entirely synchronous to open and
+	// to dismiss — evolve.DecideSuggestion is pure, no clock or
+	// filesystem call blocks Update — but accepting it ("[t]") starts a
+	// real tool_create call through m.agentOpts.Runner, which *is*
+	// async, so this mode still closes back to ModeBusy in that one
+	// case, the same "the turn is not over, only the pause is" rule
+	// ModeToolApprove already follows.
+	ModeSuggest
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
