@@ -1,17 +1,17 @@
-# ISHAKAT — Documento maestro del proyecto
+# ISHAKAT — Project master document
 
-**Versión:** 1.2 · **Última actualización:** 2026-08-13
-**Estado:** Fase 1 y Fase 2.5 cerradas (Pasos 0–25) · Fase 3 en curso · `/theme [nombre]` + overlay `ctrl+t` + resaltado de sintaxis/Chroma cerrados · **siguiente: Markdown/Glamour, o las animaciones de "idea visual"**
-**Naturaleza del proyecto:** ishakat es un **runtime de agente de propósito general** para el terminal; el chat es su interfaz, no el producto (§0.1, CERRADA).
-**Naturaleza de este archivo:** fuente única de verdad. Contiene todo lo concebido y nada de lo descartado. Quien lo lea —persona o IA— puede ejecutar el proyecto completo sin necesitar contexto previo ni conversaciones anteriores.
+**Version:** 1.2 · **Last updated:** 2026-08-13
+**Status:** Phase 1 and Phase 2.5 closed (Steps 0–25) · Phase 3 in progress · `/theme [name]` + `ctrl+t` overlay + syntax highlighting/Chroma closed · **next: Markdown/Glamour** (the cursor-following-eyes animation is cancelled, deferred indefinitely — see §11 Phase 3)
+**Nature of the project:** ishakat is a **general-purpose agent runtime** for the terminal; the chat is its interface, not the product (§0.1, CLOSED).
+**Nature of this file:** single source of truth. It contains everything conceived and nothing discarded. Whoever reads it — person or AI — can execute the whole project without needing prior context or previous conversations.
 
 ---
 
-## 0. Instrucciones para el agente que lee esto
+## 0. Instructions for the agent reading this
 
-Si eres una IA trabajando en este repositorio, lee este documento entero antes de escribir código y respeta estas reglas:
+If you are an AI working in this repository, read this whole document before writing code and follow these rules:
 
-### 0.1 Qué es ishakat, antes que cualquier otra cosa
+### 0.1 What ishakat is, before anything else
 
 **Ishakat is a general-purpose agent runtime that lives in a terminal** — one
 static binary that reads, writes and runs things on the user's machine, and that
@@ -47,11 +47,11 @@ launch a rewrite of the whole document to chase the wording.
    below, now with its reason: a prettier transcript of a model that cannot *do*
    anything is the product this pivot exists to stop building.
 
-### 0.2 Reglas de trabajo
+### 0.2 Working rules
 
 Read these before writing code:
 
-- Las decisiones marcadas como **CERRADA** no se rediscuten, se implementan. Si crees que una está equivocada, dilo explícitamente antes de cambiar nada, no la cambies por iniciativa propia.
+- Decisions marked **CLOSED** are not up for re-discussion, they get implemented. If you think one is wrong, say so explicitly before changing anything — do not change it on your own initiative.
 - **Scope discipline cuts both ways.** When this document says "out of scope in
   this phase", that is a deliberate constraint, not an oversight — do not widen
   it on your own initiative. But the converse is equally binding: **an agent
@@ -59,18 +59,19 @@ Read these before writing code:
   Never postpone agent capability (§19) in favour of polish. If you have to
   choose between a feature that makes ishakat *do* more and one that makes it
   *look* better, the first one wins every time.
-- Implementa un paso a la vez, en el orden dado. Cada paso tiene un criterio de cierre verificable. No empieces el siguiente hasta que el actual pase su criterio. Al terminar un paso, actualiza la bitácora de la §17 de este mismo archivo y haz commit.
-- No agregues dependencias sin justificarlo contra el presupuesto de la §6.4. El presupuesto es parte del producto, no una sugerencia. **The tool layer of §19 is stdlib-only: it adds zero dependencies, ever.**
-- Escribe los tests indicados en cada paso antes o junto con el código, especialmente el del matcher difuso (Paso 7), que es el contrato con el requisito central del producto.
+- Implement one step at a time, in the given order. Each step has a verifiable closing criterion. Do not start the next one until the current one passes its criterion. When a step closes, update the §17 changelog in this same file and commit.
+- Do not add dependencies without justifying them against §6.4's budget. The budget is part of the product, not a suggestion. **The tool layer of §19 is stdlib-only: it adds zero dependencies, ever.**
+- Write the tests named in each step before or alongside the code, especially the fuzzy-matcher one (Step 7), which is the contract with the product's central requirement.
 - **Language: everything new is written in English** — code, comments, godoc,
   identifiers, user-facing strings, tests, commit messages and new sections of
   this document. See `AGENTS.md` for the full policy. (An earlier version of
   this section mandated Spanish; that rule is superseded. Pre-existing Spanish
-  content stays until a dedicated migration pass.)
+  content stays until a dedicated migration pass — that pass is what this
+  document itself went through on 2026-08-13; see §17.)
 
 ---
 
-## 1. Qué es ishakat
+## 1. What is ishakat
 
 **A general-purpose agent runtime for the terminal.** One static binary that
 reads files, writes files, runs commands, fetches documentation, delegates
@@ -121,12 +122,12 @@ where this document previously would have chosen differently:
 - **A tool that only a human can approve is a broken tool.** Hence the headless
   permission flags rather than a TTY requirement.
 
-Conversar con un modelo desde el terminal ya lo hacen gemini-cli de Google,
-opencode, Claude Code, Pi y una docena más. Ishakat compite en otra categoría
-—agentes que se extienden solos— pero hereda el terreno de esas herramientas, y
-ese terreno tiene tres defectos que ishakat existe para resolver.
+Talking to a model from the terminal is already done by Google's gemini-cli,
+opencode, Claude Code, Pi and a dozen more. Ishakat competes in a different
+category — agents that extend themselves — but it inherits that tooling's
+ground, and that ground has three flaws that ishakat exists to fix.
 
-**El primero es el que nadie ha resuelto, y es el que define la categoría.**
+**The first is the one nobody has solved, and it is the one that defines the category.**
 Every agent in this class ships a fixed set of abilities. When you need one it
 does not have — talk to your exchange, send that mail, hit that internal API —
 you either wait for the vendor, install a plugin someone else wrote, or
@@ -137,43 +138,54 @@ and from then on calls it in ~120 tokens instead of reasoning it out in ~4.000
 (§19.4). **It does not need a new version to gain a capability. It gains one on
 the spot.**
 
-El segundo es que cambiar de modelo es doloroso. La mayoría eligen el modelo al arrancar y lo amarran al proceso: para pasar de un modelo caro y potente a uno barato y rápido a mitad de conversación hay que cerrar el programa, cambiar una variable de entorno, reabrirlo y perder el hilo. Y para elegir hay que escribir el identificador exacto, cosa de teclear `anthropic/claude-sonnet-4-5` sin fallar un carácter, entre quinientas opciones. Bajo el marco de agente esto pesa más que como comodidad de chat: a mitad de una tarea larga se quiere bajar a un modelo barato para los pasos mecánicos y volver al caro para el difícil, **sin perder el estado de la tarea** (§4.6).
+The second is that switching models is painful. Most of them pick the model at
+startup and tie it to the process: to go from an expensive, powerful model to a
+cheap, fast one mid-conversation you have to close the program, change an
+environment variable, reopen it, and lose the thread. And picking one means
+typing the exact identifier, keying in `anthropic/claude-sonnet-4-5` without
+missing a character, among five hundred options. Under the agent frame this
+weighs more than as a chat convenience: mid-way through a long task you want to
+drop to a cheap model for the mechanical steps and come back to the expensive
+one for the hard part, **without losing the task's state** (§4.6).
 
-El tercero es que casi ninguna funciona bien en el teléfono. Termux es un emulador de terminal para Android que mucha gente usa como computador de bolsillo. La mayoría de estos CLIs se instalan con dificultad o no se instalan, porque arrastran dependencias que hay que compilar en el dispositivo o binarios que asumen un Linux de escritorio.
+The third is that almost none of them work well on the phone. Termux is a
+terminal emulator for Android that many people use as a pocket computer. Most
+of these CLIs install with difficulty or do not install at all, because they
+drag in dependencies that must be compiled on the device or binaries that
+assume a desktop Linux.
 
 Note the order: **this list is ranked by the agent frame, not by how visible each
 defect is in a demo.** The third one constrains the first — it is why
 self-extension may not depend on a package manager (§19.3) and why the tool layer
 is stdlib-only (§6.4).
 
-Ishakat es un solo archivo ejecutable, sin nada que instalar alrededor, que
-arranca en menos de 150 milisegundos, se ve bonito, **hace trabajo real en la
-máquina y aprende herramientas nuevas mientras lo hace** — y en el que cambiar de
-modelo a mitad de la tarea es escribir `/model son45` y presionar Enter, con el
-hilo intacto.
+Ishakat is a single executable file, with nothing to install around it, that
+starts in under 150 milliseconds, looks good, **does real work on the machine
+and learns new tools while doing it** — and in which switching models mid-task
+is typing `/model son45` and pressing Enter, with the thread intact.
 
-### 1.1 La oportunidad
+### 1.1 The opportunity
 
-El acceso a modelos de IA se está fragmentando y abaratando a la vez. Un usuario típico tiene hoy acceso a media docena de proveedores distintos, cada uno bueno para algo diferente: uno razona mejor, otro es diez veces más barato, otro corre local y sin internet. La herramienta que gana no es la que se casa con un proveedor, sino la que hace trivial saltar entre todos.
+Access to AI models is fragmenting and getting cheaper at the same time. A typical user today has access to half a dozen different providers, each good at something different: one reasons better, another is ten times cheaper, another runs local and offline. The tool that wins is not the one that marries a single provider, but the one that makes it trivial to jump between all of them.
 
-Al mismo tiempo existe una capa nueva de infraestructura que resuelve el problema del lado del servidor: los gateways locales. OmniRoute es uno de ellos —código abierto, licencia MIT— que corre en tu propia máquina en `http://localhost:20128/v1` y expone cientos de proveedores tras una sola interfaz compatible con OpenAI. Ishakat no tiene que implementar 290 integraciones: implementa bien un dialecto y habla con todo.
+At the same time there is a new infrastructure layer that solves the problem on the server side: local gateways. OmniRoute is one of them — open source, MIT licensed — that runs on your own machine at `http://localhost:20128/v1` and exposes hundreds of providers behind a single OpenAI-compatible interface. Ishakat does not have to implement 290 integrations: it implements one dialect well and talks to everything.
 
-El hueco de mercado es el **agente** de terminal que aprovecha esa capa, cabe en
-un teléfono, y trata el cambio de modelo como una operación de primera clase en
-vez de una configuración escondida.
+The market gap is the terminal **agent** that leverages that layer, fits on a
+phone, and treats switching models as a first-class operation instead of a
+hidden configuration.
 
-Y hay una segunda oportunidad que la primera hace posible. Los gateways
-convirtieron el acceso a modelos en algo abundante y barato; lo que sigue siendo
-escaso es que el agente **sepa hacer lo tuyo**. Ese hueco lo llenan hoy los
-ecosistemas de plugins, que resuelven el problema equivocado: te dan lo que otro
-escribió y necesitó. La alternativa es un agente que escriba lo que *tú*
-necesitaste, a partir de la evidencia de tu propio uso (§19). Un dialecto bien
-implementado da cientos de modelos; una escalera de cristalización bien
-implementada da capacidades ilimitadas — y ninguna de las dos agrega dependencias.
+And there is a second opportunity that the first one makes possible. Gateways
+turned access to models into something abundant and cheap; what remains scarce
+is the agent **knowing how to do your thing**. That gap is filled today by
+plugin ecosystems, which solve the wrong problem: they give you what someone
+else wrote and needed. The alternative is an agent that writes what *you*
+needed, from the evidence of your own usage (§19). A well-implemented dialect
+gives you hundreds of models; a well-implemented crystallization ladder gives
+unlimited capabilities — and neither one adds dependencies.
 
-### 1.2 Los seis diferenciadores
+### 1.2 The six differentiators
 
-En orden de importancia. The first one is new and is the reason this document
+In order of importance. The first one is new and is the reason this document
 was restructured; the rest keep their original ranking below it.
 
 1. **Self-extension with governance (§19).** Ishakat crystallizes repeated work
@@ -184,20 +196,21 @@ was restructured; the rest keep their original ranking below it.
    unnoticed. **Nobody else in this category does this.** Plugin ecosystems make
    you install what somebody else wrote; ishakat writes what *you* actually
    needed, from the evidence of your own usage.
-2. **Instalación de un solo binario sin runtime**, que en Termux es la diferencia
-   entre "funciona" y "no lo instalo". This constrains #1 hard: the tool layer is
-   stdlib-only (§6.4) and generated tools may not `pip install` (§19.3).
-3. **Cambio de modelo en caliente conservando el contexto**, con verificación
-   automática de que la conversación cabe en la ventana del modelo nuevo — and
-   now also mid-task: swap models in the middle of a tool loop without losing
-   the thread. No competitor documents this as carefully (§4.6).
-4. **Selector de modelos con búsqueda difusa** y etiquetas de gratis, costo y
-   latencia leídas del catálogo, para elegir viendo información en vez de
-   adivinar entre cientos de identificadores.
-5. **Layout responsivo real diseñado para 40 columnas**, que es un teléfono en
-   vertical, algo que ninguno de los referentes hace bien.
-6. **Personalidad y animaciones conscientes de batería**, que se apagan solas
-   cuando no aportan. Every competitor is deliberately flat; being pleasant to
+2. **Single-binary installation with no runtime**, which on Termux is the
+   difference between "it works" and "I'm not installing it". This constrains #1
+   hard: the tool layer is stdlib-only (§6.4) and generated tools may not
+   `pip install` (§19.3).
+3. **Hot model swap that preserves context**, with automatic verification that
+   the conversation fits the new model's window — and now also mid-task: swap
+   models in the middle of a tool loop without losing the thread. No competitor
+   documents this as carefully (§4.6).
+4. **Fuzzy-search model picker** with free/cost/latency tags read from the
+   catalog, to choose by seeing information instead of guessing among hundreds
+   of identifiers.
+5. **Real responsive layout designed for 40 columns**, which is a phone held
+   vertically, something none of the reference tools do well.
+6. **Personality and battery-aware animations**, which turn themselves off
+   when they add nothing. Every competitor is deliberately flat; being pleasant to
    look at is a feature, not a distraction — as long as it costs nothing when it
    is off.
 
@@ -247,35 +260,35 @@ the model mid-fix without losing the thread.
 
 ---
 
-## 2. Hallazgos de investigación que fundamentan el diseño
+## 2. Research findings behind the design
 
-Resultado de la Fase 1. Explican por qué cada decisión posterior es como es.
+Result of Phase 1. They explain why every later decision is the way it is.
 
-**Por qué gemini-cli corre bien en Termux.** No es magia: su árbol de dependencias es JavaScript puro, sin módulos nativos. Lo que rompe en Termux son las dependencias que compilan C/C++ con node-gyp (`better-sqlite3`, `node-pty`, `sharp`, `keytar`) o los binarios precompilados contra glibc, porque Android usa Bionic libc. La lección transferible: la portabilidad se gana eliminando compilación en el dispositivo, no parcheándola.
+**Why gemini-cli runs well on Termux.** It is not magic: its dependency tree is pure JavaScript, with no native modules. What breaks on Termux are dependencies that compile C/C++ via node-gyp (`better-sqlite3`, `node-pty`, `sharp`, `keytar`) or binaries precompiled against glibc, because Android uses Bionic libc. The transferable lesson: portability is won by removing on-device compilation, not by patching around it.
 
-**Por qué opencode cambia de modelo tan fácil.** Tres decisiones combinadas: el catálogo de modelos vive fuera del código, consumido de models.dev; los identificadores son uniformes con la forma `proveedor/modelo`; y el modelo activo vive en el estado de la sesión, no en la inicialización del proceso. Las tres se adoptan en ishakat.
+**Why opencode switches models so easily.** Three decisions combined: the model catalog lives outside the code, consumed from models.dev; identifiers are uniform in the form `provider/model`; and the active model lives in session state, not in process initialization. All three are adopted in ishakat.
 
-models.dev publica tres endpoints, no uno. `api.json` (combinación proveedor+modelo, la que usa opencode), `models.json` (metadatos del modelo independientes del proveedor) y `catalog.json` (ambas). Esa distinción es crítica para el emparejamiento de metadatos descrito en §4.3.
+models.dev publishes three endpoints, not one. `api.json` (provider+model combination, the one opencode uses), `models.json` (provider-independent model metadata) and `catalog.json` (both). That distinction is critical for the metadata matching described in §4.3.
 
-**OmniRoute resuelve medio proyecto.** Endpoint OpenAI-compatible en `localhost:20128/v1`, con `GET /v1/models` que devuelve todo el catálogo, modelos virtuales (`auto`, `auto/coding`, `auto/fast`, `auto/cheap`, `auto/smart`, `auto/offline`), fallback automático entre proveedores, y funciona en Termux.
+**OmniRoute solves half the project.** OpenAI-compatible endpoint at `localhost:20128/v1`, with `GET /v1/models` returning the whole catalog, virtual models (`auto`, `auto/coding`, `auto/fast`, `auto/cheap`, `auto/smart`, `auto/offline`), automatic fallback between providers, and it works on Termux.
 
-**La estética objetivo ya está construida en Go.** Crush, de Charm, usa Bubble Tea (arquitectura Elm), Lip Gloss (estilos y degradados), Bubbles (componentes) y Harmonica (animación con física). Bubble Tea v2 —estable desde el 23 de febrero de 2026— trae además dos regalos: el Cursed Renderer, que hace diffing de celdas al estilo ncurses, y downsampling de color automático, que degrada cualquier estilo ANSI al perfil real del terminal sin código nuestro.
+**The target aesthetic is already built in Go.** Crush, by Charm, uses Bubble Tea (Elm architecture), Lip Gloss (styles and gradients), Bubbles (components) and Harmonica (physics-based animation). Bubble Tea v2 — stable since February 23, 2026 — also brings two gifts: the Cursed Renderer, which does ncurses-style cell diffing, and automatic color downsampling, which degrades any ANSI style to the terminal's real profile with no code of our own.
 
 ---
 
-## 3. Decisiones de arquitectura CERRADAS
+## 3. CLOSED architecture decisions
 
-**Stack:** Go 1.24+ con Bubble Tea v2 / Lip Gloss v2 / Bubbles v2. Produce un binario único de 15–25 MB, arranca en decenas de milisegundos, no necesita runtime, y el ecosistema Charm da exactamente la estética objetivo. Rutas de importación: `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` (dominio vanity nuevo de v2, verificado).
+**Stack:** Go 1.24+ with Bubble Tea v2 / Lip Gloss v2 / Bubbles v2. Produces a single 15–25 MB binary, starts in tens of milliseconds, needs no runtime, and the Charm ecosystem gives exactly the target aesthetic. Import paths: `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` (v2's new vanity domain, verified).
 
-**Compilación por plataforma.** `CGO_ENABLED=0` para linux y darwin. Para android/arm64, `CGO_ENABLED=1` con el NDK, apuntando CC a `aarch64-linux-android24-clang`. Esto es obligatorio y no negociable: un binario Go sin CGO usa el resolver DNS puro de Go, que lee `/etc/resolv.conf`, archivo que Android no tiene. El binario arranca, imprime `--version`, se ve perfecto, y muere en la primera petición HTTP con `lookup api.example.com on [::1]:53: connection refused`. El síntoma se esconde durante semanas porque el camino por defecto es `localhost:20128`, que no pasa por DNS. Como red de seguridad se implementa `internal/netfix` (§6.5).
+**Per-platform compilation.** `CGO_ENABLED=0` for linux and darwin. For android/arm64, `CGO_ENABLED=1` with the NDK, pointing CC at `aarch64-linux-android24-clang`. This is mandatory and non-negotiable: a Go binary without CGO uses Go's pure DNS resolver, which reads `/etc/resolv.conf`, a file Android does not have. The binary starts, prints `--version`, looks perfect, and dies on the first HTTP request with `lookup api.example.com on [::1]:53: connection refused`. The symptom stays hidden for weeks because the default path is `localhost:20128`, which does not go through DNS. As a safety net, `internal/netfix` is implemented (§6.5).
 
-**Modo inline, nunca alt-screen.** En alt-screen se pierde el scrollback del terminal y hay que reimplementar el scroll —que con dedos en un teléfono es peor que el nativo— y se rompe la selección de texto para copiar. En modo inline, lo que ya terminó se imprime una vez con `tea.Printf` y jamás se repinta; lo vivo ocupa las últimas líneas. Es el equivalente del `<Static>` de Ink que usa gemini-cli. Contrapartida aceptada: las líneas ya impresas no se re-envuelven al cambiar el ancho del terminal.
+**Inline mode, never alt-screen.** In alt-screen you lose the terminal's scrollback and have to reimplement scroll — which with fingers on a phone is worse than native — and it breaks text selection for copying. In inline mode, whatever already finished is printed once with `tea.Printf` and never repainted; the live region occupies the last lines. It is the equivalent of Ink's `<Static>`, which gemini-cli uses. Accepted trade-off: already-printed lines do not re-wrap when the terminal width changes.
 
-**Persistencia en JSONL, jamás SQLite.** Un archivo por sesión, append-only. Sin base de datos, sin índice, sin CGO. Sobrevive a un `kill -9` y se inspecciona con `tail`.
+**Persistence in JSONL, never SQLite.** One file per session, append-only. No database, no index, no CGO. Survives a `kill -9` and can be inspected with `tail`.
 
-**No se inventa ningún protocolo nuevo.** Tres adaptadores de dialecto cubren el mercado: OpenAI (`chat/completions`), Anthropic (`messages`) y Google (`generateContent`). El 95% de los proveedores hablan OpenAI. Lo que sí se construye es un adaptador declarativo por configuración: agregar un proveedor es pegar cinco líneas de TOML, no escribir código.
+**No new protocol is invented.** Three dialect adapters cover the market: OpenAI (`chat/completions`), Anthropic (`messages`) and Google (`generateContent`). 95% of providers speak OpenAI. What *is* built is a declarative, config-driven adapter: adding a provider is pasting five lines of TOML, not writing code.
 
-**No Go plugins. CERRADA, and it is not a compromise — it is the decision that
+**No Go plugins. CLOSED, and it is not a compromise — it is the decision that
 makes self-extension auditable.** The obvious design for §19 would be "the agent
 writes `bybit.go`, compiles it, loads it". That path is closed on the merits:
 
@@ -294,7 +307,7 @@ language model would be an opaque blob executing inside the process — the wors
 possible security property for a program that also reaches your exchange
 account. The platform limitation forced the right architecture.
 
-**The agentic loop is reactive, single-loop. CERRADA.** No `Planner`,
+**The agentic loop is reactive, single-loop. CLOSED.** No `Planner`,
 `Scheduler` or `Memory` modules. The model sees the accumulated context —
 including the stderr of the command that just failed, as a `BlockToolResult` —
 and picks the next tool, one step at a time, until it answers without a tool
@@ -304,7 +317,7 @@ work anyway, only with extra ceremony on top. "Planning" is the model thinking
 in text before it calls a tool; it is not a package. Sub-agents (`dispatch`,
 Step 22) are goroutines with isolated context, not a scheduler.
 
-**Inline rendering stays, as-is, with no reflow. CERRADA — confirmed
+**Inline rendering stays, as-is, with no reflow. CLOSED — confirmed
 2026-08-03.** Committed transcript lines are printed once and never repainted,
 which is what buys native phone scrolling and native text selection — both worth
 more on Termux than perfect reflow. **Accepted consequence: already-printed lines
@@ -315,7 +328,7 @@ reopened as a "small improvement":
 
 | Option | Verdict |
 |---|---|
-| **(a) Inline as-is, no reflow** | ✅ **CERRADA.** Preserves the terminal's native behaviour and adds no state |
+| **(a) Inline as-is, no reflow** | ✅ **CLOSED.** Preserves the terminal's native behaviour and adds no state |
 | (b) Reflow only the live region in Phase 3 | ❌ rejected — half the benefit for a permanent complication |
 | (c) Full alt-screen repaint | ❌ rejected outright — costs native scroll and copy/paste |
 
@@ -333,19 +346,19 @@ immutable by contract. If you find yourself wanting to re-render a committed
 line, the answer is no — and if the underlying need is real, it belongs in the
 live region, which is repainted anyway.
 
-**Five contracts govern the whole system:** el modelo de conversación agnóstico
-(§4), el catálogo de modelos (§4bis), el esquema de configuración (§5), el tema
-como datos (§8), and **the tool contract with its lifecycle and governance
+**Five contracts govern the whole system:** the agnostic conversation model
+(§4), the model catalog (§4bis), the config schema (§5), theme-as-data
+(§8), and **the tool contract with its lifecycle and governance
 (§19)**.
 
 ---
 
-## 4. Contrato 1: modelo de conversación agnóstico
+## 4. Contract 1: agnostic conversation model
 
-Es la pieza que hace posible todo lo demás. El historial nunca se guarda en el formato JSON de un proveedor; se guarda en estructura propia y se serializa al dialecto correspondiente en el momento exacto de la petición.
+This is the piece that makes everything else possible. History is never stored in a provider's JSON format; it is stored in our own structure and serialized to the corresponding dialect at the exact moment of the request.
 
 ```go
-// internal/convo/message.go — tipos puros, cero dependencias externas
+// internal/convo/message.go — pure types, zero external dependencies
 type Role string // "system" | "user" | "assistant" | "tool"
 
 type BlockKind int
@@ -355,91 +368,91 @@ const (
     BlockToolCall
     BlockToolResult
     BlockReasoning
-    BlockSummary   // producido por /compact
+    BlockSummary   // produced by /compact
 )
 
 type Block struct {
     Kind       BlockKind
     Text       string
-    Data       []byte          // imágenes y adjuntos
+    Data       []byte          // images and attachments
     Mime       string
-    Name       string          // nombre de herramienta
+    Name       string          // tool name
     Args       json.RawMessage
-    ToolCallID string          // correlaciona un resultado con su llamada
-    IsError    bool            // solo BlockToolResult: el fallo es dato, no excepción
-    Replaces   []int           // solo BlockSummary: índices de mensajes resumidos
+    ToolCallID string          // correlates a result with its call
+    IsError    bool            // BlockToolResult only: failure is data, not an exception
+    Replaces   []int           // BlockSummary only: indices of summarized messages
 }
 
 type Message struct {
     Role    Role
     Blocks  []Block
-    Model   string     // Ref del modelo que generó este mensaje
+    Model   string     // Ref of the model that generated this message
     Usage   *Usage
-    Aborted bool       // true si el usuario canceló a mitad de streaming
+    Aborted bool       // true if the user cancelled mid-stream
     Ts      time.Time
 }
 
 type Usage struct{ In, Out, CacheRead, CacheWrite, Reasoning int }
 ```
 
-Dos campos que parecen menores y no lo son. `Model` guarda qué modelo generó cada mensaje, lo que permite pintar el transcript con atribución correcta cuando cambiaste tres veces de modelo en la misma sesión, y sirve de auditoría de costos. `Aborted` marca las respuestas cortadas: si botas el parcial, el usuario pierde tokens que ya pagó; si lo guardas sin marcar, el modelo cree que se expresó completo. Marcado, `/retry` sabe qué hacer y el serializador puede añadir "(respuesta interrumpida por el usuario)" al convertir el historial.
+Two fields that look minor and are not. `Model` stores which model generated each message, which lets the transcript be painted with correct attribution when you switched models three times in the same session, and doubles as a cost audit trail. `Aborted` flags cut-off responses: if you discard the partial, the user loses tokens they already paid for; if you save it unmarked, the model thinks it expressed itself completely. Marked, `/retry` knows what to do and the serializer can append "(response interrupted by the user)" when converting the history.
 
-Y dos que el paso 14 vuelve obligatorios. **`ToolCallID`** parece redundante hasta que un turno trae dos llamadas a la vez: el dialecto OpenAI exige un `tool_call_id` en cada mensaje `role: "tool"`, y sin él el proveedor no sabe qué resultado corresponde a qué llamada. Emparejar por posición en el array parece funcionar y falla en cuanto una herramienta responde antes que otra. El id lo trae el proveedor en el stream; `convo` solo lo transporta, igual que con `Args`, para no saber nada del dialecto. **`IsError`** implementa la decisión de §3 de que el fallo de una herramienta es dato y no excepción: un `exit status 1` sigue siendo un `BlockToolResult` normal que entra al contexto para que el modelo lo lea y reaccione — es el mecanismo entero por el que el bucle reactivo maneja lo imprevisto, y la razón por la que no hace falta un planificador. Se guarda aparte del texto porque el TUI lo pinta distinto y porque el modelo no debería tener que adivinar si `permission denied` es una salida o un fallo.
+And two that Step 14 makes mandatory. **`ToolCallID`** looks redundant until a turn brings two calls at once: the OpenAI dialect requires a `tool_call_id` on every `role: "tool"` message, and without it the provider does not know which result corresponds to which call. Matching by array position seems to work and fails the moment one tool responds before another. The provider supplies the id in the stream; `convo` only carries it, same as with `Args`, so as to know nothing about the dialect. **`IsError`** implements §3's decision that a tool's failure is data, not an exception: an `exit status 1` is still a normal `BlockToolResult` that enters the context for the model to read and react to — it is the entire mechanism by which the reactive loop handles the unforeseen, and the reason a planner is unnecessary. It is stored apart from the text because the TUI paints it differently and because the model should not have to guess whether `permission denied` is an output or a failure.
 
-Los constructores son `ToolCallBlock`, `ToolResultBlock` y `ToolErrorBlock`. El tercero existe en vez de un booleano en el segundo para que quien construye el bloque tenga que decir cuál de los dos casos es, en lugar de pasar un `false` que nadie lee.
+The constructors are `ToolCallBlock`, `ToolResultBlock` and `ToolErrorBlock`. The third exists instead of a boolean on the second so that whoever builds the block has to say which of the two cases it is, instead of passing a `false` nobody reads.
 
 ---
 
-## 4bis. Contrato 2: el catálogo de modelos
+## 4bis. Contract 2: the model catalog
 
-### 4.1 El problema en una frase
+### 4.1 The problem in one sentence
 
-Tres fuentes dicen cosas distintas y ninguna sola alcanza: el proveedor sabe qué se puede llamar ahora mismo, models.dev sabe cuánto cuesta y qué ventana tiene, y el usuario sabe qué quiere corregir. El catálogo las funde en un registro único y garantiza que el arranque nunca dependa de la red.
+Three sources say different things and none alone is enough: the provider knows what can be called right now, models.dev knows the cost and the window, and the user knows what they want to override. The catalog merges them into a single registry and guarantees that startup never depends on the network.
 
-### 4.2 Registro normalizado
+### 4.2 Normalized registry
 
 ```go
 // internal/catalog/model.go
 type Model struct {
-    Ref       string    // "omniroute/anthropic/claude-sonnet-4-5" ← clave única, lo que ve el usuario
+    Ref       string    // "omniroute/anthropic/claude-sonnet-4-5" ← unique key, what the user sees
     Provider  string    // "omniroute"
-    WireID    string    // "anthropic/claude-sonnet-4-5" ← lo que va en el JSON de la petición
+    WireID    string    // "anthropic/claude-sonnet-4-5" ← what goes in the request JSON
     Name      string    // "Claude Sonnet 4.5"
-    Family    string    // "claude" — para agrupar y para fallback de metadatos
+    Family    string    // "claude" — for grouping and metadata fallback
 
-    Context   int       // 0 = desconocido
+    Context   int       // 0 = unknown
     MaxOutput int
 
-    Cost      *Cost     // nil = DESCONOCIDO, que no es lo mismo que gratis
+    Cost      *Cost     // nil = UNKNOWN, which is not the same as free
     Caps      Caps      // Tools, Vision, Reasoning, Streaming, JSONSchema, Attachments
     Tags      []string  // free | virtual | local | deprecated | beta
 
     Source    Source    // bitmask: Discover | ModelsDev | Config
     Health    Health    // ok | cooling | unauthenticated | unreachable
 
-    // estadísticas locales; viven en el caché y alimentan el ranking difuso
+    // local stats; live in the cache and feed the fuzzy ranking
     UseCount   int
     LastUsed   time.Time
     P50Latency time.Duration
     FailStreak int
 }
 
-type Cost struct{ In, Out, CacheRead, CacheWrite float64 } // USD por millón de tokens
+type Cost struct{ In, Out, CacheRead, CacheWrite float64 } // USD per million tokens
 ```
 
-Dos decisiones no obvias. `Ref` y `WireID` son campos separados porque el identificador que el usuario escribe lleva prefijo de proveedor y el que va al cable no. Y como OmniRoute sirve modelos cuyo propio ID ya contiene barras, `strings.Split(ref, "/")` es un bug: hay que partir únicamente en la primera barra, con `strings.Cut`. Segundo, `Cost == nil` significa "no sé", y el selector muestra `—` en vez de `$0`, porque marcar como gratis algo que cobra es la peor mentira que puede decir esa pantalla.
+Two non-obvious decisions. `Ref` and `WireID` are separate fields because the identifier the user types carries a provider prefix and the one that goes on the wire does not. And since OmniRoute serves models whose own ID already contains slashes, `strings.Split(ref, "/")` is a bug: you must split only on the first slash, with `strings.Cut`. Second, `Cost == nil` means "I don't know", and the picker shows `—` instead of `$0`, because labelling something that charges as free is the worst lie that screen can tell.
 
-### 4.3 Fusión de las tres fuentes
+### 4.3 Merging the three sources
 
-La fusión es campo por campo, no registro por registro. La existencia de un modelo la define discovery: si el proveedor no lo lista, no se puede llamar. Los metadatos los aporta models.dev cuando discovery no los trae. La config del usuario gana siempre. Un modelo declarado a mano que discovery no reporta se mantiene visible pero marcado, que es exactamente el caso de los virtuales de OmniRoute.
+The merge is field by field, not record by record. A model's existence is defined by discovery: if the provider does not list it, it cannot be called. Metadata is supplied by models.dev when discovery does not bring it. The user's config always wins. A manually declared model that discovery does not report stays visible but flagged, which is exactly the case for OmniRoute's virtual models.
 
-El emparejamiento con models.dev se intenta en cascada: primero `provider/wire_id` exacto contra `api.json`; si falla, se normaliza el `wire_id` (minúsculas, quitar `-latest`, sufijos de fecha tipo `-20250219`, prefijos de vendor duplicados) y se reintenta; si falla, se busca por familia en `models.json` —la base agnóstica del proveedor, que existe justo para esto— resolviendo el caso del gateway que sirve Claude bajo otro nombre. Si nada empata, el modelo queda con metadatos desconocidos y la interfaz lo dice en vez de inventar.
+Matching against models.dev is tried in a cascade: first an exact `provider/wire_id` match against `api.json`; if that fails, the `wire_id` is normalized (lowercase, strip `-latest`, date suffixes like `-20250219`, duplicated vendor prefixes) and retried; if that fails, it is looked up by family in `models.json` — the provider-agnostic base that exists exactly for this — which resolves the case of a gateway that serves Claude under another name. If nothing matches, the model is left with unknown metadata and the interface says so instead of inventing one.
 
-Cuando falta la ventana de contexto tras toda esa cascada, no se adivina 128k. Se marca desconocida, se asume un piso conservador de 32k solo para las alertas de compactación, y la primera respuesta con usage real corrige el dato en el caché.
+When the context window is missing after that whole cascade, it is not guessed as 128k. It is marked unknown, a conservative 32k floor is assumed just for compaction alerts, and the first response with real usage corrects the value in the cache.
 
-### 4.4 Caché y secuencia de arranque
+### 4.4 Cache and startup sequence
 
-Un solo archivo JSON en `$XDG_CACHE_HOME/ishakat/catalog.json`, escrito de forma atómica (temporal + rename) para que un Ctrl+C a media escritura no lo corrompa.
+A single JSON file at `$XDG_CACHE_HOME/ishakat/catalog.json`, written atomically (temp file + rename) so that a Ctrl+C mid-write does not corrupt it.
 
 ```json
 {
@@ -459,23 +472,23 @@ Un solo archivo JSON en `$XDG_CACHE_HOME/ishakat/catalog.json`, escrito de forma
 }
 ```
 
-La secuencia es lo que hace que se sienta rápido. Se lee el caché y se pinta la interfaz de inmediato, sin tocar la red ni una vez, incluso con el caché vencido. En paralelo, si el TTL expiró, una goroutine hace discovery contra cada proveedor habilitado con timeout de 2 segundos y refresca models.dev con `If-None-Match`. Al terminar, el catálogo se reemplaza en caliente y, si el selector está abierto, la lista se reordena sin cerrarse. Sin red no pasa nada visible salvo una franja `⚠ catálogo de hace 3 días`. En primera ejecución sin caché y sin red se usa un catálogo semilla embebido en el binario con los virtuales de OmniRoute y los diez modelos más comunes.
+The sequence is what makes it feel fast. The cache is read and the interface is painted immediately, without touching the network even once, even with an expired cache. In parallel, if the TTL expired, a goroutine runs discovery against each enabled provider with a 2-second timeout and refreshes models.dev with `If-None-Match`. When it finishes, the catalog is hot-swapped and, if the picker is open, the list re-sorts without closing. With no network, nothing visible happens except a `⚠ catalog from 3 days ago` banner. On the first run with no cache and no network, a seed catalog embedded in the binary is used, with OmniRoute's virtual models and the ten most common models.
 
-**Presupuesto no negociable:** el arranque no toca la red en el camino crítico.
+**Non-negotiable budget:** startup does not touch the network on the critical path.
 
-### 4.5 Resolución de referencias y búsqueda difusa
+### 4.5 Reference resolution and fuzzy search
 
-El corazón del requisito "no tener que escribir el ID exacto". La resolución pasa por cuatro etapas en orden y se detiene en la primera que produce un ganador claro: coincidencia exacta con un `Ref`; coincidencia exacta con un alias de la config; coincidencia única de sufijo (escribir `claude-sonnet-4-5` y que resuelva porque solo un proveedor lo sirve); y por último puntaje difuso.
+The heart of the "never have to type the exact ID" requirement. Resolution goes through four stages in order and stops at the first one that produces a clear winner: exact match against a `Ref`; exact match against a config alias; unique suffix match (typing `claude-sonnet-4-5` and having it resolve because only one provider serves it); and finally a fuzzy score.
 
-El puntaje difuso es una subsecuencia con penalización por hueco, sobre ambos strings normalizados a minúsculas y sin los separadores `- _ / . :`. Sobre el puntaje base se aplican bonificaciones por coincidencia al inicio de palabra, por prefijo de proveedor, por dígitos en el mismo orden —esto es lo que hace que `son45` gane contra `sonnet-4-0`— y por uso reciente y frecuencia leídos de las estadísticas locales. Se penaliza `deprecated`. Si `prefer_free = true`, se bonifica `free`.
+The fuzzy score is a gap-penalized subsequence match, over both strings normalized to lowercase and stripped of the `- _ / . :` separators. On top of the base score, bonuses are applied for a match at the start of a word, for a provider prefix, for digits in the same order — this is what makes `son45` win against `sonnet-4-0` — and for recent use and frequency read from local stats. `deprecated` is penalized. If `prefer_free = true`, `free` is bonused.
 
-Traza del caso `/model son45`: normaliza a `son45`; contra `omniroute/anthropic/claude-sonnet-4-5` → `omniroutanthropicclaudesonnet45` encuentra `son` contiguo dentro de una palabra y `4,5` en orden al final, puntaje alto; contra `claude-sonnet-4-0` los dígitos no empatan y baja; contra `gpt-5-nano` no hay `son` y queda fuera.
+Trace of the `/model son45` case: normalizes to `son45`; against `omniroute/anthropic/claude-sonnet-4-5` → `omniroutanthropicclaudesonnet45` it finds `son` contiguous inside a word and `4,5` in order at the end, high score; against `claude-sonnet-4-0` the digits do not match and it drops; against `gpt-5-nano` there is no `son` and it is excluded.
 
-**Regla de desempate:** si el mejor supera al segundo por más del 20%, cambia directo e imprime una línea de confirmación. Si no, abre el selector prefiltrado con `son45` ya escrito. Nunca, bajo ninguna circunstancia, un "modelo no encontrado" a secas.
+**Tie-break rule:** if the best beats the second by more than 20%, it switches directly and prints a confirmation line. If not, it opens the picker prefiltered with `son45` already typed. Never, under any circumstance, a bare "model not found".
 
-### 4.6 Cambio en caliente: las tres verificaciones
+### 4.6 Hot swap: the three checks
 
-Cambiar de modelo a mitad de conversación no es reasignar una variable. Antes de aceptar se corren tres chequeos, implementados como función pura testeable sin terminal:
+Switching models mid-conversation is not reassigning a variable. Before accepting, three checks run, implemented as a pure, terminal-free testable function:
 
 ```go
 // internal/engine/hotswap.go
@@ -496,39 +509,39 @@ type Plan struct {
 func CheckSwap(c *convo.Conversation, from, to catalog.Model) Plan
 ```
 
-El chequeo de contexto compara los tokens estimados contra `Context` del modelo destino y, si no caben, ofrece compactar. El de capacidades detecta bloques que el modelo nuevo no soporta —imágenes hacia un modelo sin visión, resultados de herramientas hacia uno sin tool calling— y advierte que se degradarán a texto descriptivo en vez de romper la petición. El de autenticación verifica que el proveedor destino tenga credencial resuelta antes de dejarte cambiar, no cuando mandes el mensaje.
+The context check compares estimated tokens against the destination model's `Context` and, if they do not fit, offers to compact. The capabilities check detects blocks the new model does not support — images toward a model with no vision, tool results toward one with no tool calling — and warns that they will degrade to descriptive text instead of breaking the request. The authentication check verifies the destination provider has resolved credentials before letting you switch, not when you send the message.
 
-Si `Plan.OK`, el cambio es instantáneo y lo único visible es una línea `── ahora: gpt-5-mini ──` en el transcript. El diálogo de conflicto aparece solo cuando hay una decisión real que tomar.
+If `Plan.OK`, the switch is instant and the only visible thing is a `── now: gpt-5-mini ──` line in the transcript. The conflict dialog appears only when there is a real decision to make.
 
-Ctrl+O (rotar favoritos) corre exactamente el mismo `CheckSwap`. Sin atajos por debajo.
+Ctrl+O (cycle favorites) runs exactly the same `CheckSwap`. No shortcuts underneath.
 
 ---
 
-## 5. Contrato 3: configuración
+## 5. Contract 3: configuration
 
-### 5.1 Ubicación y precedencia
+### 5.1 Location and precedence
 
-Un archivo de usuario en `$XDG_CONFIG_HOME/ishakat/config.toml` (en Termux resuelve a `~/.config/ishakat/config.toml`). Opcionalmente `./.ishakat.toml` por proyecto, que se fusiona encima, pensado para fijar modelo y prompt de sistema por repositorio.
+A user file at `$XDG_CONFIG_HOME/ishakat/config.toml` (on Termux this resolves to `~/.config/ishakat/config.toml`). Optionally `./.ishakat.toml` per project, merged on top, meant to pin a model and system prompt per repository.
 
-Precedencia de menor a mayor: valores compilados (`defaults.toml` embebido), config de usuario, config de proyecto, variables de entorno con prefijo `ISHAKAT_`, flags de línea de comandos. La fusión es profunda para tablas y de reemplazo total para arrays, con una excepción: los `[[provider]]` se fusionan por `id`, para que un proyecto pueda sobrescribir el `base_url` de omniroute sin redeclarar todo el bloque.
+Precedence from lowest to highest: compiled-in values (embedded `defaults.toml`), user config, project config, environment variables prefixed `ISHAKAT_`, command-line flags. The merge is deep for tables and full-replace for arrays, with one exception: `[[provider]]` entries merge by `id`, so a project can override omniroute's `base_url` without redeclaring the whole block.
 
-Cualquier string admite `$VAR` o `${VAR}`, expandido contra el entorno al cargar. Si la variable no existe, el proveedor no desaparece: se marca `unauthenticated` y sus modelos salen en gris con la nota "falta $X". El archivo se crea con permisos 0600 y el directorio con 0700; si al arrancar tiene permisos más laxos y contiene claves literales, se advierte una sola vez.
+Any string accepts `$VAR` or `${VAR}`, expanded against the environment at load time. If the variable does not exist, the provider does not disappear: it is marked `unauthenticated` and its models show greyed out with the note "missing $X". The file is created with 0600 permissions and the directory with 0700; if at startup it has looser permissions and contains literal keys, it warns once.
 
-### 5.2 Archivo completo comentado (config.example.toml)
+### 5.2 Full annotated file (config.example.toml)
 
 ```toml
 # ~/.config/ishakat/config.toml
-schema = 1                       # versión del esquema; habilita migraciones automáticas
+schema = 1                       # schema version; enables automatic migrations
 
 # ─────────────────────────────────────────────────────────────
 [app]
 default_model      = "omniroute/auto/coding"
-compact_model      = "omniroute/auto/cheap"   # modelo barato para /compact y títulos
-fallback_model     = "omniroute/auto"         # si el activo falla 2 veces seguidas
+compact_model      = "omniroute/auto/cheap"   # cheap model for /compact and titles
+fallback_model     = "omniroute/auto"         # if the active one fails 2 times in a row
 stream             = true
 system_prompt      = ""
-system_prompt_file = ""                       # el archivo gana si ambos existen
-agents_md          = true                     # paso 18: AGENTS.md global -> proyecto -> local
+system_prompt_file = ""                       # the file wins if both exist
+agents_md          = true                     # Step 18: AGENTS.md global -> project -> local
 timeout_s          = 120
 connect_timeout_s  = 10
 max_retries        = 3
@@ -538,38 +551,40 @@ locale             = "auto"                   # auto | es | en
 [session]
 save        = true
 dir         = "$XDG_DATA_HOME/ishakat/sessions"
-autoname    = true          # titula la sesión con compact_model tras el primer turno
+autoname    = true          # titles the session with compact_model after the first turn
 keep_last   = 50
 resume_last = false
 
 # ─────────────────────────────────────────────────────────────
 [ui]
-theme      = "ascua"        # tema embebido o archivo en themes/
+theme      = "ascua"        # embedded theme or a file in themes/
 banner     = true
 markdown   = true
 syntax     = true
 reasoning  = "collapsed"    # off | collapsed | full
 timestamps = false
-mouse      = false          # off por defecto: en Termux estorba al seleccionar texto
+mouse      = false          # off by default: on Termux it gets in the way of selecting text
 layout     = "auto"         # auto | minimal | narrow | wide
 max_width  = 100
 color      = "auto"         # auto | truecolor | 256 | 16 | off
 
 [ui.animations]
-mode            = "auto"    # auto = off si !TTY, TERM=dumb, NO_COLOR o ancho<40
-fps             = 12        # techo duro de repintado
+mode            = "auto"    # auto = off if !TTY, TERM=dumb, NO_COLOR, or width<40
+fps             = 12        # hard repaint ceiling
 spinner         = "charm"   # charm | dots | line | none
-face            = true      # carita con ojos que siguen el cursor
+face            = false     # reserved: no built-in animation reads this yet — a
+                             # custom theme/plugin may use it for a cursor-reactive
+                             # face or similar, deferred indefinitely (§11 Phase 3)
 gradient_scroll = true
-battery_saver   = "auto"    # auto = baja a 6 fps al detectar Android/Termux
+battery_saver   = "auto"    # auto = drops to 6 fps on detecting Android/Termux
 
 [ui.footer]
-items = ["model", "context", "tokens", "cost", "git", "cwd"]  # se recortan de derecha a izquierda
+items = ["model", "context", "tokens", "cost", "git", "cwd"]  # trimmed from right to left
 
 # ─────────────────────────────────────────────────────────────
 [keys]
 submit       = "enter"
-newline      = "ctrl+j"     # y shift+enter donde el terminal lo distinga
+newline      = "ctrl+j"     # and shift+enter where the terminal distinguishes it
 cancel       = "esc"
 quit         = "ctrl+c ctrl+c"
 clear_screen = "ctrl+l"
@@ -602,26 +617,26 @@ strategy        = "summarize"   # summarize | drop-oldest
 on_error        = "drop-oldest"
 
 # ─────────────────────────────────────────────────────────────
-# Contrato 5 (§19). Esta sección gobierna dos cosas distintas que conviene no
-# confundir: qué puede hacer ishakat en la máquina (permissions) y qué puede
-# aprender a hacer solo (evolve). La primera existe desde el paso 14; la segunda
-# desde el 18.
+# Contract 5 (§19). This section governs two different things that are worth
+# not confusing: what ishakat can do on the machine (permissions) and what it
+# can learn to do on its own (evolve). The first exists since Step 14; the
+# second since Step 18.
 [tools]
 enabled            = true
 dir                = "$XDG_DATA_HOME/ishakat/tools"
 skills_dir         = "$XDG_DATA_HOME/ishakat/skills"
-max_tools          = 40      # tope de catálogo, no de disco: ver más abajo
-archive_days       = 90      # sin usar 90 días → fuera del prompt, no del disco
-max_calls_per_turn = 25      # freno del bucle agéntico
-max_output_bytes   = 32_768  # recorte de salida de una herramienta
-budget_usd         = 0.0     # 0 = sin límite
+max_tools          = 40      # catalog cap, not a disk cap: see below
+archive_days       = 90      # unused for 90 days → out of the prompt, not off disk
+max_calls_per_turn = 25      # brake on the agentic loop
+max_output_bytes   = 32_768  # truncation of a tool's output
+budget_usd         = 0.0     # 0 = no limit
 timeout_s          = 120
 
 [tools.permissions]
-read          = "allow"      # leer no rompe nada; no interrumpe
+read          = "allow"      # reading breaks nothing; does not interrupt
 write         = "ask"
 shell         = "ask"
-allow_session = true         # "permitir en esta sesión" para un comando ya aprobado
+allow_session = true         # "allow for this session" for an already-approved command
 shell_deny    = ["rm -rf /", "rm -rf ~", "mkfs*", "curl * | sh", "git push --force*"]
 write_deny    = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "**/.env", "**/id_rsa"]
 
@@ -650,17 +665,17 @@ cheap = "omniroute/auto/cheap"
 local = "ollama/qwen2.5-coder:7b"
 
 # ─────────────────────────────────────────────────────────────
-# PROVEEDORES. Agregar uno = pegar 5 líneas, sin tocar código.
+# PROVIDERS. Adding one = paste 5 lines, no code touched.
 # ─────────────────────────────────────────────────────────────
 [[provider]]
 id        = "omniroute"
 name      = "OmniRoute"
 kind      = "openai"                    # openai | anthropic | gemini
 base_url  = "http://localhost:20128/v1"
-api_key   = "$OMNIROUTE_API_KEY"        # vacío = se envía sin Authorization
-discover  = true                        # llena el catálogo con GET /models
+api_key   = "$OMNIROUTE_API_KEY"        # empty = sent with no Authorization
+discover  = true                        # fills the catalog with GET /models
 enabled   = true
-timeout_s = 180                         # los combos tardan más
+timeout_s = 180                         # combos take longer
 
   [provider.headers]
   "X-Title" = "ishakat"
@@ -668,7 +683,7 @@ timeout_s = 180                         # los combos tardan más
   [provider.params]
   temperature = 0.7
 
-  # Declarados a mano: se suman a los descubiertos y ganan sobre ellos.
+  # Manually declared: these add to the discovered ones and win over them.
   [[provider.model]]
   id      = "auto/coding"
   name    = "Auto · Coding"
@@ -688,7 +703,7 @@ kind     = "openai"
 base_url = "https://api.openai.com/v1"
 api_key  = "$OPENAI_API_KEY"
 discover = true
-enabled  = false          # declarado pero apagado
+enabled  = false          # declared but off
 
 [[provider]]
 id       = "anthropic"
@@ -709,35 +724,35 @@ discover = true
 enabled  = false
 ```
 
-`internal/config/defaults.toml` es esta misma estructura sin comentarios, con un solo `[[provider]]` (omniroute). Los demás son sugerencias que viven únicamente en el ejemplo.
+`internal/config/defaults.toml` is this same structure with no comments, with a single `[[provider]]` (omniroute). The others are suggestions that live only in the example.
 
-Dos archivos y una trampa: `config.example.toml` en la raíz es el que la gente lee, e `internal/config/example.toml` es el que `ishakat config init` escribe de verdad, porque va embebido en el binario. Son copias, y las copias sin verificación divergen siempre — de hecho ya divergieron una vez, y el embebido perdió la documentación de `glyphs`, justo la opción que un usuario de Windows necesita. `TestExampleTOMLInSync` es lo que impide que vuelva a pasar. Al editar uno, se copia sobre el otro.
+Two files and one trap: `config.example.toml` at the repo root is the one people read, and `internal/config/example.toml` is the one `ishakat config init` actually writes, because it is embedded in the binary. They are copies, and unverified copies always drift — in fact they already drifted once, and the embedded one lost the `glyphs` documentation, precisely the option a Windows user needs. `TestExampleTOMLInSync` is what keeps that from happening again. When you edit one, copy it over the other.
 
-**Los valores de `[tools]` que no son obvios.** Cada uno responde a una pregunta concreta, y vale la pena dejar escrita la pregunta y no solo el número:
+**The non-obvious `[tools]` values.** Each answers a concrete question, and it is worth writing down the question, not just the number:
 
-- `max_tools = 40` no es un límite de disco; los archivos son de kilobytes. Es un límite de *discriminación*: cada herramienta gasta unos 15 tokens de nombre y descripción en el prompt, pero el costo real es que cuantas más opciones parecidas haya, peor elige el modelo entre ellas. Cuarenta entra en el prompt y sigue siendo distinguible. Un catálogo de doscientas herramientas es un catálogo inservible, y el fallo no se ve como un error sino como un agente que "se ha vuelto tonto".
-- `max_calls_per_turn = 25` existe porque el bucle del paso 14 no tiene planificador que lo detenga (§3): el modelo llama, ve el resultado y reacciona. Un ciclo — leer un archivo, editarlo, volver a leerlo — no se autocorta. Veinticinco es holgado para trabajo real y estrecho para un bucle infinito.
-- `max_output_bytes = 32_768` protege contra el fallo más aburrido y más frecuente: un `cat` de un archivo de 2 MB que se lleva la ventana de contexto entera. Se recorta con marca visible, para que el modelo sepa que hay más y pueda pedir el resto acotado.
-- `min_repeats = 3` en `[tools.evolve]`: tres veces es un patrón, dos es una coincidencia. Pero es un piso para el *agente*, no para el usuario. Si tú ya sabes que vas a repetir algo cien veces, no tienes que enseñárselo repitiéndolo tres: lo pides y tu intención cuenta como evidencia (§19.6, los tres orígenes).
-- `dedup_threshold = 0.8` es lo único que separa un catálogo de un vertedero. Sin este umbral se acaba con nueve variantes de "consultar precio", todas casi iguales, y el problema de discriminación de `max_tools` llega mucho antes de las cuarenta.
-- `require_selftest = true` es la puerta 3 de §19.6. Una herramienta escrita por un modelo no está verificada por haberse escrito; nace en estado `unverified` y solo pasa a `verified` si su propia prueba pasa.
-- `allow_without_tty = false` es la puerta 2. Sin terminal no hay humano que autorice, así que crear herramientas se deniega en `-p`, en `serve`, en cron y en CI. `--yolo` **no** lo concede: existe `--allow-tool-create` para el script concreto que lo necesite, porque conceder autoextensión no debe ser un efecto secundario de pedir "no me preguntes tanto".
+- `max_tools = 40` is not a disk limit; the files are kilobytes. It is a *discrimination* limit: each tool spends about 15 tokens of name and description in the prompt, but the real cost is that the more similar options there are, the worse the model picks among them. Forty fits in the prompt and stays distinguishable. A catalog of two hundred tools is an unusable catalog, and the failure does not look like an error — it looks like an agent that "got dumb".
+- `max_calls_per_turn = 25` exists because Step 14's loop has no planner to stop it (§3): the model calls, sees the result, and reacts. A cycle — read a file, edit it, read it again — does not self-terminate. Twenty-five is generous for real work and tight for an infinite loop.
+- `max_output_bytes = 32_768` protects against the most boring and most frequent failure: a `cat` of a 2 MB file that eats the entire context window. It is truncated with a visible marker, so the model knows there is more and can request the bounded rest.
+- `min_repeats = 3` in `[tools.evolve]`: three times is a pattern, two is a coincidence. But it is a floor for the *agent*, not for the user. If you already know you are going to repeat something a hundred times, you do not have to teach it by repeating it three times: you ask for it, and your intent counts as evidence (§19.6, the three origins).
+- `dedup_threshold = 0.8` is the only thing that separates a catalog from a dump. Without this threshold you end up with nine variants of "check price", all nearly identical, and `max_tools`'s discrimination problem arrives long before forty.
+- `require_selftest = true` is gate 3 of §19.6. A tool written by a model is not verified just by being written; it is born in `unverified` state and only moves to `verified` if its own test passes.
+- `allow_without_tty = false` is gate 2. With no terminal there is no human to authorize, so creating tools is denied under `-p`, under `serve`, in cron and in CI. `--yolo` does **not** grant it: `--allow-tool-create` exists for the specific script that needs it, because granting self-extension must not be a side effect of asking to "stop asking me so much".
 
-La asimetría entre `shell_deny` y `write_deny` también es deliberada. `shell_deny` rechaza formas de comando con una explicación en vez de ofrecerlas para confirmar, porque un diálogo que se aprueba en automático no es una defensa. `write_deny` va más lejos: son rutas que no se leen ni se escriben *con o sin aprobación*. Es la defensa estructural de §19.8 contra la exfiltración, y su valor está justamente en que nada del contexto puede convencerla de decir sí.
+The asymmetry between `shell_deny` and `write_deny` is also deliberate. `shell_deny` rejects command shapes with an explanation instead of offering them for confirmation, because a dialog that gets auto-approved is not a defense. `write_deny` goes further: these are paths that are neither read nor written *with or without approval*. It is §19.8's structural defense against exfiltration, and its value lies precisely in the fact that nothing in the context can talk it into saying yes.
 
-### 5.3 Validación
+### 5.3 Validation
 
-El cargador falla en arranque por cuatro cosas: schema desconocido, TOML sintácticamente inválido, un `[[provider]]` sin `id`/`kind`/`base_url`, y un valor inválido en `[tools]`. Todo lo demás degrada con advertencia visible en `/config`: un `kind` no soportado desactiva el proveedor; un `default_model` que no resuelve cae al primer proveedor habilitado; un tema inexistente cae a `ascua`; y las claves desconocidas se reportan como "clave ignorada" en vez de reventar, lo cual es esencial para no romper configs viejas al agregar funciones.
+The loader fails at startup for four things: unknown schema, syntactically invalid TOML, a `[[provider]]` missing `id`/`kind`/`base_url`, and an invalid value in `[tools]`. Everything else degrades with a visible warning in `/config`: an unsupported `kind` disables the provider; a `default_model` that does not resolve falls back to the first enabled provider; a nonexistent theme falls back to `ascua`; and unknown keys are reported as "ignored key" instead of blowing up, which is essential to avoid breaking old configs when adding features.
 
-La cuarta es la excepción a esa política de degradar, y tiene una razón: **un permiso mal escrito no tiene interpretación segura.** Si `write = "alow"` degradara a "deny" el usuario se quedaría sin escritura sin entender por qué; si degradara a "allow", ishakat escribiría sin preguntar en la máquina de alguien que creía haber pedido lo contrario. No hay opción prudente, solo una moneda al aire que se resuelve en el peor momento. Lo mismo vale para `mode` en `[tools.evolve]` y para un `dedup_threshold` fuera de `(0, 1]`, que apagaría el filtro anti-duplicados en silencio. En estos casos negarse a arrancar es la única respuesta honesta, y el mensaje dice qué valores son válidos.
+The fourth is the exception to that degrade policy, and there is a reason: **a misspelled permission has no safe interpretation.** If `write = "alow"` degraded to "deny" the user would lose write access without understanding why; if it degraded to "allow", ishakat would write without asking on the machine of someone who thought they had asked for the opposite. There is no prudent option, only a coin flip that resolves at the worst possible moment. The same applies to `mode` in `[tools.evolve]` and to a `dedup_threshold` outside `(0, 1]`, which would silently turn off the anti-duplicate filter. In these cases refusing to start is the only honest answer, and the message says which values are valid.
 
-Cuatro ajustes son legales pero peligrosos, y esos sí advierten y arrancan, porque son decisiones que el usuario tiene derecho a tomar — pero no a tomar sin darse cuenta: `max_calls_per_turn = 0` con las herramientas activas (ningún turno agéntico podría avanzar), `allow_without_tty`, `require_selftest = false` y `egress.allow_all`. Con `mode = "off"` la advertencia de `require_selftest` se calla, porque una advertencia solo se gana su sitio cuando el riesgo que nombra es alcanzable.
+Four settings are legal but dangerous, and those do warn and still start, because they are decisions the user has a right to make — but not to make without noticing: `max_calls_per_turn = 0` with tools active (no agentic turn could proceed), `allow_without_tty`, `require_selftest = false`, and `egress.allow_all`. With `mode = "off"` the `require_selftest` warning stays quiet, because a warning only earns its place when the risk it names is reachable.
 
-Los mensajes de error nombran el proveedor por su `id`, no por su índice, y traen el ejemplo de la línea que falta.
+Error messages name the provider by its `id`, not by its index, and carry an example of the missing line.
 
-### 5.4 Contrato del adaptador de proveedor
+### 5.4 Provider adapter contract
 
-Para que ese TOML sea suficiente, el código expone una sola interfaz:
+For that TOML to be enough, the code exposes a single interface:
 
 ```go
 // internal/provider/provider.go
@@ -764,35 +779,35 @@ type Event struct {
 }
 ```
 
-`kind = "openai"` cubre OmniRoute, OpenAI, Groq, Together, OpenRouter, Ollama, LM Studio y DeepSeek. Los otros dos adaptadores existen únicamente para hablar directo con Anthropic y Google sin pasar por gateway, y por eso se posponen a la Fase 4.
+`kind = "openai"` covers OmniRoute, OpenAI, Groq, Together, OpenRouter, Ollama, LM Studio and DeepSeek. The other two adapters exist solely to talk directly to Anthropic and Google without going through a gateway, and are therefore postponed to Phase 4.
 
 ---
 
-## 6. Estructura del repositorio
+## 6. Repository structure
 
-### 6.1 La regla que ordena todo
+### 6.1 The rule that orders everything
 
-El TUI no sabe qué es HTTP y el proveedor no sabe qué es un color. Todo lo que cruza esa frontera pasa por `convo` y `catalog`, que son tipos puros sin dependencias externas.
+The TUI does not know what HTTP is and the provider does not know what a color is. Everything that crosses that boundary goes through `convo` and `catalog`, which are pure types with no external dependencies.
 
-Esa frontera se prueba, no se promete: un test de CI que corra `go list -deps ./internal/tui` y falle si aparece `net/http`, y el simétrico para `provider` contra `lipgloss`, cuesta veinte líneas y evita el acoplamiento que después hace imposible testear.
+That boundary is tested, not just promised: a CI test that runs `go list -deps ./internal/tui` and fails if `net/http` shows up, and the symmetric one for `provider` against `lipgloss`, costs twenty lines and avoids the coupling that later makes testing impossible.
 
-**Con una advertencia que costó descubrir.** Esos cuatro tests existieron durante meses sin comprobar nada. Un test de Go corre con el directorio de trabajo puesto en el de su propio paquete, así que `deps(t, "./internal/tui")` desde `internal/arch_test.go` resolvía a `internal/internal/tui`, que no existe; `go list` salía con error, y el ayudante interpretaba *cualquier* fallo como "no hay toolchain en el PATH" y llamaba a `t.Skipf`. Cuatro garantías arquitectónicas reportando verde sin mirar nada — peor que no tener test, porque el verde también compraba confianza. La lección general, aplicable a cualquier guardia futuro:
+**With a warning that was costly to discover.** Those four tests existed for months without checking anything. A Go test runs with its working directory set to its own package's, so `deps(t, "./internal/tui")` from `internal/arch_test.go` resolved to `internal/internal/tui`, which does not exist; `go list` exited with an error, and the helper interpreted *any* failure as "no toolchain on PATH" and called `t.Skipf`. Four architectural guarantees reporting green without looking at anything — worse than having no test, because the green also bought false confidence. The general lesson, applicable to any future guard:
 
-- Los paquetes se nombran por su ruta de módulo completa, no relativa, porque la ruta relativa depende de desde dónde corra el test.
-- **Un guardia nunca debe poder saltarse por la misma vía por la que fallaría.** «No hay `go` en el PATH» es un salto legítimo; «`go list` existe y devolvió error» es un fallo, porque significa que la pregunta no se pudo hacer. Fundirlos en un solo `Skipf` fue el bug.
-- Todo test que exista para impedir algo se verifica por mutación: se rompe la propiedad a mano una vez y se comprueba que el test se pone rojo. Si no se ha visto fallar, no se sabe si funciona.
+- Packages are named by their full module path, not a relative one, because the relative path depends on where the test runs from.
+- **A guard must never be able to be skipped by the same path through which it would fail.** "There is no `go` on PATH" is a legitimate skip; "`go list` exists and returned an error" is a failure, because it means the question could not be asked. Merging them into a single `Skipf` was the bug.
+- Every test that exists to prevent something is verified by mutation: break the property by hand once and check that the test turns red. If it has never been seen to fail, you don't know it works.
 
-Los límites de la fase 2.5 (§19) se escriben con estas reglas ya aplicadas, y el de `internal/tools` salta explícitamente mientras el paquete no exista, en vez de fingir que pasa.
+Phase 2.5's boundaries (§19) are written with these rules already applied, and `internal/tools`'s boundary explicitly skips while the package does not yet exist, instead of pretending to pass.
 
-### 6.2 Árbol
+### 6.2 Tree
 
 ```
 ishakat/
 ├── cmd/ishakat/main.go        # flags, subcomandos, elige TUI o headless
 ├── internal/
 │   ├── app/                   # the three front doors (§1), all thin
-│   │   ├── app.go             # door 1: cableado config → catálogo → engine → TUI
-│   │   ├── headless.go        # door 2: ishakat -p "..."  (pipeline sin TUI)
+│   │   ├── app.go             # door 1: wiring config → catalog → engine → TUI
+│   │   ├── headless.go        # door 2: ishakat -p "..."  (pipeline with no TUI)
 │   │   └── serve.go           # door 3: NDJSON/WS for another agent (Step 23)
 │   ├── config/
 │   │   ├── config.go  schema.go  merge.go  load.go
@@ -800,24 +815,24 @@ ishakat/
 │   │   └── defaults.toml      # go:embed
 │   ├── catalog/
 │   │   ├── model.go           # Model, Ref/WireID, Cost, Caps
-│   │   ├── store.go           # caché JSON atómico + TTL
+│   │   ├── store.go           # atomic JSON cache + TTL
 │   │   ├── merge.go           # discovery ∪ models.dev ∪ config
-│   │   ├── resolve.go         # exacto → alias → sufijo → difuso
-│   │   ├── seed.go            # catálogo semilla embebido (go:embed)
-│   │   └── modelsdev.go       # cliente con If-None-Match
+│   │   ├── resolve.go         # exact → alias → suffix → fuzzy
+│   │   ├── seed.go            # embedded seed catalog (go:embed)
+│   │   └── modelsdev.go       # client with If-None-Match
 │   ├── provider/
 │   │   ├── provider.go        # interface Provider + Event + Request
 │   │   ├── registry.go        # kind → constructor
-│   │   ├── openai/            # dialecto OpenAI + parser SSE
-│   │   └── fake/              # httptest.Server y proveedor de pruebas
+│   │   ├── openai/            # OpenAI dialect + SSE parser
+│   │   └── fake/              # httptest.Server and a test provider
 │   ├── convo/
-│   │   ├── message.go         # Message, Block, Role, Usage (tipos puros)
-│   │   ├── store.go           # JSONL append-only, listar, resume
-│   │   ├── tokens.go          # estimador + corrección con usage real
+│   │   ├── message.go         # Message, Block, Role, Usage (pure types)
+│   │   ├── store.go           # JSONL append-only, listing, resume
+│   │   ├── tokens.go          # estimator + correction with real usage
 │   │   └── compact.go         # summarize / drop-oldest
 │   ├── engine/
 │   │   ├── engine.go  turn.go  retry.go  hotswap.go  streambuf.go
-│   │   └── agentloop.go       # tool_call → result → repeat, cap + loop guard (Paso 14)
+│   │   └── agentloop.go       # tool_call → result → repeat, cap + loop guard (Step 14)
 │   ├── tools/                 # §19 layer 1: the eight core tools. stdlib ONLY.
 │   │   ├── tool.go            # Tool interface, Schema, Result, Danger tier
 │   │   ├── registry.go        # native ∪ declarative ∪ script; progressive disclosure
@@ -825,51 +840,51 @@ ishakat/
 │   │   ├── shell.go           # bash (os/exec) + deny-list of obvious shapes
 │   │   ├── fetch.go           # URL → text/markdown, egress allowlist
 │   │   ├── dispatch.go        # sub-agent as a goroutine, isolated context (Paso 22)
-│   │   ├── permission.go      # danger tiers, session allowlist, budget (Paso 16)
+│   │   ├── permission.go      # danger tiers, session allowlist, budget (Step 16)
 │   │   ├── declarative.go     # §19.2 rung 1: tool.toml interpreter + auth schemes
 │   │   ├── script.go          # §19.2 rung 2: run.py / run.sh executor
-│   │   ├── meta.go            # tool_list/create/probe/edit/delete (Paso 21)
+│   │   ├── meta.go            # tool_list/create/probe/edit/delete (Step 21)
 │   │   ├── lifecycle.go       # unverified→verified→archived/broken, hash pinning
 │   │   └── govern.go          # §19.6 gate 1: repetition, dedup, budget, origin
 │   ├── skills/                # §19.2 rung 0: SKILL.md discovery + frontmatter
 │   │   └── skills.go
 │   ├── tui/
-│   │   ├── root.go            # modelo raíz de Bubble Tea
-│   │   ├── msgs.go            # TODOS los tea.Msg propios, en un solo archivo
-│   │   ├── keys.go            # keymap desde config
-│   │   ├── chat.go            # transcript vivo + commit a scrollback
-│   │   ├── input.go           # textarea + dropdown de slash commands
+│   │   ├── root.go            # Bubble Tea root model
+│   │   ├── msgs.go            # ALL our own tea.Msg types, in a single file
+│   │   ├── keys.go            # keymap from config
+│   │   ├── chat.go            # live transcript + commit to scrollback
+│   │   ├── input.go           # textarea + slash-command dropdown
 │   │   ├── footer.go
-│   │   ├── picker.go          # selector de modelos (overlay)
-│   │   ├── confirm.go         # diálogo de cambio con conflicto
-│   │   ├── spinner.go         # animación tipo Crush + carita
-│   │   ├── banner.go          # logo ASCII con degradado
-│   │   └── layout.go          # breakpoints, ancho, recorte
-│   ├── theme/                 # Fase 2: un tema embebido y la interfaz
-│   ├── slash/                 # registro de comandos, parseo, autocompletado
-│   ├── netfix/                # shim de DNS para Android
-│   └── xdg/                   # rutas config/cache/data/state
-├── testdata/                  # fixtures: /v1/models real, recorte api.json, SSE grabado
+│   │   ├── picker.go          # model picker (overlay)
+│   │   ├── confirm.go         # swap dialog with conflict
+│   │   ├── spinner.go         # Crush-style animation + face (reserved, §11 Phase 3)
+│   │   ├── banner.go          # ASCII logo with gradient
+│   │   └── layout.go          # breakpoints, width, truncation
+│   ├── theme/                 # Phase 2: an embedded theme and the interface
+│   ├── slash/                 # command registry, parsing, autocomplete
+│   ├── netfix/                # DNS shim for Android
+│   └── xdg/                   # config/cache/data/state paths
+├── testdata/                  # fixtures: real /v1/models, trimmed api.json, recorded SSE
 ├── themes/ascua.toml
-├── examples/skills/           # Fase 2.5, paso 19: skills de ejemplo (prosa, no sensibles)
-│                              # NO va aquí ninguna herramienta que toque dinero (§16.1)
-├── docs/PLAN.md               # este archivo
-├── docs/ARCHITECTURE.md       # números del spike + decisiones fechadas
+├── examples/skills/           # Phase 2.5, Step 19: example skills (prose, non-sensitive)
+│                              # NO tool that touches money goes here (§16.1)
+├── docs/PLAN.md               # this file
+├── docs/ARCHITECTURE.md       # spike numbers + dated decisions
 ├── config.example.toml
 ├── AGENTS.md
 ├── Makefile
-├── install.sh                 # Paso 13bis: detecta Termux ($PREFIX), instala el binario
+├── install.sh                 # Step 13bis: detects Termux ($PREFIX), installs the binary
 └── .github/workflows/         # release.yml (13bis) + ci.yml
 ```
 
-**Dos entradas de ese árbol todavía no existen y es deliberado:**
-`examples/skills/` aparece en el paso 19 e `install.sh` en el 13bis. Están
-listadas aquí porque el sitio donde alguien busca «dónde va esto» es el árbol, no
-la fase — y porque `examples/` es donde la regla de §16.1 tiene que estar visible:
-lo que entra ahí demuestra el mecanismo, no hace trabajo con las credenciales de
-nadie.
+**Two entries in that tree do not exist yet, and that is deliberate:**
+`examples/skills/` shows up in Step 19 and `install.sh` in 13bis. They are
+listed here because the place someone looks for "where does this go" is the
+tree, not the phase — and because `examples/` is where §16.1's rule has to be
+visible: what goes in there demonstrates the mechanism, it does not do work
+with anyone's credentials.
 
-### 6.3 Comandos de arranque
+### 6.3 Bootstrap commands
 
 ```bash
 mkdir ishakat && cd ishakat && git init
@@ -885,11 +900,11 @@ mkdir -p internal/tui testdata themes docs .github/workflows
 printf 'bin/\ndist/\n*.jsonl\n' > .gitignore
 ```
 
-Las dependencias de Charm entran en el Paso 3, no antes.
+Charm's dependencies come in at Step 3, not before.
 
-### 6.4 Presupuesto de dependencias (Fase 2: seis, máximo)
+### 6.4 Dependency budget (Phase 2: six, maximum)
 
-Bubble Tea v2, Lip Gloss v2, Bubbles v2, un parser TOML (`BurntSushi/toml`), `sahilm/fuzzy` solo como referencia de scoring —lo más probable es terminar con matcher propio porque se necesitan las bonificaciones por dígitos y por uso reciente— y `charmbracelet/x/exp/teatest` solo en tests. Glamour (Markdown) y Chroma (resaltado) se quedan afuera hasta la Fase 3: pesan varios MB y no aportan a "que funcione". Nada de cobra: flag de la stdlib y despacho manual.
+Bubble Tea v2, Lip Gloss v2, Bubbles v2, a TOML parser (`BurntSushi/toml`), `sahilm/fuzzy` only as a scoring reference — the likely outcome is ending up with our own matcher because the digit and recent-use bonuses are needed — and `charmbracelet/x/exp/teatest` only in tests. Glamour (Markdown) and Chroma (highlighting) stay out until Phase 3: they weigh several MB and do not contribute to "it works". No cobra: stdlib flag and manual dispatch.
 
 **Phase 2.5 adds zero dependencies. This is a rule, not an aspiration.** The
 entire agent and self-extension layer (§19) is standard library:
@@ -911,82 +926,82 @@ arranged so it cannot: capabilities are files on disk, not linked code (§3, §1
 library, a headless browser, an MCP client — is a §16 open question that needs an
 explicit decision, not a commit.
 
-### 6.5 El shim de DNS
+### 6.5 The DNS shim
 
 ```go
 // internal/netfix/android.go
-// Instala un resolver propio cuando detecta Android sin /etc/resolv.conf.
-// Lee getprop net.dns1 / net.dns2, cae a 1.1.1.1 y 8.8.8.8 como último recurso.
+// Installs a custom resolver when it detects Android with no /etc/resolv.conf.
+// Reads getprop net.dns1 / net.dns2, falls back to 1.1.1.1 and 8.8.8.8 as a last resort.
 func Install() (active string, err error)
 ```
 
-`ishakat doctor` debe reportar qué resolver está activo, porque diagnosticar esto a ciegas es horrible. Verificación en el dispositivo: `GODEBUG=netdns=go+1 ./ishakat doctor`.
+`ishakat doctor` must report which resolver is active, because diagnosing this blind is horrible. On-device verification: `GODEBUG=netdns=go+1 ./ishakat doctor`.
 
 ---
 
-## 7. El loop de Bubble Tea v2
+## 7. The Bubble Tea v2 loop
 
-### 7.1 Modelo raíz y máquina de estados
+### 7.1 Root model and state machine
 
 ```go
 type Mode int
 const (
-    ModeChat Mode = iota // input enfocado, se puede escribir
-    ModeBusy             // generando; solo esc y ctrl+c
-    ModePicker           // overlay de modelos
-    ModeConfirm          // diálogo de cambio con conflicto
+    ModeChat Mode = iota // input focused, can type
+    ModeBusy             // generating; only esc and ctrl+c
+    ModePicker           // model overlay
+    ModeConfirm          // swap dialog with conflict
     ModeHelp
 )
 
 type Root struct {
     cfg  *config.Config
-    cat  *catalog.Catalog   // snapshot inmutable; se reemplaza entero al refrescar
+    cat  *catalog.Catalog   // immutable snapshot; fully replaced on refresh
     eng  *engine.Engine
     conv *convo.Conversation
 
     mode Mode
-    lay  layout.Layout      // ancho, alto, breakpoint, animaciones on/off
+    lay  layout.Layout      // width, height, breakpoint, animations on/off
     keys keys.Map
 
     input  textarea.Model
-    live   liveTurn         // turno en curso: texto parcial, tokens, inicio
+    live   liveTurn         // turn in progress: partial text, tokens, start
     picker picker.Model
     footer footer.Model
     spin   spinner.Model
 
     buf    *engine.StreamBuf
-    cancel context.CancelFunc // no-nil solo en ModeBusy
+    cancel context.CancelFunc // non-nil only in ModeBusy
     err    *uierr.Item
 }
 ```
 
-`Mode` es una sola variable y todas las decisiones de teclado y render cuelgan de ella. La alternativa —booleanos `showPicker`, `isStreaming`, `confirmOpen`— produce en dos semanas estados imposibles como picker abierto durante streaming con diálogo encima. Un enum, un switch, y se acabó.
+`Mode` is a single variable and every keyboard and render decision hangs off it. The alternative — booleans `showPicker`, `isStreaming`, `confirmOpen` — produces impossible states within two weeks, like a picker open during streaming with a dialog on top. One enum, one switch, done.
 
-El despacho en `Update` va en tres capas y en este orden: mensajes globales que aplican en cualquier modo (`tea.WindowSizeMsg`, ticks, eventos de stream, refresco de catálogo); teclas globales (`ctrl+c`, `ctrl+l`); y solo al final el switch `m.mode` que delega al componente enfocado. Invertir el orden hace que `esc` deje de cancelar cuando hay un overlay abierto.
+Dispatch in `Update` goes in three layers, in this order: global messages that apply in any mode (`tea.WindowSizeMsg`, ticks, stream events, catalog refresh); global keys (`ctrl+c`, `ctrl+l`); and only at the end the `m.mode` switch that delegates to the focused component. Reversing the order makes `esc` stop cancelling when an overlay is open.
 
-### 7.2 La vista declarativa de v2
+### 7.2 v2's declarative view
 
-En v2 `View()` devuelve `tea.View`, no `string`. El modo inline es simplemente no activar `AltScreen`:
+In v2, `View()` returns `tea.View`, not `string`. Inline mode is simply not enabling `AltScreen`:
 
 ```go
 func (m Root) View() tea.View {
     var v tea.View
-    v.SetContent(m.render())        // solo la región viva
-    v.AltScreen = false             // inline: conservamos el scrollback del terminal
-    v.MouseMode = m.mouseMode()     // tea.MouseModeCellMotion solo si cfg.ui.mouse
-    v.Cursor = m.cursorFor()        // posición real del cursor dentro del textarea
+    v.SetContent(m.render())        // only the live region
+    v.AltScreen = false             // inline: we keep the terminal's scrollback
+    v.MouseMode = m.mouseMode()     // tea.MouseModeCellMotion only if cfg.ui.mouse
+    v.Cursor = m.cursorFor()        // real cursor position inside the textarea
     return v
 }
 ```
 
-Las teclas se capturan con `tea.KeyPressMsg` (no `tea.KeyMsg`, que ahora es la interfaz que agrupa press y release), y `msg.String()` sigue siendo la forma cómoda de hacer match. Tres funciones nativas de v2 que se aprovechan directo: `tea.SetClipboard` implementa `/copy` y `ctrl+y` vía OSC52, funcionando incluso sobre SSH; el downsampling de color es automático, así que los bloques `[fallback.256]` del tema pasan de obligatorios a overrides opcionales; y `tea.EnvMsg` entrega el entorno real del cliente, útil para detectar Termux.
+Keys are captured with `tea.KeyPressMsg` (not `tea.KeyMsg`, which is now the interface grouping press and release), and `msg.String()` is still the convenient way to match. Three v2-native features used directly: `tea.SetClipboard` implements `/copy` and `ctrl+y` via OSC52, working even over SSH; color downsampling is automatic, so the theme's `[fallback.256]` blocks go from mandatory to optional overrides; and `tea.EnvMsg` delivers the client's real environment, useful for detecting Termux.
 
-### 7.3 El puente de streaming: coalescing, no un mensaje por token
+### 7.3 The streaming bridge: coalescing, not one message per token
 
-Este es el punto donde la mayoría de los TUIs de IA se ponen lentos en el celular. El patrón canónico —un `Cmd` que lee un evento del canal, lo devuelve como `Msg` y se re-emite— significa un ciclo Update+View completo por token, o sea 80–150 repintados por segundo. La solución es desacoplar la llegada de datos del repintado:
+This is the point where most AI TUIs get slow on a phone. The canonical pattern — a `Cmd` that reads an event from the channel, returns it as a `Msg`, and re-emits — means a full Update+View cycle per token, i.e. 80–150 repaints per second. The solution is to decouple data arrival from repainting:
 
 ```go
-// internal/engine/streambuf.go — vive fuera de Bubble Tea
+// internal/engine/streambuf.go — lives outside Bubble Tea
 type StreamBuf struct {
     mu    sync.Mutex
     text  strings.Builder
@@ -1021,7 +1036,7 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     case streamTickMsg:
         chunk, usage, done, err := m.buf.Drain()
         if chunk != "" {
-            m.live.Append(chunk)   // re-envuelve solo el bloque vivo
+            m.live.Append(chunk)   // re-wraps only the live block
         }
         if usage != nil {
             m.live.Usage = usage
@@ -1029,7 +1044,7 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         if !done {
             return m, tickStream(m.lay.StreamInterval) // 50ms normal, 100ms battery saver
         }
-        return m.finishTurn(err)   // commit a scrollback + volver a ModeChat
+        return m.finishTurn(err)   // commit to scrollback + return to ModeChat
 
     case tea.KeyPressMsg:
         if m.mode == ModeBusy && msg.String() == m.keys.Cancel {
@@ -1042,21 +1057,21 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 ```
 
-Veinte repintados por segundo se leen perfectamente fluidos y cuestan una fracción del CPU. Y como el tick solo se re-emite mientras hay un turno vivo, la aplicación en reposo consume exactamente cero: no hay ticker global de fondo, que es el pecado clásico de los TUIs con animaciones. El spinner y la carita corren en un tick independiente a `ui.animations.fps`, también activo solo en `ModeBusy`. Dos relojes, dos presupuestos.
+Twenty repaints per second read as perfectly smooth and cost a fraction of the CPU. And since the tick only re-emits while there is a live turn, the idle application consumes exactly zero: there is no global background ticker, which is the classic sin of TUIs with animations. The spinner and the (currently unused) face run on a tick independent of `ui.animations.fps`, also active only in `ModeBusy`. Two clocks, two budgets.
 
-### 7.4 Cancelación y cierre del turno
+### 7.4 Cancellation and closing the turn
 
-`esc` llama al `context.CancelFunc`. El engine ve el contexto muerto, cierra el cuerpo de la respuesta, escribe `done = true` en el buffer y termina la goroutine. El siguiente `streamTickMsg` drena lo que quedó y llama a `finishTurn`, que guarda el parcial como mensaje del asistente con `Aborted: true`.
+`esc` calls `context.CancelFunc`. The engine sees the dead context, closes the response body, writes `done = true` in the buffer and ends the goroutine. The next `streamTickMsg` drains what was left and calls `finishTurn`, which saves the partial as an assistant message with `Aborted: true`.
 
-`ctrl+c` una vez en `ModeBusy` equivale a `esc`. Dos veces en menos de un segundo, sale. Nunca salir con un solo `ctrl+c` durante generación: es demasiado fácil perder una respuesta larga por reflejo.
+`ctrl+c` once in `ModeBusy` is equivalent to `esc`. Twice within a second, it quits. Never quit on a single `ctrl+c` during generation: it is too easy to lose a long response by reflex.
 
-### 7.5 Commit al scrollback
+### 7.5 Commit to scrollback
 
-Mientras hace streaming, el turno vive en el modelo. Al terminar se renderiza a texto definitivo, se emite con `tea.Printf` —que escribe por encima de la región dinámica sin pelearse con el renderer— y se borra del estado vivo. Ese es el equivalente exacto del `<Static>` de Ink.
+While streaming, the turn lives in the model. When it finishes it is rendered to final text, emitted with `tea.Printf` — which writes above the dynamic region without fighting the renderer — and cleared from live state. That is the exact equivalent of Ink's `<Static>`.
 
 ---
 
-## 8. Contrato 4: el tema como datos
+## 8. Contract 4: theme-as-data
 
 ```toml
 # ~/.config/ishakat/themes/ascua.toml
@@ -1064,7 +1079,7 @@ name = "ascua"
 dark = true
 
 [gradient]
-space  = "oklab"                          # oklab | oklch | hsl — nunca rgb lineal
+space  = "oklab"                          # oklab | oklch | hsl — never linear rgb
 stops  = ["#ff6a3d", "#ffa63d", "#ffe0a3"]
 scroll = true
 
@@ -1086,27 +1101,27 @@ string  = "#8ec07c"
 comment = "#6b655f"
 number  = "#d3869b"
 
-# Overrides opcionales. Bubble Tea v2 hace downsampling automático;
-# esto solo se declara cuando el resultado automático no convence.
+# Optional overrides. Bubble Tea v2 does automatic downsampling;
+# this is only declared when the automatic result is not convincing.
 [fallback.256]
 accent = 209
 [fallback.16]
 accent = "yellow"
 ```
 
-Los degradados se interpolan en espacio perceptual (Oklab) y no en RGB lineal, porque en RGB los pasos intermedios se ven sucios y grisáceos. La detección de capacidades lee `COLORTERM`, `TERM` y `NO_COLOR`, con override por `[ui] color`. Termux reporta truecolor correctamente.
+Gradients are interpolated in perceptual space (Oklab), not linear RGB, because in RGB the intermediate steps look dirty and greyish. Capability detection reads `COLORTERM`, `TERM` and `NO_COLOR`, with an override via `[ui] color`. Termux reports truecolor correctly.
 
 ---
 
-## 9. Interfaz: wireframes a 40 columnas
+## 9. Interface: 40-column wireframes
 
 ### 9.1 Breakpoints
 
-Cuatro modos, recalculados en cada `WindowSizeMsg`. Bajo 40 columnas es mínimo: sin cajas, sin banner, sin animaciones, prefijos de un carácter, footer de una línea recortada. De 40 a 59 es estrecho, que es Termux en vertical y es el que hay que hacer bien. De 60 a 99 es normal: bordes completos, dropdown de autocompletado, footer de dos secciones. De 100 en adelante es ancho: el selector pasa a dos columnas con panel de detalle y el texto se limita a `max_width`.
+Four modes, recalculated on every `WindowSizeMsg`. Under 40 columns is minimal: no boxes, no banner, no animations, single-character prefixes, a trimmed one-line footer. From 40 to 59 is narrow, which is Termux held vertically and the one that has to be done right. From 60 to 99 is normal: full borders, autocomplete dropdown, two-section footer. From 100 up is wide: the picker becomes two columns with a detail panel and text is capped at `max_width`.
 
-Todos los wireframes siguientes miden exactamente 40 columnas.
+All the following wireframes measure exactly 40 columns.
 
-### 9.2 Arranque
+### 9.2 Startup
 
 ```
 1...5....0....5....0....5....0....5....0
@@ -1455,11 +1470,11 @@ Phase 6, and no step here may be reordered or widened for it.** What steps 20 an
 cheap now and become format migrations later; they are the only part of §20 that
 touches this phase at all.
 
-### Fase 3 — Mejoras internas y estéticas
+### Phase 3 — Internal and aesthetic improvements
 
-Ahora lo bonito, con disciplina de rendimiento. Temas en archivos con `/theme` en vivo; degradados interpolados en Oklab; degradación de color verificada contra terminales pobres (Bubble Tea v2 la hace automática, pero hay que comprobarla). Caja de input con bordes, footer completo, dropdown de autocompletado, Markdown renderizado (Glamour entra aquí) y bloques de código resaltados (Chroma entra aquí).
+Now the pretty part, with performance discipline. Themes in files with live `/theme` switching; gradients interpolated in Oklab; colour degradation verified against poor terminals (Bubble Tea v2 does it automatically, but it has to be checked). Input box with borders, full footer, autocomplete dropdown, rendered Markdown (Glamour enters here) and highlighted code blocks (Chroma enters here — **closed**, see §17 2026-08-13).
 
-Aquí van las dos ideas visuales del producto. La carita con ojos que siguen el cursor mapea la columna del cursor sobre el ancho del input a una posición de pupila en el rango −1 a 1, con temporizador de parpadeo y repintado solo cuando el input cambia. La animación tipo Crush es un ciclo de caracteres de un charset con el degradado desplazándose. Ambas con dos reglas no negociables: máximo 10–15 fps, y apagado automático sin TTY, con `TERM=dumb`, con `--no-anim`, o bajo 40 columnas. En un celular esas animaciones son exactamente lo que se come la batería.
+**The cursor-following-eyes animation is cancelled as a built-in feature — deferred indefinitely, not merely deprioritized.** An earlier draft of this section described a face with eyes that track the cursor column across the input width, mapped to a pupil position in the −1..1 range, with its own blink timer and a repaint gate limited to input changes. That idea is off the roadmap for the foreseeable future: no core-team implementation is planned. What stays is the groundwork that lets *a user* build this themselves without touching Go: theme files are already data (§8, `theme.Theme`), and `ui.animations` already exists as a config table a user's own theme or a future plugin surface could read. The Crush-style character-cycling animation (`spinner.go`'s `CrushFrame`) is unaffected by this — it is already built and stays, at a hard ceiling of 10–15 fps and automatic shutdown with no TTY, with `TERM=dumb`, with `--no-anim`, or below 40 columns. On a phone, an animation that ignores those rules is exactly what drains the battery.
 
 ### Fase 4 — Solución (robustez)
 
