@@ -79,10 +79,19 @@ type UI struct {
 }
 
 type Animations struct {
-	Mode           string `toml:"mode"`
-	FPS            int    `toml:"fps"`
-	Spinner        string `toml:"spinner"`
-	Face           bool   `toml:"face"`
+	Mode    string `toml:"mode"`
+	FPS     int    `toml:"fps"`
+	Spinner string `toml:"spinner"`
+
+	// Face is reserved and has no built-in reader: no first-party animation
+	// consumes it. A cursor-following-eyes animation was considered for the
+	// built-in spinner and is deliberately cancelled, deferred indefinitely
+	// (docs/PLAN.md §11, Phase 3) rather than shipped — the key stays in the
+	// schema, defaulting to false, so a user's own theme file or a future
+	// plugin surface has a place to opt into that kind of animation without
+	// a schema migration.
+	Face bool `toml:"face"`
+
 	GradientScroll bool   `toml:"gradient_scroll"`
 	BatterySaver   string `toml:"battery_saver"`
 }

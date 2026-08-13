@@ -48,7 +48,7 @@ glyphs = "auto"
 mode = "auto"
 fps = 12
 spinner = "charm"
-face = true
+face = false
 gradient_scroll = true
 battery_saver = "auto"
 

@@ -556,12 +556,14 @@ max_width  = 100
 color      = "auto"         # auto | truecolor | 256 | 16 | off
 
 [ui.animations]
-mode            = "auto"    # auto = off si !TTY, TERM=dumb, NO_COLOR o ancho<40
-fps             = 12        # techo duro de repintado
+mode            = "auto"    # auto = off if !TTY, TERM=dumb, NO_COLOR, or width<40
+fps             = 12        # hard repaint ceiling
 spinner         = "charm"   # charm | dots | line | none
-face            = true      # carita con ojos que siguen el cursor
+face            = false     # reserved: no built-in animation reads this yet — a
+                             # custom theme/plugin may use it for a cursor-reactive
+                             # face or similar, deferred indefinitely (§11 Phase 3)
 gradient_scroll = true
-battery_saver   = "auto"    # auto = baja a 6 fps al detectar Android/Termux
+battery_saver   = "auto"    # auto = drops to 6 fps on detecting Android/Termux
 
 [ui.footer]
 items = ["model", "context", "tokens", "cost", "git", "cwd"]  # se recortan de derecha a izquierda
@@ -1455,11 +1457,11 @@ Phase 6, and no step here may be reordered or widened for it.** What steps 20 an
 cheap now and become format migrations later; they are the only part of §20 that
 touches this phase at all.
 
-### Fase 3 — Mejoras internas y estéticas
+### Phase 3 — Internal and aesthetic improvements
 
-Ahora lo bonito, con disciplina de rendimiento. Temas en archivos con `/theme` en vivo; degradados interpolados en Oklab; degradación de color verificada contra terminales pobres (Bubble Tea v2 la hace automática, pero hay que comprobarla). Caja de input con bordes, footer completo, dropdown de autocompletado, Markdown renderizado (Glamour entra aquí) y bloques de código resaltados (Chroma entra aquí).
+Now the pretty part, with performance discipline. Themes in files with live `/theme` switching; gradients interpolated in Oklab; colour degradation verified against poor terminals (Bubble Tea v2 does it automatically, but it has to be checked). Input box with borders, full footer, autocomplete dropdown, rendered Markdown (Glamour enters here) and highlighted code blocks (Chroma enters here — **closed**, see §17 2026-08-13).
 
-Aquí van las dos ideas visuales del producto. La carita con ojos que siguen el cursor mapea la columna del cursor sobre el ancho del input a una posición de pupila en el rango −1 a 1, con temporizador de parpadeo y repintado solo cuando el input cambia. La animación tipo Crush es un ciclo de caracteres de un charset con el degradado desplazándose. Ambas con dos reglas no negociables: máximo 10–15 fps, y apagado automático sin TTY, con `TERM=dumb`, con `--no-anim`, o bajo 40 columnas. En un celular esas animaciones son exactamente lo que se come la batería.
+**The cursor-following-eyes animation is cancelled as a built-in feature — deferred indefinitely, not merely deprioritized.** An earlier draft of this section described a face with eyes that track the cursor column across the input width, mapped to a pupil position in the −1..1 range, with its own blink timer and a repaint gate limited to input changes. That idea is off the roadmap for the foreseeable future: no core-team implementation is planned. What stays is the groundwork that lets *a user* build this themselves without touching Go: theme files are already data (§8, `theme.Theme`), and `ui.animations` already exists as a config table a user's own theme or a future plugin surface could read. The Crush-style character-cycling animation (`spinner.go`'s `CrushFrame`) is unaffected by this — it is already built and stays, at a hard ceiling of 10–15 fps and automatic shutdown with no TTY, with `TERM=dumb`, with `--no-anim`, or below 40 columns. On a phone, an animation that ignores those rules is exactly what drains the battery.
 
 ### Fase 4 — Solución (robustez)
 
