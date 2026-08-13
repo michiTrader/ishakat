@@ -269,6 +269,37 @@ func SetEvolveMode(mode string) error {
 	return writeRawConfigTOML(raw)
 }
 
+// SetTheme writes [ui].theme into config.toml. It is /theme's own
+// persistence half (§8/§11 Fase 3): the in-session switch itself just
+// rebuilds internal/tui's styles in memory (theme.Load never errors, so
+// there is nothing for this function to validate against — an unknown
+// name is exactly as legitimate to write here as a real one, the same
+// way theme.Load itself degrades to the embedded default plus a warning
+// rather than refusing outright), this is only what makes that choice
+// survive the next `ishakat` launch.
+//
+// [ui] is a flat table like [app] (SetAppModel's own comment on why that
+// matters, contrasted with [tools.evolve]'s nested shape SetEvolveMode
+// has to read one level deeper): a single raw["ui"] map, read once,
+// mutated in place, written back whole.
+func SetTheme(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("theme name is required")
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
+	}
+	ui, _ := raw["ui"].(map[string]any)
+	if ui == nil {
+		ui = map[string]any{}
+	}
+	ui["theme"] = name
+	raw["ui"] = ui
+	return writeRawConfigTOML(raw)
+}
+
 // SetAlias writes (or overwrites) one [alias] entry in config.toml. name is
 // matched case-insensitively against every OTHER key already in the table
 // (mirroring lookupAlias's own case-insensitive lookup in

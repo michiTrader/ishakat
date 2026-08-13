@@ -122,6 +122,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runSkillsCommand()
 	case slash.KindLogin:
 		return m.startLogin(args)
+	case slash.KindTheme:
+		return m.runThemeCommand(args)
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}
@@ -138,9 +140,11 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 // not yet driven from inside a running TUI session — internal/tui cannot
 // import net/http (internal/arch_test.go's TestTUINoImportaHTTP), so a real
 // in-session wizard needs the HTTP-driving half injected via a factory the
-// way EngineFactory already is, not written here directly. Every other
-// KindUnimplemented row (/theme, reserved for Phase 3) keeps the generic
-// message — it has no such stand-in.
+// way EngineFactory already is, not written here directly. /theme (Fase 3's
+// first increment) has since moved off this path entirely — it is a real
+// KindTheme with its own runner (theme.go) — so /config and /debug are now
+// the only two rows left here, and both keep the generic message for the
+// same reason: neither has a stand-in command to point at yet.
 func unimplementedNotice(cmd slash.Command) string {
 	switch cmd.Name {
 	case "config":

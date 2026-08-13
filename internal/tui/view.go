@@ -66,6 +66,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeSuggest {
 		return m.renderSuggest()
 	}
+	if m.mode == ModeThemePicker {
+		return m.renderThemePicker()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

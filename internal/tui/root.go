@@ -70,6 +70,14 @@ const (
 	// case, the same "the turn is not over, only the pause is" rule
 	// ModeToolApprove already follows.
 	ModeSuggest
+	// ModeThemePicker: the §9.7 ctrl+t overlay (themepicker.go) — /theme
+	// [nombre]'s own second access path, a flat list with no grouping
+	// (themes have no provider/tier split, unlike ModePicker's catalog),
+	// following resumeMenu/confirmDialog's simpler shape. Closes back to
+	// ModeChat either way — unlike ModeToolApprove/ModeSuggest's one
+	// async branch, applying a theme (switchTheme) is synchronous, so
+	// there is no "turn not over" case to preserve here.
+	ModeThemePicker
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -98,6 +106,14 @@ type Root struct {
 	keys Map
 
 	styles theme.Styles
+
+	// themesDir and themeStore are /theme's own two dependencies
+	// (theme.go): where to look for named themes beyond the embedded
+	// default, and where to persist a switch. Both mirror Options'
+	// fields of the same name one-for-one — see those comments for why
+	// nil/"" are supported values.
+	themesDir  string
+	themeStore ThemeStore
 
 	input textarea.Model
 	live  liveTurn
@@ -332,6 +348,10 @@ type Root struct {
 	// mode == ModeResume.
 	resume resumeMenu
 
+	// themePicker is the §9.7 ctrl+t overlay's own state (themepicker.go),
+	// live only while mode == ModeThemePicker.
+	themePicker themePickerState
+
 	// toolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false is
 	// the pre-Step-16 behaviour: startEngineTurn always takes the plain
 	// m.eng.Start streaming path, exactly as it always has, and no turn
@@ -412,6 +432,27 @@ type Options struct {
 	// resolved by theme.DetectGlyphs). The zero value is GlyphsUnicode, so a
 	// caller that says nothing keeps the preferred look.
 	Glyphs theme.GlyphSet
+
+	// ThemesDir is xdg.ThemesDir(), where /theme looks for named themes
+	// beyond the embedded default (§8, theme.go's own doc comment: "un
+	// tema es un archivo de datos"). This is a bare path, not a
+	// filesystem read — Root only ever hands it to theme.Load/
+	// theme.Available, the same two calls internal/app.Run itself makes
+	// at startup — so passing it here does not reopen the §6.1 boundary
+	// tui's own package comment on Options.Cfg draws around
+	// *config.Config: it is one string, the directory xdg.ThemesDir()
+	// already is, not a config field this package would otherwise have
+	// to know the shape of. Empty is a supported value: theme.Available
+	// and theme.Load both already treat "" as "no such directory,
+	// nothing found there" and fall back to the embedded default alone.
+	ThemesDir string
+
+	// ThemeStore persists /theme's own choice (theme.go's own doc
+	// comment on the §6.1 seam this draws, the same one EvolveStore
+	// already draws for its own config write). nil is a supported
+	// value: the switch still applies for the running session, it just
+	// does not survive a restart.
+	ThemeStore ThemeStore
 
 	NoTTY bool
 
@@ -628,6 +669,8 @@ func NewRoot(o Options) Root {
 		mode:       ModeChat,
 		lay:        lay,
 		styles:     styles,
+		themesDir:  o.ThemesDir,
+		themeStore: o.ThemeStore,
 		input:      NewInput(lay.InputPrefix()),
 		fps:        fps,
 		cfgBanner:  o.Cfg == nil || o.Cfg.UI.Banner,
@@ -893,6 +936,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLogin(msg)
 	case ModeSuggest:
 		return m.updateSuggest(msg)
+	case ModeThemePicker:
+		return m.updateThemePicker(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -952,6 +997,17 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			return true, m, nil
 		}
 		next, cmd := m.openPicker("")
+		return true, next, cmd
+
+	case m.keys.ThemePicker:
+		// Same ModeChat-only gating as ModelPicker above: ModeBusy is
+		// generating (§7.4 already reserves esc/ctrl+c there) and every
+		// overlay mode owns the keyboard outright, so a second ctrl+t is
+		// swallowed rather than reopening an overlay already open.
+		if m.mode != ModeChat {
+			return true, m, nil
+		}
+		next, cmd := m.openThemePicker()
 		return true, next, cmd
 
 	case m.keys.CopyLast:

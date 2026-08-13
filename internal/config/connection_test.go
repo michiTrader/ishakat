@@ -322,3 +322,82 @@ func TestSetAppModelWritesReadableConfigFile(t *testing.T) {
 		t.Errorf("config.toml mode = %o, want 0644", mode)
 	}
 }
+
+// --- /theme (§8/§11 Fase 3): SetTheme --------------------------------------
+
+func TestSetThemeWritesFlatUITable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.SetTheme("dracula"); err != nil {
+		t.Fatalf("SetTheme() error = %v", err)
+	}
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.UI.Theme != "dracula" {
+		t.Errorf("UI.Theme = %q, want %q", cfg.UI.Theme, "dracula")
+	}
+}
+
+func TestSetThemeRejectsEmptyName(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.SetTheme(""); err == nil {
+		t.Fatal("SetTheme(\"\") error = nil, want an error")
+	}
+	if err := config.SetTheme("   "); err == nil {
+		t.Fatal("SetTheme(\"   \") error = nil, want an error (whitespace-only)")
+	}
+}
+
+// TestSetThemePreservesOtherUISettings mirrors
+// TestSetAppModelPreservesOtherAppSettings: [ui] already carries several
+// other keys (banner, markdown, glyphs...) by the time a user ever types
+// /theme, and a naive write must not clobber them.
+func TestSetThemePreservesOtherUISettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// Seed a config.toml with a pre-existing [ui] table carrying an
+	// unrelated setting, the same way a real install accumulates one.
+	if err := os.MkdirAll(dir+"/ishakat", 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	seed := "[ui]\nbanner = false\n"
+	if err := os.WriteFile(xdg.ConfigFile(), []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed config file: %v", err)
+	}
+
+	if err := config.SetTheme("ascua"); err != nil {
+		t.Fatalf("SetTheme() error = %v", err)
+	}
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.UI.Theme != "ascua" {
+		t.Errorf("UI.Theme = %q, want %q", cfg.UI.Theme, "ascua")
+	}
+	if cfg.UI.Banner {
+		t.Errorf("SetTheme clobbered UI.Banner: got true, want the seeded false")
+	}
+}
+
+func TestSetThemeOverwritesPreviousChoice(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.SetTheme("dracula"); err != nil {
+		t.Fatalf("first SetTheme() error = %v", err)
+	}
+	if err := config.SetTheme("ascua"); err != nil {
+		t.Fatalf("second SetTheme() error = %v", err)
+	}
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.UI.Theme != "ascua" {
+		t.Errorf("UI.Theme = %q, want the second call's %q to win", cfg.UI.Theme, "ascua")
+	}
+}
