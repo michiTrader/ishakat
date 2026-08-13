@@ -99,6 +99,14 @@ type Root struct {
 
 	styles theme.Styles
 
+	// themesDir and themeStore are /theme's own two dependencies
+	// (theme.go): where to look for named themes beyond the embedded
+	// default, and where to persist a switch. Both mirror Options'
+	// fields of the same name one-for-one — see those comments for why
+	// nil/"" are supported values.
+	themesDir  string
+	themeStore ThemeStore
+
 	input textarea.Model
 	live  liveTurn
 
@@ -413,6 +421,27 @@ type Options struct {
 	// caller that says nothing keeps the preferred look.
 	Glyphs theme.GlyphSet
 
+	// ThemesDir is xdg.ThemesDir(), where /theme looks for named themes
+	// beyond the embedded default (§8, theme.go's own doc comment: "un
+	// tema es un archivo de datos"). This is a bare path, not a
+	// filesystem read — Root only ever hands it to theme.Load/
+	// theme.Available, the same two calls internal/app.Run itself makes
+	// at startup — so passing it here does not reopen the §6.1 boundary
+	// tui's own package comment on Options.Cfg draws around
+	// *config.Config: it is one string, the directory xdg.ThemesDir()
+	// already is, not a config field this package would otherwise have
+	// to know the shape of. Empty is a supported value: theme.Available
+	// and theme.Load both already treat "" as "no such directory,
+	// nothing found there" and fall back to the embedded default alone.
+	ThemesDir string
+
+	// ThemeStore persists /theme's own choice (theme.go's own doc
+	// comment on the §6.1 seam this draws, the same one EvolveStore
+	// already draws for its own config write). nil is a supported
+	// value: the switch still applies for the running session, it just
+	// does not survive a restart.
+	ThemeStore ThemeStore
+
 	NoTTY bool
 
 	// Engine is the turn runner (§7.3), already built over a concrete
@@ -628,6 +657,8 @@ func NewRoot(o Options) Root {
 		mode:       ModeChat,
 		lay:        lay,
 		styles:     styles,
+		themesDir:  o.ThemesDir,
+		themeStore: o.ThemeStore,
 		input:      NewInput(lay.InputPrefix()),
 		fps:        fps,
 		cfgBanner:  o.Cfg == nil || o.Cfg.UI.Banner,

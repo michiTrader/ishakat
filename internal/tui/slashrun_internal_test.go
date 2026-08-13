@@ -110,18 +110,20 @@ func TestSlashUnknownCommandReportsANoticeWithoutTouchingHistory(t *testing.T) {
 }
 
 func TestSlashUnimplementedCommandSaysSoInsteadOfDoingNothing(t *testing.T) {
-	// /model closed in Step 10 (see the tests below); /theme is still a
-	// KindUnimplemented row in the registry, which is exactly what this
-	// test needs to exercise.
+	// /theme closed in this step (Fase 3, first increment; see theme.go
+	// and the tests in theme_internal_test.go); /config is still a
+	// KindUnimplemented row in the registry (it has a generic
+	// unimplementedNotice, unlike /debug/login, which point at a binary
+	// equivalent), which is exactly what this test needs to exercise.
 	var m tea.Model = newHeadlessRoot()
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = typeAndEnter(m, "/theme dracula")
+	m = typeAndEnter(m, "/config")
 
 	root := m.(Root)
 	if len(root.transcript) != 1 {
 		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
 	}
-	if !strings.Contains(root.transcript[0].text, "/theme") {
+	if !strings.Contains(root.transcript[0].text, "/config") {
 		t.Errorf("notice should name the command, got %q", root.transcript[0].text)
 	}
 }

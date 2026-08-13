@@ -227,7 +227,15 @@ func Run(version string, resume bool) int {
 		Theme:   th,
 		Cap:     cap,
 		Glyphs:  glyphs,
-		NoTTY:   noTTY,
+		// ThemesDir/ThemeStore are /theme's own two dependencies
+		// (internal/tui/theme.go's own doc comment on the §6.1 seam
+		// this draws): the same xdg.ThemesDir() th above was already
+		// resolved against, and a fileThemeStore over config.SetTheme
+		// (themestore.go) mirroring NewEvolveStore's own "only
+		// internal/app touches internal/config's write path" rule.
+		ThemesDir:  xdg.ThemesDir(),
+		ThemeStore: &fileThemeStore{},
+		NoTTY:      noTTY,
 		// battery_saver = "auto" (the default) means "6fps on Termux", not "6fps
 		// literally everywhere": without this, every desktop session with no
 		// override would have read the same false that a phone should, and the
