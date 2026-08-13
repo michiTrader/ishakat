@@ -4,15 +4,16 @@
 // Step 3 ("Markdown is still deferred").
 //
 // This is deliberately narrower than "Markdown rendering": it does not touch
-// bold, headers, links or lists — that is Glamour's job, and Glamour is a
-// separate, much heavier dependency (goldmark, bluemonday, a second lipgloss
-// major version) that §6.4's budget explicitly keeps out until it is the one
-// thing being built. What this file adds is the one piece §9.3's own
-// wireframe already draws with a fenced code block inside a normal
-// message — the rail (`│`) that has been part of the spec since the
-// wireframe was written — and, new here, colouring its tokens instead of
-// leaving them the plain foreground colour every other word in the bubble
-// already had.
+// bold, headers, links or lists — that is markdown.go's job, wired in as a
+// separate, later increment (docs/PLAN.md §11, "Markdown/Glamour"). What
+// this file adds is the one piece §9.3's own wireframe already draws with a
+// fenced code block inside a normal message — the rail (`│`) that has been
+// part of the spec since the wireframe was written — and colouring its
+// tokens instead of leaving them the plain foreground colour every other
+// word in the bubble already had. renderMessageBody is the seam between the
+// two: it splits a message into code and prose segments and hands each to
+// the renderer that owns it — renderCodeBlock/highlightSource for code,
+// renderMarkdown (markdown.go) for prose when enabled.
 package tui
 
 import (
@@ -84,15 +85,20 @@ func splitCodeSegments(text string) []codeSegment {
 }
 
 // renderMessageBody is renderTranscriptLine's own text half, now aware of
-// fenced code blocks. For a message with no fence at all — the overwhelming
-// majority — splitCodeSegments returns exactly one prose segment whose text
-// is the original string unchanged (strings.Split then strings.Join with the
-// same separator is the identity), so this produces byte-identical output to
-// the plain wrapText(text, width) call it replaces; the branch below only
-// does anything different once a fence actually appears.
-func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, highlightCode bool) string {
+// fenced code blocks and, via renderProse, of Markdown prose (markdown.go).
+// For a message with no fence at all — the overwhelming majority —
+// splitCodeSegments returns exactly one prose segment whose text is the
+// original string unchanged (strings.Split then strings.Join with the same
+// separator is the identity), so with renderProse false this produces
+// byte-identical output to the plain wrapText(text, width) call it
+// replaces; the branches below only do anything different once a fence
+// actually appears, or renderProse is enabled.
+func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, highlightCode, renderProse bool) string {
 	segs := splitCodeSegments(text)
 	if len(segs) == 0 {
+		if renderProse {
+			return renderMarkdown(styles, text, width)
+		}
 		return wrapText(text, width)
 	}
 	parts := make([]string, 0, len(segs))
@@ -102,6 +108,8 @@ func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, hi
 		}
 		if seg.isCode {
 			parts = append(parts, renderCodeBlock(styles, g, seg.lang, seg.text, width, highlightCode))
+		} else if renderProse {
+			parts = append(parts, renderMarkdown(styles, seg.text, width))
 		} else {
 			parts = append(parts, wrapText(seg.text, width))
 		}

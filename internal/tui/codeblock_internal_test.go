@@ -210,7 +210,7 @@ func TestRenderMessageBodyWithNoFenceMatchesWrapText(t *testing.T) {
 	g := unicodeGlyphs
 	text := "una respuesta normal sin ningún bloque de código, apenas prosa."
 
-	got := renderMessageBody(styles, g, text, 40, true)
+	got := renderMessageBody(styles, g, text, 40, true, false)
 	want := wrapText(text, 40)
 	if got != want {
 		t.Errorf("no-fence path must match wrapText verbatim:\ngot  %q\nwant %q", got, want)
@@ -230,7 +230,7 @@ func TestRenderMessageBodyHighlightCodeFalseStillDrawsRail(t *testing.T) {
 	g := unicodeGlyphs
 	text := "código:\n```go\nfunc main() {}\n```\nfin"
 
-	out := renderMessageBody(styles, g, text, 40, false)
+	out := renderMessageBody(styles, g, text, 40, false, false)
 	if !strings.Contains(out, g.barLead) {
 		t.Errorf("the rail must be drawn even with highlighting off: %q", out)
 	}
