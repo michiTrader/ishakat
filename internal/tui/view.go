@@ -63,6 +63,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeLogin {
 		return m.renderLogin()
 	}
+	if m.mode == ModeSuggest {
+		return m.renderSuggest()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

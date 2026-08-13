@@ -12,6 +12,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/evolve"
 	"github.com/MichiTrader/ishakat/internal/skills"
 	"github.com/MichiTrader/ishakat/internal/slash"
 	"github.com/MichiTrader/ishakat/internal/theme"
@@ -56,6 +57,19 @@ const (
 	// code request, then the slow poll-for-token wait) instead of
 	// ModeCompact's one.
 	ModeLogin
+	// ModeSuggest: §19.7's "crystallization by observation" suggestion
+	// dialog (Step 25, suggest.go) — "[t] crearla  [v] ver el código
+	// [n] no, ni ahora ni después". Opens only at the end of a turn
+	// (checkSuggest, called alongside checkAutoCompact from finishTurn
+	// and finishAgentTurn), never mid-task, per civility rule 1. Unlike
+	// every other overlay this one is entirely synchronous to open and
+	// to dismiss — evolve.DecideSuggestion is pure, no clock or
+	// filesystem call blocks Update — but accepting it ("[t]") starts a
+	// real tool_create call through m.agentOpts.Runner, which *is*
+	// async, so this mode still closes back to ModeBusy in that one
+	// case, the same "the turn is not over, only the pause is" rule
+	// ModeToolApprove already follows.
+	ModeSuggest
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -349,6 +363,39 @@ type Root struct {
 	// carries that turn's cancellation, so there is no separate
 	// agentCancel field — cancelAgentTurn closes the very same m.cancel.
 	agentTurn agentTurnState
+
+	// evolveStore is §19.7's own persistence seam (suggest.go's own
+	// EvolveStore doc comment) — usage.jsonl's ledger plus
+	// suggest-state.json's budget/decay bookkeeping, both resolved
+	// through it rather than read from disk here (§6.1). nil is the
+	// supported "the suggestion feature is not active" value
+	// ([tools.evolve].mode != "suggest", or the store failed to open),
+	// same nil-is-safe convention Recorder/SessionLister/EngineFactory
+	// already establish for their own concern — checkSuggest simply
+	// never fires.
+	evolveStore EvolveStore
+
+	// evolveThresholds, suggestPerSession, suggestPerWeek and
+	// decayAfterRejects mirror config.Evolve/config.Tools.MaxTools
+	// verbatim, already translated by internal/app.evolveThresholds —
+	// the exact scalars checkSuggest needs to call evolve.DecideSuggestion,
+	// the same "test-friendly, still correct" resolved-value rule
+	// compactAuto/compactTriggerPct above already follow for [compact].
+	evolveThresholds  evolve.Thresholds
+	suggestPerSession int
+	suggestPerWeek    int
+	decayAfterRejects int
+
+	// suggestSessionCount is §19.7 rule 3's in-memory "1 per session"
+	// half (see evolve.SuggestState's own doc comment for why this is
+	// not persisted alongside the week counter): reset simply by the
+	// process exiting, incremented once per suggestion actually shown
+	// (startSuggest), never by one merely detected and not offered.
+	suggestSessionCount int
+
+	// suggest is Step 25's ModeSuggest overlay's own state (suggest.go),
+	// live only while mode == ModeSuggest.
+	suggest suggestState
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -499,6 +546,28 @@ type Options struct {
 	// business knowing what a tool is (§6.1's TestToolsNoImportaTUI), only
 	// that engine.AgentOptions is the shape RunAgentTurn needs.
 	AgentOptions engine.AgentOptions
+
+	// EvolveStore is §19.7's own read/write seam over usage.jsonl and
+	// suggest-state.json (suggest.go's own doc comment on why an
+	// interface, not two path strings this package would then have to
+	// open itself — see EvolveStore's own comment for the §6.1 reasoning).
+	// nil means the suggestion feature is inert: checkSuggest never
+	// offers anything, the same "nothing wired, nothing happens" default
+	// Recorder/SessionLister/EngineFactory above already establish.
+	EvolveStore EvolveStore
+
+	// EvolveThresholds, SuggestPerSession, SuggestPerWeek and
+	// DecayAfterRejects mirror [tools.evolve]/[tools].max_tools, already
+	// translated by internal/app's own evolveThresholds — see
+	// Root.evolveThresholds' own comment for why this package takes the
+	// plain evolve.Thresholds struct rather than config.Evolve itself
+	// (§6.1: tui never imports internal/config's schema beyond the one
+	// *config.Config it already carries for [ui]/[keys], and evolve.Evaluate's
+	// own doc comment already draws this same line for internal/tools).
+	EvolveThresholds  evolve.Thresholds
+	SuggestPerSession int
+	SuggestPerWeek    int
+	DecayAfterRejects int
 }
 
 // NewRoot construye el modelo inicial.
@@ -605,6 +674,16 @@ func NewRoot(o Options) Root {
 		// keeps taking the plain-streaming path unchanged.
 		toolsEnabled: o.ToolsEnabled,
 		agentOpts:    o.AgentOptions,
+
+		// evolveStore/evolveThresholds/suggestPerSession/suggestPerWeek/
+		// decayAfterRejects are Step 25's own resolved-value set (§19.7)
+		// — see Root.evolveStore's own comment for why a nil store is a
+		// legitimate, silent "suggestions are off" rather than an error.
+		evolveStore:       o.EvolveStore,
+		evolveThresholds:  o.EvolveThresholds,
+		suggestPerSession: o.SuggestPerSession,
+		suggestPerWeek:    o.SuggestPerWeek,
+		decayAfterRejects: o.DecayAfterRejects,
 
 		// History (--resume, resume_last, /resume — §13) has to land in two
 		// places, not one: m.conv, because it is what the *next* request's
@@ -812,6 +891,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateToolApprove(msg)
 	case ModeLogin:
 		return m.updateLogin(msg)
+	case ModeSuggest:
+		return m.updateSuggest(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -1338,11 +1419,30 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 	m.mode = ModeChat
 	m.animOffset = 0
 
-	return m.checkAutoCompact()
+	return m.checkEndOfTurn()
 }
 
-// checkAutoCompact is finishTurn's and finishAgentTurn's shared tail: the
-// §10 auto-trigger. Once a turn's own answer has landed (streamed one
+// checkEndOfTurn is finishTurn's and finishAgentTurn's actual shared
+// tail: run §10's auto-compact check first, and only offer §19.7's
+// crystallization suggestion (checkSuggest, suggest.go) if that check
+// left the turn fully settled in ModeChat — never behind checkAutoCompact's
+// own async ModeCompact overlay. Order matters here for the same reason
+// it matters in confirmOptionsFor's own priority comment: a suggestion
+// dialog opening on top of (or racing) an in-flight compaction would be
+// asking the user to read two unrelated things at once, and compaction is
+// the one of the two that must not be delayed — an over-full context
+// window breaks the very next request, while a crystallization offer can
+// always wait for the next turn that ends cleanly.
+func (m Root) checkEndOfTurn() (tea.Model, tea.Cmd) {
+	next, cmd := m.checkAutoCompact()
+	if r, ok := next.(Root); ok && r.mode == ModeChat {
+		return r.checkSuggest()
+	}
+	return next, cmd
+}
+
+// checkAutoCompact is checkEndOfTurn's own first half: the §10
+// auto-trigger. Once a turn's own answer has landed (streamed one
 // chunk at a time, or produced in full by RunAgentTurn — this check does
 // not care which), see whether the conversation just crossed
 // [compact].trigger_pct of the active model's window and, if so, compact

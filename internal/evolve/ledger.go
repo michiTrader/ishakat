@@ -50,6 +50,15 @@ type Record struct {
 	Pattern string `json:"pattern"`
 	N       int    `json:"n"`
 	Last    string `json:"last"`
+
+	// Dismissed implements §19.7 rule 2 ("once per pattern, ever"): once
+	// true, suggest.go's NextSuggestion never offers this pattern again,
+	// regardless of how much further N grows. omitempty keeps
+	// usage.jsonl's own worked example verbatim for every record that has
+	// never been offered and declined — the common case — rather than
+	// adding "dismissed":false to every line on the first Save after this
+	// field existed.
+	Dismissed bool `json:"dismissed,omitempty"`
 }
 
 // Ledger is the in-memory form of usage.jsonl: an ordered list of Records,

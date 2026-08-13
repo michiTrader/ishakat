@@ -80,6 +80,67 @@ func TestSetAppModelPreservesOtherAppSettings(t *testing.T) {
 	}
 }
 
+// --- §19.7: SetEvolveMode --------------------------------------------------
+
+func TestSetEvolveModeWritesNestedTable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.SetEvolveMode("on_request"); err != nil {
+		t.Fatalf("SetEvolveMode() error = %v", err)
+	}
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Tools.Evolve.Mode != "on_request" {
+		t.Errorf("Tools.Evolve.Mode = %q, want %q", cfg.Tools.Evolve.Mode, "on_request")
+	}
+}
+
+// TestSetEvolveModeRejectsUnknownMode locks the same validation the config
+// loader itself applies (validEvolveMode) onto the write path too, so a
+// typo from a future caller fails immediately instead of writing an invalid
+// config.toml that only errors on the *next* Load.
+func TestSetEvolveModeRejectsUnknownMode(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.SetEvolveMode("sometimes"); err == nil {
+		t.Fatal("SetEvolveMode(\"sometimes\") error = nil, want an error")
+	}
+}
+
+// TestSetEvolveModePreservesOtherEvolveSettings guards the nested-table
+// read-modify-write: a prior min_repeats/thresholds set by hand-editing
+// config.toml (or by a future SetEvolveThresholds-style writer) must survive
+// a SetEvolveMode call untouched, the same way SetAppModel must not clobber
+// sibling [app] keys.
+func TestSetEvolveModePreservesOtherEvolveSettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(dir+"/ishakat", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	hand := "[tools.evolve]\nmode = \"auto\"\nmin_repeats = 7\n"
+	if err := os.WriteFile(xdg.ConfigFile(), []byte(hand), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := config.SetEvolveMode("suggest"); err != nil {
+		t.Fatalf("SetEvolveMode() error = %v", err)
+	}
+	cfg, err := config.Load(config.Options{SkipProject: true})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Tools.Evolve.Mode != "suggest" {
+		t.Errorf("Tools.Evolve.Mode = %q, want %q", cfg.Tools.Evolve.Mode, "suggest")
+	}
+	if cfg.Tools.Evolve.MinRepeats != 7 {
+		t.Errorf("SetEvolveMode clobbered MinRepeats: got %d, want 7 (preserved from hand-written config)",
+			cfg.Tools.Evolve.MinRepeats)
+	}
+}
+
 // --- P3c: SetAlias / RemoveAlias ------------------------------------------
 
 func TestSetAliasCreatesNewEntry(t *testing.T) {

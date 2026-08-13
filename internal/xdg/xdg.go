@@ -79,6 +79,19 @@ func ErrorFile() string   { return filepath.Join(StateDir(), "last-error.json") 
 // "$XDG_STATE_HOME/ishakat/usage.jsonl".
 func UsageFile() string { return filepath.Join(StateDir(), "usage.jsonl") }
 
+// SuggestStateFile is §19.7's suggestion budget/decay bookkeeping: how many
+// suggestions have been shown this week, and how many consecutive rejections
+// have piled up. It is deliberately a separate file from UsageFile, not a
+// field folded into it: usage.jsonl is an append-only observation ledger
+// that a user might reasonably hand-edit or truncate, while this file is
+// small, mutable counter state that must round-trip exactly for the weekly
+// budget and the decay-to-on_request rule to behave correctly. Keeping them
+// apart means a corrupted or hand-edited ledger can never desynchronize the
+// budget/decay counters, and vice versa. Lives under StateDir for the same
+// reason UsageFile does: frequently changed, not worth backing up, not a
+// disposable cache.
+func SuggestStateFile() string { return filepath.Join(StateDir(), "suggest-state.json") }
+
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
 
