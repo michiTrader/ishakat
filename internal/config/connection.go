@@ -232,6 +232,43 @@ func SetAppModel(key AppModelKey, ref string) error {
 	return writeRawConfigTOML(raw)
 }
 
+// SetEvolveMode writes tools.evolve.mode into config.toml. It is §19.7's
+// decay-writeback path: when a user has rejected `decay_after_rejects`
+// suggestions in a row, the suggest-mode overlay calls this to drop Mode
+// down to "on_request" and say so, rather than keep asking.
+//
+// Unlike SetAppModel's flat raw["app"], [tools.evolve] is a *nested* table:
+// BurntSushi/toml decodes it as raw["tools"].(map[string]any)["evolve"], one
+// level under the umbrella [tools] table that also (today) holds nothing
+// else, but might one day hold sibling settings for other tool-related
+// features. Flattening it into raw["evolve"] the way SetAppModel flattens
+// into raw["app"] would silently produce a *second*, wrong top-level table
+// in config.toml, next to a real, still-nested [tools.evolve] a user could
+// have hand-written — so both levels of the map must be read, created if
+// absent, and written back explicitly.
+func SetEvolveMode(mode string) error {
+	mode = strings.TrimSpace(mode)
+	if !validEvolveMode(mode) {
+		return fmt.Errorf("invalid evolve mode %q: must be one of off, on_request, suggest, auto", mode)
+	}
+	raw, err := readRawConfigTOML()
+	if err != nil {
+		return err
+	}
+	tools, _ := raw["tools"].(map[string]any)
+	if tools == nil {
+		tools = map[string]any{}
+	}
+	evolve, _ := tools["evolve"].(map[string]any)
+	if evolve == nil {
+		evolve = map[string]any{}
+	}
+	evolve["mode"] = mode
+	tools["evolve"] = evolve
+	raw["tools"] = tools
+	return writeRawConfigTOML(raw)
+}
+
 // SetAlias writes (or overwrites) one [alias] entry in config.toml. name is
 // matched case-insensitively against every OTHER key already in the table
 // (mirroring lookupAlias's own case-insensitive lookup in
