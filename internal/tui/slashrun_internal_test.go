@@ -8,6 +8,7 @@ import (
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/slash"
 )
 
 // typeAndEnter feeds each rune of text as a keypress and finishes with enter,
@@ -110,21 +111,22 @@ func TestSlashUnknownCommandReportsANoticeWithoutTouchingHistory(t *testing.T) {
 }
 
 func TestSlashUnimplementedCommandSaysSoInsteadOfDoingNothing(t *testing.T) {
-	// /theme closed in this step (Fase 3, first increment; see theme.go
-	// and the tests in theme_internal_test.go); /config is still a
-	// KindUnimplemented row in the registry (it has a generic
-	// unimplementedNotice, unlike /debug/login, which point at a binary
-	// equivalent), which is exactly what this test needs to exercise.
-	var m tea.Model = newHeadlessRoot()
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = typeAndEnter(m, "/config")
-
-	root := m.(Root)
-	if len(root.transcript) != 1 {
-		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
+	// /theme (Fase 3) and /config (this increment; see configcmd.go)
+	// have both closed since this test was first written — neither
+	// registry row reaches the generic "default:" branch of
+	// unimplementedNotice (slashrun.go) any more, /debug and /login
+	// having their own specific messages instead. There is currently no
+	// KindUnimplemented row left that exercises the generic fallback
+	// through a live command, so this calls unimplementedNotice
+	// directly against a Command built with an unrecognised name —
+	// exactly what a future KindUnimplemented row with no stand-in
+	// command yet would hit.
+	got := unimplementedNotice(slash.Command{Name: "nope", Kind: slash.KindUnimplemented})
+	if !strings.Contains(got, "/nope") {
+		t.Errorf("notice should name the command, got %q", got)
 	}
-	if !strings.Contains(root.transcript[0].text, "/config") {
-		t.Errorf("notice should name the command, got %q", root.transcript[0].text)
+	if !strings.Contains(got, "todavia no esta implementado") {
+		t.Errorf("notice should use the generic fallback message, got %q", got)
 	}
 }
 

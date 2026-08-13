@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/config"
 )
 
 func TestSlashModelsListsTheCatalogGroupedByProvider(t *testing.T) {
@@ -49,12 +51,66 @@ func TestSlashModelsWithNoCatalogSaysSo(t *testing.T) {
 	}
 }
 
-func TestSlashConfigDebugAndLoginPointAtTheirBinaryEquivalent(t *testing.T) {
+// TestSlashConfigRendersRedactedProvidersAndMasksAPIKey closes the loop
+// this increment opened: internal/config.Redacted()/Mask() (validate.go)
+// used to be tested but never called from anywhere in the tree
+// (docs/PLAN.md's Phase 4 paragraph flagged this) — /config's own runner
+// (configcmd.go) is that first real caller, and this test is what proves
+// the wiring end to end, not just that Redacted() itself works (which
+// internal/config's own TestRedacted already covers).
+func TestSlashConfigRendersRedactedProvidersAndMasksAPIKey(t *testing.T) {
+	root := newHeadlessRoot()
+	root.cfg = &config.Config{
+		Files: []string{"/home/user/.config/ishakat/config.toml"},
+		App:   config.App{DefaultModel: "omni/son45"},
+		Providers: []config.Provider{{
+			ID: "omniroute", Kind: "openai", BaseURL: "http://localhost:20128/v1",
+			APIKey: "secret-1234567890", Enabled: true, AuthOK: true,
+		}},
+	}
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/config")
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	for _, want := range []string{"omniroute", "openai", "omni/son45", "config.toml"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("notice missing %q, got:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "secret-1234567890") {
+		t.Errorf("notice must never contain the raw api_key, got:\n%s", text)
+	}
+}
+
+// TestSlashConfigWithNoConfigSaysSo mirrors
+// TestSlashModelsWithNoCatalogSaysSo (models.go's own "no hay catalogo"
+// case): newHeadlessRoot never sets Options.Cfg, so m.cfg is nil, and
+// that must report instead of panicking on a nil Redacted() receiver.
+func TestSlashConfigWithNoConfigSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/config")
+
+	root := m.(Root)
+	if len(root.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
+	}
+	if !strings.Contains(root.transcript[0].text, "no hay configuracion") {
+		t.Errorf("notice should explain there is no config yet, got %q", root.transcript[0].text)
+	}
+}
+
+func TestSlashDebugAndLoginPointAtTheirBinaryEquivalent(t *testing.T) {
 	cases := []struct {
 		line string
 		want string
 	}{
-		{"/config", "ishakat config check"},
 		{"/debug", "ishakat doctor"},
 		{"/login", "ishakat login <proveedor>"},
 	}

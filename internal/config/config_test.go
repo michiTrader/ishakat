@@ -784,6 +784,72 @@ func TestRedacted(t *testing.T) {
 	}
 }
 
+// TestRedactedMasksEnvSourcedHeadersAndParams closes the gap flagged while
+// designing /config (docs/PLAN.md §17): a custom provider.headers/
+// provider.params value that came from an expanded "$VAR" is exactly as
+// real a credential as api_key is — a nonstandard gateway might send its
+// key as "X-Api-Key" instead of Authorization — and Redacted() used to
+// leave both maps untouched. A literal constant (an API version string, a
+// fixed header, a float param) must survive unmasked: masking those would
+// make a redacted view harder to read for no safety gain, since they are
+// configuration, not credentials.
+func TestRedactedMasksEnvSourcedHeadersAndParams(t *testing.T) {
+	cfg := &config.Config{
+		EnvUsed: map[string]string{"$GATEWAY_KEY": "sk-super-secret-value-123"},
+		Providers: []config.Provider{{
+			ID: "p1",
+			Headers: map[string]string{
+				"X-Api-Key":         "sk-super-secret-value-123", // env-sourced
+				"anthropic-version": "2023-06-01",                // literal, stays
+			},
+			Params: map[string]any{
+				"auth_token":  "sk-super-secret-value-123", // env-sourced
+				"temperature": 0.7,                         // literal, stays
+			},
+		}},
+	}
+	redacted := cfg.Redacted()
+	p := redacted.Providers[0]
+
+	if p.Headers["X-Api-Key"] == cfg.Providers[0].Headers["X-Api-Key"] {
+		t.Error("Redacted() should mask a header value that came from an expanded env var")
+	}
+	if strings.Contains(p.Headers["X-Api-Key"], "secret-value-123") {
+		t.Errorf("masked header still contains sensitive material: %s", p.Headers["X-Api-Key"])
+	}
+	if p.Headers["anthropic-version"] != "2023-06-01" {
+		t.Errorf("a literal header must survive unmasked, got %q", p.Headers["anthropic-version"])
+	}
+
+	if p.Params["auth_token"] == cfg.Providers[0].Params["auth_token"] {
+		t.Error("Redacted() should mask a param value that came from an expanded env var")
+	}
+	if s, ok := p.Params["auth_token"].(string); ok && strings.Contains(s, "secret-value-123") {
+		t.Errorf("masked param still contains sensitive material: %s", s)
+	}
+	if p.Params["temperature"] != 0.7 {
+		t.Errorf("a literal, non-string param must survive unmasked, got %v", p.Params["temperature"])
+	}
+}
+
+// TestRedactedNilHeadersAndParamsStayNil guards the zero-value case: a
+// provider that never set [provider.headers]/[provider.params] must come
+// back with nil maps, not an empty-but-non-nil one — this is what
+// TestRedactedMasksEnvSourcedHeadersAndParams's own fixture already relies
+// on implicitly (config.example.toml's "openai"/"anthropic" rows have no
+// headers block of their own), and a spurious non-nil empty map would be
+// a visible diff to anything that round-trips Redacted() back to TOML.
+func TestRedactedNilHeadersAndParamsStayNil(t *testing.T) {
+	cfg := &config.Config{Providers: []config.Provider{{ID: "p1"}}}
+	redacted := cfg.Redacted()
+	if redacted.Providers[0].Headers != nil {
+		t.Errorf("Headers = %#v, want nil", redacted.Providers[0].Headers)
+	}
+	if redacted.Providers[0].Params != nil {
+		t.Errorf("Params = %#v, want nil", redacted.Providers[0].Params)
+	}
+}
+
 // TestServeWarnings covers docs/PLAN.md §11 Step 23's [serve] validation: none
 // of these are fatal, but each describes a real risk a caller should see
 // spelled out at startup rather than discover later.

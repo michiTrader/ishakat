@@ -202,6 +202,24 @@ type Root struct {
 
 	quitting bool
 
+	// cfg is the effective configuration, held only so /config
+	// (runConfigCommand, configcmd.go) has something to call
+	// config.Redacted() on at render time — every other Root field this
+	// package already derives from Options.Cfg (cfgBanner/cfgSyntax/
+	// cfgMarkdown/keys/footerItems, compactModel/fallbackModel/etc.)
+	// still reads its own single value out of it instead of reaching
+	// through cfg, so none of that has to change. This does not reopen
+	// the §6.1 boundary internal/config's own schema draws: cfg is the
+	// same *config.Config Options.Cfg already is (a pure value type, no
+	// filesystem/network handle attached to it), the same reasoning
+	// Catalog/Skills above already rely on for holding a whole struct
+	// rather than yet another set of copied-out scalars. nil is a
+	// supported value (every test in this package that never sets
+	// Options.Cfg): runConfigCommand reports that instead of a nil
+	// dereference, the same "nothing wired, nothing happens" default this
+	// file's own EvolveStore/EngineFactory fields already establish.
+	cfg *config.Config
+
 	cfgBanner bool
 	// cfgSyntax is ui.syntax (config/schema.go's UI.Syntax, defaults.toml's
 	// syntax = true, unread by anything until codeblock.go): whether fenced
@@ -718,6 +736,7 @@ func NewRoot(o Options) Root {
 		themeStore:  o.ThemeStore,
 		input:       NewInput(lay.InputPrefix()),
 		fps:         fps,
+		cfg:         o.Cfg,
 		cfgBanner:   o.Cfg == nil || o.Cfg.UI.Banner,
 		cfgSyntax:   o.Cfg == nil || o.Cfg.UI.Syntax,
 		cfgMarkdown: o.Cfg == nil || o.Cfg.UI.Markdown,

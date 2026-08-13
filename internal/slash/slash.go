@@ -90,6 +90,17 @@ const (
 	// used to lack — §9.7's wireframe and keys.go's ThemePicker ("ctrl+t")
 	// both already reserved the slot; this Kind is what finally answers it.
 	KindTheme
+	// KindConfig implements /config (§13, Step 18's own left-over scope):
+	// the effective configuration, secrets redacted — the in-session
+	// counterpart to `ishakat config check` (unimplementedNotice's own
+	// former stand-in for this row), and the runner that finally gives
+	// internal/config.Redacted()/Mask() a real caller (docs/PLAN.md's
+	// Phase 4 paragraph flagged both as tested-but-dead code). Read-only,
+	// like KindModels/KindSkills: there is no "edit config" Kind, since
+	// changing config.toml is a filesystem write this package never makes
+	// (§6.1) — `ishakat config init`/a text editor remain how it is
+	// actually changed.
+	KindConfig
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -140,7 +151,7 @@ var Commands = []Command{
 	{Name: "copy", ArgHint: "[n]", Describe: "copiar respuesta", Kind: KindCopy},
 	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
-	{Name: "config", Describe: "config efectiva", Kind: KindUnimplemented},
+	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
 	{Name: "debug", Describe: "diagnostico", Kind: KindUnimplemented},
 	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
