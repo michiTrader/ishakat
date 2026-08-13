@@ -71,7 +71,7 @@ Read these before writing code:
 
 ---
 
-## 1. Qué es ishakat
+## 1. What is ishakat
 
 **A general-purpose agent runtime for the terminal.** One static binary that
 reads files, writes files, runs commands, fetches documentation, delegates
@@ -122,12 +122,12 @@ where this document previously would have chosen differently:
 - **A tool that only a human can approve is a broken tool.** Hence the headless
   permission flags rather than a TTY requirement.
 
-Conversar con un modelo desde el terminal ya lo hacen gemini-cli de Google,
-opencode, Claude Code, Pi y una docena más. Ishakat compite en otra categoría
-—agentes que se extienden solos— pero hereda el terreno de esas herramientas, y
-ese terreno tiene tres defectos que ishakat existe para resolver.
+Talking to a model from the terminal is already done by Google's gemini-cli,
+opencode, Claude Code, Pi and a dozen more. Ishakat competes in a different
+category — agents that extend themselves — but it inherits that tooling's
+ground, and that ground has three flaws that ishakat exists to fix.
 
-**El primero es el que nadie ha resuelto, y es el que define la categoría.**
+**The first is the one nobody has solved, and it is the one that defines the category.**
 Every agent in this class ships a fixed set of abilities. When you need one it
 does not have — talk to your exchange, send that mail, hit that internal API —
 you either wait for the vendor, install a plugin someone else wrote, or
@@ -138,43 +138,54 @@ and from then on calls it in ~120 tokens instead of reasoning it out in ~4.000
 (§19.4). **It does not need a new version to gain a capability. It gains one on
 the spot.**
 
-El segundo es que cambiar de modelo es doloroso. La mayoría eligen el modelo al arrancar y lo amarran al proceso: para pasar de un modelo caro y potente a uno barato y rápido a mitad de conversación hay que cerrar el programa, cambiar una variable de entorno, reabrirlo y perder el hilo. Y para elegir hay que escribir el identificador exacto, cosa de teclear `anthropic/claude-sonnet-4-5` sin fallar un carácter, entre quinientas opciones. Bajo el marco de agente esto pesa más que como comodidad de chat: a mitad de una tarea larga se quiere bajar a un modelo barato para los pasos mecánicos y volver al caro para el difícil, **sin perder el estado de la tarea** (§4.6).
+The second is that switching models is painful. Most of them pick the model at
+startup and tie it to the process: to go from an expensive, powerful model to a
+cheap, fast one mid-conversation you have to close the program, change an
+environment variable, reopen it, and lose the thread. And picking one means
+typing the exact identifier, keying in `anthropic/claude-sonnet-4-5` without
+missing a character, among five hundred options. Under the agent frame this
+weighs more than as a chat convenience: mid-way through a long task you want to
+drop to a cheap model for the mechanical steps and come back to the expensive
+one for the hard part, **without losing the task's state** (§4.6).
 
-El tercero es que casi ninguna funciona bien en el teléfono. Termux es un emulador de terminal para Android que mucha gente usa como computador de bolsillo. La mayoría de estos CLIs se instalan con dificultad o no se instalan, porque arrastran dependencias que hay que compilar en el dispositivo o binarios que asumen un Linux de escritorio.
+The third is that almost none of them work well on the phone. Termux is a
+terminal emulator for Android that many people use as a pocket computer. Most
+of these CLIs install with difficulty or do not install at all, because they
+drag in dependencies that must be compiled on the device or binaries that
+assume a desktop Linux.
 
 Note the order: **this list is ranked by the agent frame, not by how visible each
 defect is in a demo.** The third one constrains the first — it is why
 self-extension may not depend on a package manager (§19.3) and why the tool layer
 is stdlib-only (§6.4).
 
-Ishakat es un solo archivo ejecutable, sin nada que instalar alrededor, que
-arranca en menos de 150 milisegundos, se ve bonito, **hace trabajo real en la
-máquina y aprende herramientas nuevas mientras lo hace** — y en el que cambiar de
-modelo a mitad de la tarea es escribir `/model son45` y presionar Enter, con el
-hilo intacto.
+Ishakat is a single executable file, with nothing to install around it, that
+starts in under 150 milliseconds, looks good, **does real work on the machine
+and learns new tools while doing it** — and in which switching models mid-task
+is typing `/model son45` and pressing Enter, with the thread intact.
 
-### 1.1 La oportunidad
+### 1.1 The opportunity
 
-El acceso a modelos de IA se está fragmentando y abaratando a la vez. Un usuario típico tiene hoy acceso a media docena de proveedores distintos, cada uno bueno para algo diferente: uno razona mejor, otro es diez veces más barato, otro corre local y sin internet. La herramienta que gana no es la que se casa con un proveedor, sino la que hace trivial saltar entre todos.
+Access to AI models is fragmenting and getting cheaper at the same time. A typical user today has access to half a dozen different providers, each good at something different: one reasons better, another is ten times cheaper, another runs local and offline. The tool that wins is not the one that marries a single provider, but the one that makes it trivial to jump between all of them.
 
-Al mismo tiempo existe una capa nueva de infraestructura que resuelve el problema del lado del servidor: los gateways locales. OmniRoute es uno de ellos —código abierto, licencia MIT— que corre en tu propia máquina en `http://localhost:20128/v1` y expone cientos de proveedores tras una sola interfaz compatible con OpenAI. Ishakat no tiene que implementar 290 integraciones: implementa bien un dialecto y habla con todo.
+At the same time there is a new infrastructure layer that solves the problem on the server side: local gateways. OmniRoute is one of them — open source, MIT licensed — that runs on your own machine at `http://localhost:20128/v1` and exposes hundreds of providers behind a single OpenAI-compatible interface. Ishakat does not have to implement 290 integrations: it implements one dialect well and talks to everything.
 
-El hueco de mercado es el **agente** de terminal que aprovecha esa capa, cabe en
-un teléfono, y trata el cambio de modelo como una operación de primera clase en
-vez de una configuración escondida.
+The market gap is the terminal **agent** that leverages that layer, fits on a
+phone, and treats switching models as a first-class operation instead of a
+hidden configuration.
 
-Y hay una segunda oportunidad que la primera hace posible. Los gateways
-convirtieron el acceso a modelos en algo abundante y barato; lo que sigue siendo
-escaso es que el agente **sepa hacer lo tuyo**. Ese hueco lo llenan hoy los
-ecosistemas de plugins, que resuelven el problema equivocado: te dan lo que otro
-escribió y necesitó. La alternativa es un agente que escriba lo que *tú*
-necesitaste, a partir de la evidencia de tu propio uso (§19). Un dialecto bien
-implementado da cientos de modelos; una escalera de cristalización bien
-implementada da capacidades ilimitadas — y ninguna de las dos agrega dependencias.
+And there is a second opportunity that the first one makes possible. Gateways
+turned access to models into something abundant and cheap; what remains scarce
+is the agent **knowing how to do your thing**. That gap is filled today by
+plugin ecosystems, which solve the wrong problem: they give you what someone
+else wrote and needed. The alternative is an agent that writes what *you*
+needed, from the evidence of your own usage (§19). A well-implemented dialect
+gives you hundreds of models; a well-implemented crystallization ladder gives
+unlimited capabilities — and neither one adds dependencies.
 
-### 1.2 Los seis diferenciadores
+### 1.2 The six differentiators
 
-En orden de importancia. The first one is new and is the reason this document
+In order of importance. The first one is new and is the reason this document
 was restructured; the rest keep their original ranking below it.
 
 1. **Self-extension with governance (§19).** Ishakat crystallizes repeated work
@@ -185,20 +196,21 @@ was restructured; the rest keep their original ranking below it.
    unnoticed. **Nobody else in this category does this.** Plugin ecosystems make
    you install what somebody else wrote; ishakat writes what *you* actually
    needed, from the evidence of your own usage.
-2. **Instalación de un solo binario sin runtime**, que en Termux es la diferencia
-   entre "funciona" y "no lo instalo". This constrains #1 hard: the tool layer is
-   stdlib-only (§6.4) and generated tools may not `pip install` (§19.3).
-3. **Cambio de modelo en caliente conservando el contexto**, con verificación
-   automática de que la conversación cabe en la ventana del modelo nuevo — and
-   now also mid-task: swap models in the middle of a tool loop without losing
-   the thread. No competitor documents this as carefully (§4.6).
-4. **Selector de modelos con búsqueda difusa** y etiquetas de gratis, costo y
-   latencia leídas del catálogo, para elegir viendo información en vez de
-   adivinar entre cientos de identificadores.
-5. **Layout responsivo real diseñado para 40 columnas**, que es un teléfono en
-   vertical, algo que ninguno de los referentes hace bien.
-6. **Personalidad y animaciones conscientes de batería**, que se apagan solas
-   cuando no aportan. Every competitor is deliberately flat; being pleasant to
+2. **Single-binary installation with no runtime**, which on Termux is the
+   difference between "it works" and "I'm not installing it". This constrains #1
+   hard: the tool layer is stdlib-only (§6.4) and generated tools may not
+   `pip install` (§19.3).
+3. **Hot model swap that preserves context**, with automatic verification that
+   the conversation fits the new model's window — and now also mid-task: swap
+   models in the middle of a tool loop without losing the thread. No competitor
+   documents this as carefully (§4.6).
+4. **Fuzzy-search model picker** with free/cost/latency tags read from the
+   catalog, to choose by seeing information instead of guessing among hundreds
+   of identifiers.
+5. **Real responsive layout designed for 40 columns**, which is a phone held
+   vertically, something none of the reference tools do well.
+6. **Personality and battery-aware animations**, which turn themselves off
+   when they add nothing. Every competitor is deliberately flat; being pleasant to
    look at is a feature, not a distraction — as long as it costs nothing when it
    is off.
 
@@ -248,27 +260,27 @@ the model mid-fix without losing the thread.
 
 ---
 
-## 2. Hallazgos de investigación que fundamentan el diseño
+## 2. Research findings behind the design
 
-Resultado de la Fase 1. Explican por qué cada decisión posterior es como es.
+Result of Phase 1. They explain why every later decision is the way it is.
 
-**Por qué gemini-cli corre bien en Termux.** No es magia: su árbol de dependencias es JavaScript puro, sin módulos nativos. Lo que rompe en Termux son las dependencias que compilan C/C++ con node-gyp (`better-sqlite3`, `node-pty`, `sharp`, `keytar`) o los binarios precompilados contra glibc, porque Android usa Bionic libc. La lección transferible: la portabilidad se gana eliminando compilación en el dispositivo, no parcheándola.
+**Why gemini-cli runs well on Termux.** It is not magic: its dependency tree is pure JavaScript, with no native modules. What breaks on Termux are dependencies that compile C/C++ via node-gyp (`better-sqlite3`, `node-pty`, `sharp`, `keytar`) or binaries precompiled against glibc, because Android uses Bionic libc. The transferable lesson: portability is won by removing on-device compilation, not by patching around it.
 
-**Por qué opencode cambia de modelo tan fácil.** Tres decisiones combinadas: el catálogo de modelos vive fuera del código, consumido de models.dev; los identificadores son uniformes con la forma `proveedor/modelo`; y el modelo activo vive en el estado de la sesión, no en la inicialización del proceso. Las tres se adoptan en ishakat.
+**Why opencode switches models so easily.** Three decisions combined: the model catalog lives outside the code, consumed from models.dev; identifiers are uniform in the form `provider/model`; and the active model lives in session state, not in process initialization. All three are adopted in ishakat.
 
-models.dev publica tres endpoints, no uno. `api.json` (combinación proveedor+modelo, la que usa opencode), `models.json` (metadatos del modelo independientes del proveedor) y `catalog.json` (ambas). Esa distinción es crítica para el emparejamiento de metadatos descrito en §4.3.
+models.dev publishes three endpoints, not one. `api.json` (provider+model combination, the one opencode uses), `models.json` (provider-independent model metadata) and `catalog.json` (both). That distinction is critical for the metadata matching described in §4.3.
 
-**OmniRoute resuelve medio proyecto.** Endpoint OpenAI-compatible en `localhost:20128/v1`, con `GET /v1/models` que devuelve todo el catálogo, modelos virtuales (`auto`, `auto/coding`, `auto/fast`, `auto/cheap`, `auto/smart`, `auto/offline`), fallback automático entre proveedores, y funciona en Termux.
+**OmniRoute solves half the project.** OpenAI-compatible endpoint at `localhost:20128/v1`, with `GET /v1/models` returning the whole catalog, virtual models (`auto`, `auto/coding`, `auto/fast`, `auto/cheap`, `auto/smart`, `auto/offline`), automatic fallback between providers, and it works on Termux.
 
-**La estética objetivo ya está construida en Go.** Crush, de Charm, usa Bubble Tea (arquitectura Elm), Lip Gloss (estilos y degradados), Bubbles (componentes) y Harmonica (animación con física). Bubble Tea v2 —estable desde el 23 de febrero de 2026— trae además dos regalos: el Cursed Renderer, que hace diffing de celdas al estilo ncurses, y downsampling de color automático, que degrada cualquier estilo ANSI al perfil real del terminal sin código nuestro.
+**The target aesthetic is already built in Go.** Crush, by Charm, uses Bubble Tea (Elm architecture), Lip Gloss (styles and gradients), Bubbles (components) and Harmonica (physics-based animation). Bubble Tea v2 — stable since February 23, 2026 — also brings two gifts: the Cursed Renderer, which does ncurses-style cell diffing, and automatic color downsampling, which degrades any ANSI style to the terminal's real profile with no code of our own.
 
 ---
 
-## 3. Decisiones de arquitectura CERRADAS
+## 3. CLOSED architecture decisions
 
-**Stack:** Go 1.24+ con Bubble Tea v2 / Lip Gloss v2 / Bubbles v2. Produce un binario único de 15–25 MB, arranca en decenas de milisegundos, no necesita runtime, y el ecosistema Charm da exactamente la estética objetivo. Rutas de importación: `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` (dominio vanity nuevo de v2, verificado).
+**Stack:** Go 1.24+ with Bubble Tea v2 / Lip Gloss v2 / Bubbles v2. Produces a single 15–25 MB binary, starts in tens of milliseconds, needs no runtime, and the Charm ecosystem gives exactly the target aesthetic. Import paths: `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` (v2's new vanity domain, verified).
 
-**Compilación por plataforma.** `CGO_ENABLED=0` para linux y darwin. Para android/arm64, `CGO_ENABLED=1` con el NDK, apuntando CC a `aarch64-linux-android24-clang`. Esto es obligatorio y no negociable: un binario Go sin CGO usa el resolver DNS puro de Go, que lee `/etc/resolv.conf`, archivo que Android no tiene. El binario arranca, imprime `--version`, se ve perfecto, y muere en la primera petición HTTP con `lookup api.example.com on [::1]:53: connection refused`. El síntoma se esconde durante semanas porque el camino por defecto es `localhost:20128`, que no pasa por DNS. Como red de seguridad se implementa `internal/netfix` (§6.5).
+**Per-platform compilation.** `CGO_ENABLED=0` for linux and darwin. For android/arm64, `CGO_ENABLED=1` with the NDK, pointing CC at `aarch64-linux-android24-clang`. This is mandatory and non-negotiable: a Go binary without CGO uses Go's pure DNS resolver, which reads `/etc/resolv.conf`, a file Android does not have. The binary starts, prints `--version`, looks perfect, and dies on the first HTTP request with `lookup api.example.com on [::1]:53: connection refused`. The symptom stays hidden for weeks because the default path is `localhost:20128`, which does not go through DNS. As a safety net, `internal/netfix` is implemented (§6.5).
 
 **Modo inline, nunca alt-screen.** En alt-screen se pierde el scrollback del terminal y hay que reimplementar el scroll —que con dedos en un teléfono es peor que el nativo— y se rompe la selección de texto para copiar. En modo inline, lo que ya terminó se imprime una vez con `tea.Printf` y jamás se repinta; lo vivo ocupa las últimas líneas. Es el equivalente del `<Static>` de Ink que usa gemini-cli. Contrapartida aceptada: las líneas ya impresas no se re-envuelven al cambiar el ancho del terminal.
 
