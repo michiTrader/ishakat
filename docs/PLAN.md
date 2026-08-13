@@ -1301,42 +1301,42 @@ No error shows raw JSON on the surface. The full dump stays in `/debug` and in `
 
 One file per session at `$XDG_DATA_HOME/ishakat/sessions/2026-07-30T14-02-11-a3f9.jsonl`. First line: a header object with `id`, `title`, `timestamps`, `initial model` and `schema version`. After that, one serialized `convo.Message` per line, appended when the message completes, never during streaming. `/resume` lists the files, reads only the first line of each to build the menu, and loads the full file only once you pick one.
 
-`/compact` no reescribe el archivo: anexa un mensaje con un `BlockSummary` que declara qué rangos reemplaza, de modo que el historial completo queda auditable y compactar es reversible.
+`/compact` does not rewrite the file: it appends a message with a `BlockSummary` that declares which ranges it replaces, so the complete history stays auditable and compacting is reversible.
 
 ---
 
-## 11. Las cinco fases
+## 11. The five phases
 
-*(Cinco cerradas y una propuesta: la fase 6 al final de esta sección existe solo
-como propuesta de §20, y el conteo del título se queda en cinco a propósito hasta
-que se decida.)*
+*(Five closed and one proposed: Phase 6 at the end of this section exists only
+as §20's proposal, and the title's count deliberately stays at five until it is
+decided.)*
 
-### Fase 1 — Investigación y arquitectura · CERRADA
+### Phase 1 — Research and architecture · CLOSED
 
-Entregada en este documento: los cuatro contratos, el esquema de configuración completo, el diseño del catálogo, los wireframes a 40 columnas.
+Delivered in this document: the four contracts, the complete config schema, the catalog design, the 40-column wireframes.
 
-### Fase 2 — Prototipo · EN CURSO
+### Phase 2 — Prototype · IN PROGRESS
 
-Un chat que funciona de verdad, feo pero sólido: streaming SSE token por token, input multilínea, historial navegable con flechas, comandos mínimos, persistencia JSONL, y el selector de modelos, que es el diferenciador principal.
+A chat that really works, ugly but solid: token-by-token SSE streaming, multiline input, arrow-navigable history, minimal commands, JSONL persistence, and the model picker, which is the main differentiator.
 
-Orden concreto de implementación. Cada paso deja algo funcionando y probable, y el riesgo grande —Termux, red, DNS— se toca primero. El detalle de cada paso está en §12.
+Concrete implementation order. Each step leaves something working and demoable, and the big risk — Termux, network, DNS — is tackled first. Each step's detail is in §12.
 
-| # | Paso | Estado |
+| # | Step | Status |
 |---|------|--------|
-| 0 | Spike medido en teléfono real | ✅ hecho |
-| 1 | Esqueleto y configuración | ✅ hecho |
-| 2 | Tipos de conversación y almacén JSONL | ✅ hecho |
-| 3 | Esqueleto de TUI sin red (banner, degradado) | ✅ hecho |
-| 4 | Adaptador OpenAI con SSE | ✅ hecho |
-| 5 | Modo headless `ishakat -p` | ✅ hecho |
-| 6 | Catálogo (discovery, caché, merge) | ✅ hecho |
-| 7 | Resolución y matcher difuso | ✅ hecho |
-| 8 | Conectar engine y TUI (coalescing) | ✅ hecho |
-| 9 | Registro de slash commands | ✅ hecho |
-| 10 | Picker de modelos | ✅ hecho |
-| 11 | Cambio en caliente (CheckSwap) | ✅ hecho |
-| 12 | `/compact` del lado del cliente | ✅ hecho |
-| 13 | Cierre: historial, `/copy`, `/retry`, `/stats`, `doctor`, `--resume`, `/models` | ✅ hecho · alcance recortado, ver §17: `/config`/`/debug` reasignados al paso 18 |
+| 0 | Spike measured on a real phone | ✅ done |
+| 1 | Skeleton and configuration | ✅ done |
+| 2 | Conversation types and JSONL store | ✅ done |
+| 3 | TUI skeleton with no network (banner, gradient) | ✅ done |
+| 4 | OpenAI adapter with SSE | ✅ done |
+| 5 | Headless mode `ishakat -p` | ✅ done |
+| 6 | Catalog (discovery, cache, merge) | ✅ done |
+| 7 | Resolution and fuzzy matcher | ✅ done |
+| 8 | Wire up engine and TUI (coalescing) | ✅ done |
+| 9 | Slash-command registry | ✅ done |
+| 10 | Model picker | ✅ done |
+| 11 | Hot swap (CheckSwap) | ✅ done |
+| 12 | Client-side `/compact` | ✅ done |
+| 13 | Closing: history, `/copy`, `/retry`, `/stats`, `doctor`, `--resume`, `/models` | ✅ done · scope trimmed, see §17: `/config`/`/debug` reassigned to Step 18 |
 | 13bis | **Distribution: `curl \| sh` + GitHub Actions** (advanced from Phase 5 · **CLOSED**) | ✅ `install.sh`, `ci.yml`, and `release.yml` are live; desktop builds, Android arm64 NDK+CGO linkage, Android emulator DNS+HTTPS verification, and the published `v0.1.0` release all passed in run `31141287827`. Manual Termux acceptance remains part of the overall Phase 2 gate. See §17 2026-08-07. |
 
 **Step 13bis is closed. Step 14 may now begin.** The remaining manual Termux
@@ -1344,16 +1344,16 @@ acceptance is still required before the overall Phase 2 closes, but it no longer
 blocks the agent-layer implementation: distribution is live and its Android
 DNS+HTTPS gate passed in CI.
 
-**Aceptación de la Fase 2.** En un teléfono limpio: un `curl \| sh` instala el binario en menos de dos minutos; se conversa con OmniRoute con streaming visible; se cambia de modelo tres veces en la misma conversación, al menos una hacia un modelo con ventana más chica, sin perder el hilo; `esc` cancela sin romper nada; se cierra y `ishakat --resume` recupera la sesión completa; todo a 40 columnas en vertical sin una línea rota. Números: arranque bajo 150 ms con catálogo cacheado, RSS bajo 60 MB con 50 turnos, y cero repintados en reposo (verificable con `top` mostrando 0% de CPU).
+**Phase 2 acceptance.** On a clean phone: a `curl \| sh` installs the binary in under two minutes; you converse with OmniRoute with visible streaming; you switch models three times in the same conversation, at least once toward a model with a smaller window, without losing the thread; `esc` cancels without breaking anything; you close it and `ishakat --resume` recovers the full session; all of it at 40 columns held vertically with not a single broken line. Numbers: startup under 150 ms with a cached catalog, RSS under 60 MB with 50 turns, and zero idle repaints (verifiable with `top` showing 0% CPU).
 
-**Fuera de alcance en Fase 2**, por más que dé comidilla: MCP, temas en archivo (basta uno embebido), Markdown con Glamour, resaltado de sintaxis, mouse, imágenes, y los adaptadores de Anthropic y Gemini. Los últimos son trampa pura: `kind = "openai"` contra OmniRoute ya te da Claude y Gemini, así que escribirlos ahora es trabajo sin funcionalidad nueva visible.
+**Out of scope in Phase 2**, however much it might invite chatter: MCP, file-based themes (one embedded is enough), Markdown with Glamour, syntax highlighting, mouse, images, and the Anthropic and Gemini adapters. The last two are a pure trap: `kind = "openai"` against OmniRoute already gets you Claude and Gemini, so writing them now is work with no visible new functionality.
 
 **Tool calling used to be on that list and no longer is.** It moved into its own
 phase below, because it is the product rather than a temptation to resist. MCP
 stays out, correctly — §19's ladder covers the same ground without a daemon per
 integration.
 
-### Step 13bis — Distribution · CERRADA: goes immediately after step 13
+### Step 13bis — Distribution · CLOSED: goes immediately after step 13
 
 **Confirmed 2026-08-03.** Not a recommendation: it is the next step after 13, and
 step 14 does not start before it closes.
@@ -1400,13 +1400,13 @@ the android artifact, not just that it compiled.**
 `curl -fsSL … | sh` yields a working `ishakat doctor` in under two minutes, and
 `doctor` reports a successful HTTPS request to a remote host.
 
-### Fase 2.5 — El agente · the phase this document was restructured for
+### Phase 2.5 — The agent · the phase this document was restructured for
 
 Ishakat stops being a chat that could become an agent and becomes one. Ordered
 so that each step leaves something usable, and so the tool *engine* is proven
 before any model is allowed to write into it.
 
-| # | Paso | Deja funcionando |
+| # | Step | Leaves working |
 |---|---|---|
 | 14 | **Tool-calling loop** in `engine` + OpenAI/Anthropic dialect serialization — **CLOSED**, see §17 2026-08-07 | ✅ The engine iterates `tool_call → result → repeat`, with a hard cap, loop detection and cancellation. Tested with a fake tool, no network |
 | 15 | **The first six of the eight core tools** in `internal/tools` (pure Go, stdlib) | `read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`. It genuinely programs. The remaining two of §19.1's eight arrive later because they are not local: `fetch` in step 19, `dispatch` in step 22 |
@@ -1449,7 +1449,7 @@ The last one is the one that matters most and looks the least important: it is
 what lets *"is there already a tool for this?"* grow a second source later without
 reopening the governance code path, which is the path that must stay boring.
 
-**Aceptación de la Fase 2.5, and it is meant to be this ambitious:**
+**Phase 2.5 acceptance, and it is meant to be this ambitious:**
 
 > **Ishakat implements Step 23 of itself**, with a human only approving diffs. If
 > it can read its own 26.000+ lines, work out where `serve.go` belongs, write it,
@@ -1462,7 +1462,7 @@ columns; `esc` cancels mid-tool-loop leaving no half-written file; a
 fails its self-test never becomes usable; and `tool_create` is denied over
 headless and `serve` without `--allow-tool-create`.
 
-**Fuera de alcance en Fase 2.5:** MCP, LSP, OS sandboxing, session trees,
+**Out of scope in Phase 2.5:** MCP, LSP, OS sandboxing, session trees,
 Starlark (§16), browser automation — `fetch` only (§19.8) — **and the community
 capability layer (§20): installing capabilities other people wrote is a proposed
 Phase 6, and no step here may be reordered or widened for it.** What steps 20 and
@@ -1476,32 +1476,32 @@ Now the pretty part, with performance discipline. Themes in files with live `/th
 
 **The cursor-following-eyes animation is cancelled as a built-in feature — deferred indefinitely, not merely deprioritized.** An earlier draft of this section described a face with eyes that track the cursor column across the input width, mapped to a pupil position in the −1..1 range, with its own blink timer and a repaint gate limited to input changes. That idea is off the roadmap for the foreseeable future: no core-team implementation is planned. What stays is the groundwork that lets *a user* build this themselves without touching Go: theme files are already data (§8, `theme.Theme`), and `ui.animations` already exists as a config table a user's own theme or a future plugin surface could read. The Crush-style character-cycling animation (`spinner.go`'s `CrushFrame`) is unaffected by this — it is already built and stays, at a hard ceiling of 10–15 fps and automatic shutdown with no TTY, with `TERM=dumb`, with `--no-anim`, or below 40 columns. On a phone, an animation that ignores those rules is exactly what drains the battery.
 
-### Fase 4 — Solución (robustez)
+### Phase 4 — Solution (robustness)
 
-La fase menos divertida y la que decide si la gente lo usa. Reintentos con backoff exponencial respetando `Retry-After` en los 429, timeouts configurables, cancelación limpia, y mensajes de error legibles en vez de volcados de JSON. Modo offline real: sin red, el catálogo cacheado sirve y el CLI arranca igual. Fallback automático a `fallback_model` si el activo falla dos veces seguidas —OmniRoute ya lo hace por dentro, pero un usuario apuntando a un proveedor directo lo necesita.
+The least fun phase, and the one that decides whether people use it. Retries with exponential backoff respecting `Retry-After` on 429s, configurable timeouts, clean cancellation, and readable error messages instead of JSON dumps. Real offline mode: with no network, the cached catalog serves and the CLI still starts. Automatic fallback to `fallback_model` if the active one fails twice in a row — OmniRoute already does this internally, but a user pointing directly at a provider needs it.
 
-Aquí entran también los adaptadores de Anthropic y Gemini, las pruebas de los tres dialectos contra servidores simulados, el perfilado con presupuestos explícitos, y la revisión de seguridad: claves nunca en logs, permisos 600, `/debug` que redacta secretos.
+This is also where the Anthropic and Gemini adapters come in, testing all three dialects against simulated servers, profiling with explicit budgets, and the security review: keys never in logs, 600 permissions, `/debug` that redacts secrets.
 
-### Fase 5 — Creación (distribución)
+### Phase 5 — Creation (distribution)
 
-**Nota:** el núcleo de esta fase —la matriz de GitHub Actions y el `install.sh`—
-se adelantó al Paso 13bis por las razones dadas allí. Lo que queda aquí es el
-resto: README con GIF grabado en un celular, documentación de la config, guía de
-"cómo agregar un proveedor", un tema de ejemplo, y el paquete npm si se decide
-que vale la pena.
+**Note:** this phase's core — the GitHub Actions matrix and `install.sh` —
+was advanced to Step 13bis for the reasons given there. What is left here is the
+rest: a README with a GIF recorded on a phone, config documentation, a
+"how to add a provider" guide, an example theme, and the npm package if it is
+decided to be worth it.
 
-Binarios cross-compilados para android/arm64 (con NDK y CGO, obligatorio), linux/amd64, linux/arm64 y darwin/arm64, publicados en GitHub Releases vía GitHub Actions, más un `install.sh` que detecte Termux y ponga el binario en `$PREFIX/bin`. Opcionalmente un paquete npm que solo descargue el binario correcto, para quien prefiera `npm i -g`.
+Cross-compiled binaries for android/arm64 (with NDK and CGO, mandatory), linux/amd64, linux/arm64 and darwin/arm64, published on GitHub Releases via GitHub Actions, plus an `install.sh` that detects Termux and drops the binary into `$PREFIX/bin`. Optionally an npm package that only downloads the right binary, for whoever prefers `npm i -g`.
 
-README con GIF grabado en un celular, documentación de la config, guía de "cómo agregar un proveedor" y un tema de ejemplo.
+A README with a GIF recorded on a phone, config documentation, a "how to add a provider" guide and an example theme.
 
-### Fase 6 — La capa comunitaria · PROPUESTA, no comprometida
+### Phase 6 — The community layer · PROPOSED, not committed
 
-**No es una fase aprobada: es lo que §20 propone, y §20 está abierta (§16).** Se
-lista aquí para que tenga un lugar en el orden y no se cuele dentro de la fase
-2.5, no porque esté decidida. Su contenido, si algún día se acepta: `ishakat
-install|uninstall|update|search|publish`, la puerta 0 de integridad, el índice
-como archivo firmado en un repo, el concepto de *pack* con activación explícita, y
-el opt-in del peldaño 2.
+**This is not an approved phase: it is what §20 proposes, and §20 is open (§16).** It
+is listed here so it has a place in the order and does not sneak into Phase
+2.5, not because it has been decided. Its content, if it is ever accepted: `ishakat
+install|uninstall|update|search|publish`, integrity gate 0, the index
+as a signed file in a repo, the *pack* concept with explicit activation, and
+rung 2's opt-in.
 
 Tres condiciones para siquiera empezarla, todas en §20:
 
@@ -3632,3 +3632,5 @@ The governing sentence, matching §19's:
 ---
 
 *Fin del documento.*
+.*
+
