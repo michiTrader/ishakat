@@ -1517,25 +1517,25 @@ Tres condiciones para siquiera empezarla, todas en §20:
 
 ---
 
-## 12. Detalle de los pasos de la Fase 2
+## 12. Detail of Phase 2's steps
 
-### Paso 0 · Spike — ✅ COMPLETADO
+### Step 0 · Spike — ✅ COMPLETED
 
-Hola mundo con Bubble Tea v2 compilado con `GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$NDK/.../aarch64-linux-android24-clang`, corriendo en el teléfono, haciendo un GET real a `https://models.dev/api.json` y otro a `localhost:20128/v1/models`.
+Hello-world with Bubble Tea v2 compiled with `GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$NDK/.../aarch64-linux-android24-clang`, running on the phone, making a real GET to `https://models.dev/api.json` and another to `localhost:20128/v1/models`.
 
-Higiene pendiente si no se hizo: anotar en `docs/ARCHITECTURE.md` los números reales (arranque en ms, RSS, si el DNS resolvió con CGO o hubo que tocar algo) y mover el hola-mundo a una rama `spike/` o borrarlo. No dejarlo flotando en `main`.
+Pending hygiene if not already done: note the real numbers in `docs/ARCHITECTURE.md` (startup in ms, RSS, whether DNS resolved with CGO or something had to be touched) and move the hello-world to a `spike/` branch or delete it. Don't leave it floating in `main`.
 
-### Paso 1 · Esqueleto y configuración — ⬜ SIGUIENTE
+### Step 1 · Skeleton and configuration — ⬜ NEXT
 
-**Objetivo.** Un binario `ishakat` que todavía no chatea, pero que carga, fusiona, expande y valida la configuración completa, y responde a `config init`, `config path`, `config check` y `doctor`.
+**Goal.** An `ishakat` binary that does not chat yet, but loads, merges, expands and validates the full configuration, and responds to `config init`, `config path`, `config check` and `doctor`.
 
-**Criterio de cierre.** `ishakat config check` acepta `config.example.toml` sin errores y rechaza con mensaje legible un `[[provider]]` sin `base_url`.
+**Closing criterion.** `ishakat config check` accepts `config.example.toml` with no errors and rejects, with a readable message, a `[[provider]]` with no `base_url`.
 
-Es el paso menos vistoso del proyecto y el que más deuda evita, porque todo lo demás (catálogo, engine, TUI) lee de aquí. Una sola dependencia: `BurntSushi/toml`.
+It is the least flashy step in the project and the one that avoids the most debt, because everything else (catalog, engine, TUI) reads from here. A single dependency: `BurntSushi/toml`.
 
-#### 1.1 `internal/xdg` — rutas y detección de Termux
+#### 1.1 `internal/xdg` — paths and Termux detection
 
-Empieza por aquí porque todo lo demás lo importa.
+Start here because everything else imports it.
 
 ```go
 // internal/xdg/xdg.go
@@ -1574,10 +1574,10 @@ func CatalogFile() string { return filepath.Join(CacheDir(), "catalog.json") }
 func SessionsDir() string { return filepath.Join(DataDir(), "sessions") }
 func ErrorFile() string   { return filepath.Join(StateDir(), "last-error.json") }
 
-// EnsureDir crea con 0700, como exige §5.1.
+// EnsureDir creates with 0700, as required by §5.1.
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
 
-// IsTermux alimenta battery_saver = "auto" y el instalador de la Fase 5.
+// IsTermux feeds battery_saver = "auto" and the Phase 5 installer.
 func IsTermux() bool {
 	if strings.Contains(os.Getenv("PREFIX"), "com.termux") {
 		return true
@@ -1587,17 +1587,17 @@ func IsTermux() bool {
 }
 ```
 
-En Termux `HOME` es `/data/data/com.termux/files/home` y `XDG_CONFIG_HOME` normalmente no está definido, así que la config cae en `~/.config/ishakat/config.toml`. Verifícalo con `ishakat config path` en el teléfono al final del paso.
+On Termux `HOME` is `/data/data/com.termux/files/home` and `XDG_CONFIG_HOME` is normally not set, so the config falls into `~/.config/ishakat/config.toml`. Verify it with `ishakat config path` on the phone at the end of the step.
 
-#### 1.2 La estrategia de fusión (léela antes de codificar)
+#### 1.2 The merge strategy (read this before coding)
 
-Es la única decisión técnica no obvia del paso, y equivocarse cuesta reescribir el paquete.
+It is the step's only non-obvious technical decision, and getting it wrong costs a rewrite of the whole package.
 
-El impulso natural es decodificar cada capa directamente sobre el mismo `struct Config`. No sirve: cuando el archivo de proyecto trae un `[[provider]]`, el slice completo se reemplaza y pierdes los defaults, y no hay forma de saber si `enabled = false` fue escrito por el usuario o es el cero de Go.
+The natural impulse is to decode each layer directly onto the same `Config` struct. That does not work: when the project file brings a `[[provider]]`, the whole slice gets replaced and you lose the defaults, and there is no way to know whether `enabled = false` was written by the user or is Go's zero value.
 
-La estrategia correcta es decodificar cada capa a `map[string]any`, fusionar los mapas con reglas explícitas, y recién al final decodificar el mapa fusionado al struct. Con eso obtienes semántica exacta de "solo las claves presentes ganan", el merge por `id` de los proveedores sale natural, y `md.Undecoded()` del decode final te da gratis la lista de claves desconocidas para reportarlas como advertencia.
+The correct strategy is to decode each layer to `map[string]any`, merge the maps with explicit rules, and only decode the merged map into the struct at the very end. That gives you exact "only present keys win" semantics, the by-`id` provider merge falls out naturally, and the final decode's `md.Undecoded()` gives you the list of unknown keys for free, to report as a warning.
 
-Que los defaults sean un TOML embebido y no una función `Defaults()` en Go es deliberado: una sola fuente de verdad, la capa 0 se fusiona con el mismo código que las demás, y ishakat funciona sin ningún archivo de config porque el proveedor `omniroute` ya viene declarado ahí.
+That the defaults are an embedded TOML file rather than a `Defaults()` function in Go is deliberate: a single source of truth, layer 0 gets merged with the exact same code as the others, and ishakat works with no config file at all because the `omniroute` provider already comes declared there.
 
 #### 1.3 `internal/config/schema.go`
 
@@ -1618,8 +1618,8 @@ type Config struct {
 	Alias     map[string]string `toml:"alias"`
 	Providers []Provider        `toml:"provider"`
 
-	// No se serializa: diagnóstico de la carga.
-	Files    []string          `toml:"-"` // capas efectivamente leídas, en orden
+	// Not serialized: load diagnostics.
+	Files    []string          `toml:"-"` // layers actually read, in order
 	Warnings []Warning         `toml:"-"`
 	EnvUsed  map[string]string `toml:"-"` // "$OMNIROUTE_API_KEY" -> "sk-…9f2"
 }
@@ -1678,9 +1678,9 @@ type Provider struct {
 	Params   map[string]any    `toml:"params"`
 	Models   []ProviderModel   `toml:"model"`
 
-	// Derivados de la carga, no del archivo.
+	// Derived from the load, not from the file.
 	AuthOK     bool   `toml:"-"`
-	MissingEnv string `toml:"-"` // "OMNIROUTE_API_KEY" si la variable no existe
+	MissingEnv string `toml:"-"` // "OMNIROUTE_API_KEY" if the variable does not exist
 }
 
 type ProviderModel struct {
@@ -1696,10 +1696,10 @@ type Warning struct {
 	Msg   string
 }
 
-// Session, Keys, Catalog, Compact, Favorites: igual de mecánicos, cópialos de §5.2.
+// Session, Keys, Catalog, Compact, Favorites: just as mechanical, copy them from §5.2.
 ```
 
-`Enabled` y `Discover` pueden ser `bool` normal y no `*bool` solo porque los defaults llegan por TOML. Para un `[[provider]]` nuevo que el usuario declare sin esas claves, el merge rellena `enabled = true` y `discover = true` desde la plantilla de 1.4. Si algún día quitas la capa de defaults en TOML, tendrás que volver a punteros.
+`Enabled` and `Discover` can be a plain `bool` rather than `*bool` only because the defaults arrive via TOML. For a new `[[provider]]` the user declares without those keys, the merge fills in `enabled = true` and `discover = true` from 1.4's template. If you ever remove the TOML defaults layer, you will have to go back to pointers.
 
 #### 1.4 `internal/config/merge.go`
 
@@ -1729,10 +1729,10 @@ func mergeValue(dst, src any) any {
 		}
 		return dm
 	}
-	return src // escalares y arrays: reemplazo total (§5.1)
+	return src // scalars and arrays: total replacement (§5.1)
 }
 
-// Plantilla para un [[provider]] que aparece por primera vez.
+// Template for a [[provider]] that appears for the first time.
 var providerTemplate = map[string]any{
 	"kind":     "openai",
 	"discover": true,
@@ -1752,7 +1752,7 @@ func mergeProviders(dstAny, srcAny any) any {
 	for _, p := range src {
 		id, _ := p["id"].(string)
 		if i, ok := idx[id]; ok {
-			out[i] = mergeRoot(out[i], p) // fusión por id: §5.1
+			out[i] = mergeRoot(out[i], p) // merge by id: §5.1
 			continue
 		}
 		idx[id] = len(out)
@@ -1778,7 +1778,7 @@ func toTables(v any) []map[string]any {
 }
 ```
 
-`cloneMap` es una copia superficial de una línea; la plantilla no tiene submapas.
+`cloneMap` is a one-line shallow copy; the template has no sub-maps.
 
 #### 1.5 `internal/config/load.go`
 
@@ -1804,7 +1804,7 @@ type Options struct {
 	UserPath    string // "" = xdg.ConfigFile()
 	ProjectPath string // "" = "./.ishakat.toml"
 	SkipProject bool
-	Overrides   map[string]any // flags ya traducidos a rutas punteadas
+	Overrides   map[string]any // flags already translated to dotted paths
 }
 
 func Load(o Options) (*Config, error) {
@@ -1820,7 +1820,7 @@ func Load(o Options) (*Config, error) {
 	var warns []Warning
 
 	if err := decodeInto(raw, defaultsTOML); err != nil {
-		return nil, fmt.Errorf("defaults embebidos corruptos: %w", err) // bug nuestro
+		return nil, fmt.Errorf("embedded defaults corrupted: %w", err) // our bug
 	}
 
 	layers := []string{o.UserPath}
@@ -1837,7 +1837,7 @@ func Load(o Options) (*Config, error) {
 		}
 		var m map[string]any
 		if _, err := toml.Decode(string(b), &m); err != nil {
-			return nil, fmt.Errorf("%s: TOML inválido: %w", p, err) // fatal (§5.3)
+			return nil, fmt.Errorf("%s: invalid TOML: %w", p, err) // fatal (§5.3)
 		}
 		raw = mergeRoot(raw, m)
 		files = append(files, p)
@@ -1849,11 +1849,11 @@ func Load(o Options) (*Config, error) {
 		setPath(raw, path, v)
 	}
 
-	// Re-serializar y decodificar al struct: así md.Undecoded() reporta
-	// claves desconocidas sobre el resultado final ya fusionado.
+	// Re-serialize and decode into the struct: this way md.Undecoded() reports
+	// unknown keys against the final, already-merged result.
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(raw); err != nil {
-		return nil, fmt.Errorf("no se pudo normalizar la configuración: %w", err)
+		return nil, fmt.Errorf("could not normalize the configuration: %w", err)
 	}
 	cfg := &Config{EnvUsed: map[string]string{}}
 	md, err := toml.Decode(buf.String(), cfg)
@@ -1861,7 +1861,7 @@ func Load(o Options) (*Config, error) {
 		return nil, err
 	}
 	for _, k := range md.Undecoded() {
-		warns = append(warns, Warning{Where: "config", Msg: "clave ignorada: " + k.String()})
+		warns = append(warns, Warning{Where: "config", Msg: "ignored key: " + k.String()})
 	}
 
 	cfg.Files = files
@@ -1875,7 +1875,7 @@ func Load(o Options) (*Config, error) {
 }
 ```
 
-`applyEnv` no adivina rutas a partir del nombre de la variable — `ISHAKAT_APP_DEFAULT_MODEL` es ambiguo porque no sabes dónde parte el guion bajo. Usa una tabla explícita y corta:
+`applyEnv` does not guess paths from the variable name — `ISHAKAT_APP_DEFAULT_MODEL` is ambiguous because you cannot tell where the underscore splits. It uses an explicit, short table instead:
 
 ```go
 var envMap = map[string]string{
@@ -1886,11 +1886,11 @@ var envMap = map[string]string{
 }
 ```
 
-Las claves de API no se pasan por aquí: viajan como `$VAR` dentro del TOML y se expanden en `expandVars`. Un solo mecanismo para secretos.
+API keys do not go through here: they travel as `$VAR` inside the TOML and get expanded in `expandVars`. A single mechanism for secrets.
 
 #### 1.6 `internal/config/expand.go`
 
-Recorrido con `reflect` sobre todos los `string` del struct (campos, valores de mapas y elementos de slices), reemplazando `$VAR` y `${VAR}`. Los proveedores se procesan primero para poder marcar el estado de autenticación:
+A `reflect` walk over every `string` in the struct (fields, map values and slice elements), replacing `$VAR` and `${VAR}`. Providers are processed first so the authentication state can be flagged:
 
 ```go
 var varRe = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`)
@@ -1904,12 +1904,12 @@ func expandVars(c *Config) []Warning {
 		p.APIKey = val
 		switch {
 		case raw == "":
-			p.AuthOK = true // proveedor local sin clave: legítimo
+			p.AuthOK = true // local provider with no key: legitimate
 		case missing != "":
 			p.AuthOK, p.MissingEnv = false, missing
 			warns = append(warns, Warning{
 				Where: "provider[" + p.ID + "]",
-				Msg:   "falta $" + missing + "; el proveedor queda sin autenticar",
+				Msg:   "missing $" + missing + "; the provider is left unauthenticated",
 			})
 		default:
 			p.AuthOK = true
@@ -1920,43 +1920,43 @@ func expandVars(c *Config) []Warning {
 }
 ```
 
-El detalle que importa: una variable ausente no elimina el proveedor. Lo deja `AuthOK = false` para que el selector lo muestre en gris con la nota. Si lo borras aquí, el usuario ve modelos desaparecidos sin explicación y no hay forma de diagnosticarlo.
+The detail that matters: a missing variable does not delete the provider. It leaves it `AuthOK = false` so the picker shows it in grey with the note. Delete it here instead and the user sees models vanish with no explanation and no way to diagnose it.
 
-También expande `$XDG_DATA_HOME` y `$XDG_CACHE_HOME`, que aparecen en los defaults. En Termux esas variables no existen, así que `expandString` debe consultar primero a `xdg` para esos tres nombres concretos antes de caer a `os.LookupEnv`. Si no lo haces, `session.dir` queda como `/ishakat/sessions` y escribes en la raíz.
+It also expands `$XDG_DATA_HOME` and `$XDG_CACHE_HOME`, which appear in the defaults. On Termux those variables do not exist, so `expandString` must consult `xdg` first for those three specific names before falling back to `os.LookupEnv`. Skip that and `session.dir` ends up as `/ishakat/sessions`, writing at the root.
 
-#### 1.7 `validate.go` y `redact.go`
+#### 1.7 `validate.go` and `redact.go`
 
 ```go
 func Validate(c *Config) error {
 	if c.Schema != Schema {
-		return fmt.Errorf("schema = %d no soportado (esta versión entiende %d); "+
-			"actualiza ishakat o corrige la primera línea de config.toml", c.Schema, Schema)
+		return fmt.Errorf("schema = %d not supported (this version understands %d); "+
+			"update ishakat or fix config.toml’s first line", c.Schema, Schema)
 	}
 	seen := map[string]bool{}
 	for i := range c.Providers {
 		p := &c.Providers[i]
 		where := fmt.Sprintf("provider[%d]", i)
 		if p.ID == "" {
-			return fmt.Errorf("%s: falta id. Cada [[provider]] necesita un id único", where)
+			return fmt.Errorf("%s: missing id. Every [[provider]] needs a unique id", where)
 		}
 		if seen[p.ID] {
-			return fmt.Errorf("provider %q está declarado dos veces", p.ID)
+			return fmt.Errorf("provider %q is declared twice", p.ID)
 		}
 		seen[p.ID] = true
 		if p.Kind == "" {
-			return fmt.Errorf("provider %q: falta kind. Usa openai, anthropic o gemini", p.ID)
+			return fmt.Errorf("provider %q: missing kind. Use openai, anthropic or gemini", p.ID)
 		}
 		if p.BaseURL == "" {
-			return fmt.Errorf("provider %q: falta base_url.\n  Ejemplo: base_url = \"https://api.openai.com/v1\"", p.ID)
+			return fmt.Errorf("provider %q: missing base_url.\n  Example: base_url = \"https://api.openai.com/v1\"", p.ID)
 		}
 		if !validKind(p.Kind) {
 			p.Enabled = false
 			c.Warnings = append(c.Warnings, Warning{where,
-				fmt.Sprintf("kind %q no soportado; el proveedor queda desactivado", p.Kind)})
+				fmt.Sprintf("kind %q not supported; the provider is disabled", p.Kind)})
 		}
 	}
-	// no fatales: theme inexistente -> "ascua"; default_model que no resuelve
-	// se corrige en el Paso 6 contra el catálogo; fps fuera de [1,30] se recorta.
+	// non-fatal: nonexistent theme -> "ascua"; default_model that does not resolve
+	// gets fixed against the catalog in Step 6; fps outside [1,30] gets clamped.
 	return nil
 }
 
@@ -1966,14 +1966,14 @@ func Mask(s string) string {
 	return "…" + s[len(s)-4:]
 }
 
-// Redacted devuelve una copia profunda con todo secreto enmascarado.
-// Ninguna ruta de logging a disco debe usar el Config sin pasar por aquí.
+// Redacted returns a deep copy with every secret masked.
+// No path that logs to disk should use the Config without passing through here.
 func (c *Config) Redacted() *Config
 ```
 
 #### 1.8 `cmd/ishakat/main.go`
 
-Sin cobra: flag de la stdlib y despacho manual.
+No cobra: stdlib flag and manual dispatch.
 
 ```go
 var version = "dev" // -X main.version
@@ -1989,39 +1989,39 @@ func main() {
 			fmt.Println("ishakat", version)
 			return
 		case "models":
-			fmt.Fprintln(os.Stderr, "aún no: paso 6")
+			fmt.Fprintln(os.Stderr, "not yet: step 6")
 			os.Exit(1)
 		}
 	}
-	// TUI: paso 3. Por ahora carga la config y la imprime.
+	// TUI: step 3. For now it loads the config and prints it.
 }
 ```
 
-`cmdConfig` implementa los tres verbos. `init` crea `~/.config/ishakat/` con 0700, escribe `config.example.toml` embebido como `config.toml` con 0600, y se niega a sobrescribir si ya existe salvo `--force`. `path` imprime la ruta y nada más, para que sirva en `$(ishakat config path)`. `check` carga, imprime las capas leídas, las advertencias, y sale con código 0 o 1; con `--strict` las advertencias también fallan, que es lo que correrá CI.
+`cmdConfig` implements the three verbs. `init` creates `~/.config/ishakat/` with 0700, writes the embedded `config.example.toml` as `config.toml` with 0600, and refuses to overwrite it if it already exists unless `--force`. `path` just prints the path and nothing else, so it works in `$(ishakat config path)`. `check` loads, prints the layers read, the warnings, and exits with code 0 or 1; with `--strict` warnings also fail, which is what CI will run.
 
-`doctor` va ahora aunque esté a medias: imprime versión, plataforma, si detecta Termux, las cuatro rutas XDG, el resolver DNS activo y el resultado de un `net.LookupHost` de prueba. Cuesta cuarenta líneas y es la única herramienta de diagnóstico remoto cuando alguien escriba "no me funciona en mi teléfono".
+`doctor` goes in now even half-finished: it prints version, platform, whether it detects Termux, the four XDG paths, the active DNS resolver and the result of a test `net.LookupHost`. It costs forty lines and is the only remote-diagnostic tool for when someone writes "it doesn’t work on my phone".
 
-#### 1.9 Tests que cierran el paso
+#### 1.9 Tests that close the step
 
-Cinco en `internal/config/config_test.go`, ninguno necesita red.
+Five in `internal/config/config_test.go`, none needs the network.
 
-El primero carga `config.example.toml` como capa de usuario y exige cero advertencias. Es el que mata la deriva entre `defaults.toml` y el ejemplo.
+The first loads `config.example.toml` as the user layer and demands zero warnings. It is the one that kills drift between `defaults.toml` and the example.
 
-El segundo prueba el merge por `id`: una capa de proyecto con solo `[[provider]] id = "omniroute"` y `base_url = "http://otro:9999/v1"` debe producir un proveedor con el `base_url` nuevo pero conservando `kind`, `timeout_s` y los `[[provider.model]]` de la capa inferior.
+The second tests the by-`id` merge: a project layer with only `[[provider]] id = "omniroute"` and `base_url = "http://otro:9999/v1"` must produce a provider with the new `base_url` but keeping `kind`, `timeout_s` and the `[[provider.model]]` entries from the layer below.
 
-El tercero es una tabla de errores fatales: `[[provider]]` sin `base_url`, sin `id`, con `id` duplicado, `schema = 99`, y TOML roto. Verifica que el mensaje contenga el `id` del proveedor y la palabra `base_url` — no compares el string exacto o el test se rompe cada vez que mejores la redacción.
+The third is a table of fatal errors: `[[provider]]` with no `base_url`, with no `id`, with a duplicate `id`, `schema = 99`, and broken TOML. Verify the message contains the provider’s `id` and the word `base_url` — do not compare the exact string, or the test breaks every time the wording improves.
 
-El cuarto usa `t.Setenv` para probar expansión: variable presente, ausente (proveedor con `AuthOK == false` y `MissingEnv` correcto, pero presente en la lista), y `${LLAVES}`.
+The fourth uses `t.Setenv` to test expansion: variable present, missing (provider with `AuthOK == false` and the right `MissingEnv`, but still present in the list), and `${BRACES}`.
 
-El quinto verifica que `Redacted()` no deje ninguna clave completa: recorre el struct redactado buscando el valor original y falla si lo encuentra.
+The fifth verifies that `Redacted()` leaves no key intact: it walks the redacted struct looking for the original value and fails if it finds it.
 
-Y el test de frontera arquitectónica en `internal/arch_test.go`, que ya se puede escribir aunque `tui` esté vacío:
+And the architectural-boundary test in `internal/arch_test.go`, which can already be written even while `tui` is empty:
 
 ```go
 func TestTUINoImportaHTTP(t *testing.T) {
 	out, _ := exec.Command("go", "list", "-deps", "./internal/tui").Output()
 	if bytes.Contains(out, []byte("net/http")) {
-		t.Fatal("internal/tui importa net/http: la frontera de §6.1 está rota")
+		t.Fatal("internal/tui imports net/http: §6.1’s boundary is broken")
 	}
 }
 ```
@@ -2050,196 +2050,195 @@ android:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BIN)-android-arm64 $(PKG)
 ```
 
-El target `android` no se usa hasta la Fase 5, pero se deja escrito ahora mientras está fresco el comando que funcionó en el spike.
+The `android` target is not used until Phase 5, but it is written down now while the command that worked in the spike is still fresh.
 
-**Definición de terminado.** `go test ./...` en verde; `ishakat config init` crea el archivo con permisos 0600 en un `$HOME` limpio; `ishakat config check` acepta el ejemplo; borrar la línea `base_url` de un proveedor produce un mensaje que nombra el proveedor y dice qué falta; `ishakat doctor` corre en Termux mostrando rutas correctas. Commit: `feat(config): esquema, carga por capas, expansión y validación`
+**Definition of done.** `go test ./...` green; `ishakat config init` creates the file with 0600 permissions on a clean `$HOME`; `ishakat config check` accepts the example; deleting a provider’s `base_url` line produces a message that names the provider and says what is missing; `ishakat doctor` runs on Termux showing correct paths. Commit: `feat(config): schema, layered load, expansion and validation`
 
-### Paso 2 · Tipos de conversación y almacén JSONL
+### Step 2 · Conversation types and JSONL store
 
-Implementar `internal/convo`: `message.go` con los tipos de §4 (puros, sin imports externos salvo `encoding/json` y `time`), `store.go` con el JSONL append-only descrito en §10, y `tokens.go` con el estimador.
+Implement `internal/convo`: `message.go` with §4’s types (pure, no external imports besides `encoding/json` and `time`), `store.go` with the append-only JSONL described in §10, and `tokens.go` with the estimator.
 
-El estimador de tokens es heurístico y está bien que lo sea: aproximadamente `len(texto)/4` para latinos, con ajuste por bloques de código, y corrección con el usage real que devuelve el proveedor al terminar cada turno. Guarda el ratio observado por modelo en el caché para que la estimación mejore con el uso. Nunca embarcar un tokenizador real: pesa megas y no cambia ninguna decisión del producto.
+The token estimator is heuristic, and that is fine: roughly `len(text)/4` for Latin-script text, adjusted for code blocks, and corrected with the real usage the provider returns at the end of each turn. It stores the observed ratio per model in the cache so the estimate improves with use. Never ship a real tokenizer: it weighs megabytes and does not change a single product decision.
 
-`store.go` expone `Append(msg)`, `List()` (lee solo la primera línea de cada archivo), `Load(id)`, `New(title)` y la rotación por `session.keep_last`.
+`store.go` exposes `Append(msg)`, `List()` (reads only the first line of each file), `Load(id)`, `New(title)` and rotation by `session.keep_last`.
 
-**Cierre:** un test escribe veinte mensajes, los relee y obtiene lo mismo, incluyendo un bloque de imagen y uno de resumen. Un test extra trunca el archivo a la mitad de una línea y verifica que `Load` devuelva los mensajes completos anteriores sin error fatal. Commit: `feat(convo): tipos agnósticos y almacén JSONL`
+**Closing:** a test writes twenty messages, rereads them and gets the same thing back, including an image block and a summary block. An extra test truncates the file mid-line and verifies that `Load` returns the previous complete messages with no fatal error. Commit: `feat(convo): agnostic types and JSONL store`
 
-### Paso 3 · Esqueleto de TUI sin red — la recompensa temprana
+### Step 3 · TUI skeleton with no network — the early reward
 
-Entran las dependencias de Charm. Modo inline, `Root` con los cinco modos de §7.1, textarea de Bubbles, footer, `WindowSizeMsg` con los breakpoints de §9.1, banner con degradado Oklab, `ctrl+c` doble para salir.
+Charm’s dependencies come in. Inline mode, `Root` with §7.1’s five modes, Bubbles textarea, footer, `WindowSizeMsg` with §9.1’s breakpoints, banner with an Oklab gradient, double `ctrl+c` to exit.
 
-Nota de método: este paso está adelantado deliberadamente respecto del orden puramente técnico (lo lógico sería ir tras el catálogo). Va aquí como recompensa visual, porque en un proyecto personal mantener el impulso es un requisito de ingeniería tan real como el rendimiento. Cuesta algo de retrabajo menor y vale la pena.
+Method note: this step is deliberately moved ahead of the purely technical order (logically it should come after the catalog). It goes here as a visual reward, because on a personal project keeping momentum is as real an engineering requirement as performance. It costs a bit of minor rework, and it is worth it.
 
-Sin red, sin engine: el input hace eco de lo que escribes como si fuera respuesta. Es un maniquí, pero un maniquí con la estética final.
+No network, no engine: the input echoes back what you type as if it were the reply. It is a mannequin, but a mannequin with the final aesthetic.
 
-**Cierre:** se ve correcto a 40, 60 y 120 columnas, sin parpadeo al redimensionar, y el CPU en reposo es 0%. Commit: `feat(tui): esqueleto inline, breakpoints y banner`
+**Closing:** it looks correct at 40, 60 and 120 columns, no flicker on resize, and idle CPU is 0%. Commit: `feat(tui): inline skeleton, breakpoints and banner`
 
-### Paso 4 · Adaptador OpenAI con SSE
+### Step 4 · OpenAI adapter with SSE
 
-`internal/provider/openai`: construcción del request desde `convo.Message`, parser de Server-Sent Events, y traducción a `provider.Event`.
+`internal/provider/openai`: building the request from `convo.Message`, a Server-Sent Events parser, and translation to `provider.Event`.
 
-El parser de SSE es donde se esconden los bugs. Trátalo como un `bufio.Scanner` con split function propia que respete líneas `data:`, líneas vacías como separador de evento, y comentarios `:`. Nunca asumas que un `Read` del socket trae un evento completo.
+The SSE parser is where the bugs hide. Treat it as a `bufio.Scanner` with its own split function that honors `data:` lines, blank lines as the event separator, and `:` comments. Never assume a socket `Read` brings a complete event.
 
-**Cierre:** el test contra un `httptest.Server` que reproduce un stream grabado en `testdata/` cubre cinco casos: stream normal, `[DONE]`, corte a mitad de evento, chunk partido en dos lecturas del socket, y 429 con `Retry-After`. Commit: `feat(provider): dialecto OpenAI con streaming SSE`
+**Closing:** the test against an `httptest.Server` that replays a stream recorded in `testdata/` covers five cases: normal stream, `[DONE]`, cut mid-event, a chunk split across two socket reads, and 429 with `Retry-After`. Commit: `feat(provider): OpenAI dialect with SSE streaming`
 
-### Paso 5 · Modo headless `ishakat -p "hola"`
+### Step 5 · Headless mode `ishakat -p "hello"`
 
-Pipeline completo —config, proveedor, streaming, persistencia— escupiendo texto a stdout sin una línea de TUI.
+The full pipeline —config, provider, streaming, persistence— spitting text to stdout with not one line of TUI.
 
-Es el paso más subestimado de la lista: da el 60% del sistema probado en CI, sirve para scripting y pipes, y cuando algo falle en la interfaz sabrás de inmediato de qué lado está el bug.
+It is the most underrated step on the list: it delivers 60% of the system tested in CI, it is useful for scripting and pipes, and when something breaks in the interface you will immediately know which side the bug is on.
 
-Detalles: si stdin no es TTY, lee el prompt de stdin y lo concatena. Si stdout no es TTY, desactiva todo color. `--json` emite un evento por línea para que se pueda encadenar con `jq`.
+Details: if stdin is not a TTY, it reads the prompt from stdin and concatenates it. If stdout is not a TTY, it disables all color. `--json` emits one event per line so it can be chained with `jq`.
 
-**Cierre:** `ishakat -p "di hola" | cat` funciona en Termux. Commit: `feat(app): modo headless`
+**Closing:** `ishakat -p "say hello" | cat` works on Termux. Commit: `feat(app): headless mode`
 
-### Paso 6 · Catálogo
+### Step 6 · Catalog
 
-Discovery contra proveedores habilitados, caché atómico con TTL, merge de las tres fuentes según §4.3, cliente de models.dev con `If-None-Match`, catálogo semilla embebido, y el subcomando `ishakat models [--json]`.
+Discovery against enabled providers, atomic cache with TTL, merging the three sources per §4.3, a models.dev client with `If-None-Match`, an embedded seed catalog, and the `ishakat models [--json]` subcommand.
 
-**Cierre:** el fixture real de OmniRoute en `testdata/` produce el catálogo esperado; el arranque en frío con la red apagada devuelve el caché sin bloquearse; y con caché ausente y sin red arranca con la semilla. Commit: `feat(catalog): descubrimiento, caché y fusión de tres fuentes`
+**Closing:** the real OmniRoute fixture in `testdata/` produces the expected catalog; a cold start with the network off returns the cache without blocking; and with no cache and no network it starts with the seed. Commit: `feat(catalog): discovery, cache and three-source merge`
 
-### Paso 7 · Resolución y matcher difuso
+### Step 7 · Resolution and fuzzy matcher
 
-`catalog.Resolve(texto)` con las cuatro etapas de §4.5 y el scoring completo.
+`catalog.Resolve(text)` with §4.5’s four stages and the full scoring.
 
-Escribe este test antes que la UI del picker. Es el contrato con el requisito central del producto. Tabla mínima de casos: `son45` → `omniroute/anthropic/claude-sonnet-4-5`; `gpt5` → el `gpt-5` correcto y no `gpt-5-nano` si hay ambos; `haiku` → único match por sufijo; `smart` → resuelve por alias; un sufijo ambiguo que debe abrir el picker en vez de adivinar; y una cadena sin ningún match razonable que también abre el picker prefiltrado, nunca un error.
+Write this test before the picker’s UI. It is the contract with the product’s core requirement. Minimum table of cases: `son45` → `omniroute/anthropic/claude-sonnet-4-5`; `gpt5` → the right `gpt-5` and not `gpt-5-nano` when both exist; `haiku` → a single match by suffix; `smart` → resolves by alias; an ambiguous suffix that must open the picker instead of guessing; and a string with no reasonable match that also opens the pre-filtered picker, never an error.
 
-**Cierre:** la tabla completa pasa. Commit: `feat(catalog): resolución por alias, sufijo y difusa`
+**Closing:** the full table passes. Commit: `feat(catalog): resolution by alias, suffix and fuzzy match`
 
-### Paso 8 · Conectar engine y TUI
+### Step 8 · Wiring engine and TUI
 
-`internal/engine` con el `StreamBuf` de §7.3, el turno, los reintentos básicos y la cancelación. El puente con coalescing a 50 ms, el commit a scrollback con `tea.Printf`, el spinner con tiempo transcurrido y contador de tokens, y `esc` que cancela dejando el parcial marcado como `Aborted`.
+`internal/engine` with §7.3’s `StreamBuf`, the turn, basic retries and cancellation. The bridge with 50 ms coalescing, the commit to scrollback with `tea.Printf`, the spinner with elapsed time and token counter, and `esc` that cancels leaving the partial marked as `Aborted`.
 
-**Cierre:** cancelas a mitad de una respuesta larga y la app sigue perfectamente usable; el parcial queda en el historial marcado; el CPU vuelve a 0% al terminar el turno; y — deuda anotada en la bitácora del Paso 3 — la altura del frame que `render()` dibuja se mantiene acotada sin importar cuántos turnos ya corrieron, porque cada turno terminado se retira de `Root.transcript` en el mismo commit que lo emite con `tea.Printf`, no solo se le agrega texto encima. Sin este paso, un test ya mide 64 filas de frame tras 10 turnos cortos en una terminal de 24 filas. Commit: `feat(engine): turno con streaming coalescido y cancelación`
+**Closing:** cancel mid-way through a long response and the app stays perfectly usable; the partial stays in the history, marked; CPU returns to 0% when the turn ends; and — debt flagged in Step 3’s changelog entry— the frame height `render()` draws stays bounded no matter how many turns have already run, because every finished turn is removed from `Root.transcript` in the same commit that emits it via `tea.Printf`, not just appended text on top. Without this step, a test already measures a 64-row frame after 10 short turns in a 24-row terminal. Commit: `feat(engine): turn with coalesced streaming and cancellation`
 
-### Paso 9 · Registro de slash commands
+### Step 9 · Slash-command registry
 
-`internal/slash` con el registro como tabla de datos: nombre, alias, descripción, si acepta argumento, y la función. El parser, el dropdown de autocompletado dibujado encima del input (§9.6), y los comandos `/help`, `/clear`, `/new`, `/exit`.
+`internal/slash` with the registry as a data table: name, alias, description, whether it takes an argument, and the function. The parser, the autocomplete dropdown drawn above the input (§9.6), and the `/help`, `/clear`, `/new`, `/exit` commands.
 
-`/help` y el autocompletado se generan de la tabla. Si tienes que tocar dos sitios para agregar un comando, el diseño está mal.
+`/help` and autocomplete are generated from the table. If you have to touch two places to add a command, the design is wrong.
 
-Commit: `feat(slash): registro declarativo y autocompletado`
+Commit: `feat(slash): declarative registry and autocomplete`
 
-### Paso 10 · Picker de modelos
+### Step 10 · Model picker
 
-Overlay según §9.4: filas de dos líneas, agrupación por proveedor, búsqueda incremental sobre el matcher del Paso 7, `ctrl+f` para ciclar filtros, `ctrl+O` para rotar favoritos, badges de gratis/costo/latencia. Recibe un snapshot del catálogo y no toca la red jamás. Devuelve un único mensaje `modelChosenMsg{Ref string}`.
+Overlay per §9.4: two-line rows, grouping by provider, incremental search over Step 7’s matcher, `ctrl+f` to cycle filters, `ctrl+O` to rotate favorites, free/cost/latency badges. It receives a catalog snapshot and never touches the network. It returns a single `modelChosenMsg{Ref string}` message.
 
-**Cierre:** `/model` sin argumentos abre; `/model son45` cambia directo con línea de confirmación; `/model son` abre prefiltrado. Commit: `feat(tui): selector de modelos con búsqueda difusa`
+**Closing:** `/model` with no arguments opens it; `/model son45` switches directly with a confirmation line; `/model son` opens pre-filtered. Commit: `feat(tui): model picker with fuzzy search`
 
-### Paso 11 · Cambio en caliente
+### Step 11 · Hot swap
 
-`engine.CheckSwap` como función pura (§4.6) y el diálogo de conflicto de §9.5.
+`engine.CheckSwap` as a pure function (§4.6) and §9.5’s conflict dialog.
 
-**Cierre:** el test unitario de "142k tokens hacia una ventana de 128k" ofrece compactar y, aceptando, el siguiente mensaje llega bien al modelo nuevo. Los tres tipos de conflicto tienen test. Commit: `feat(engine): verificación de cambio de modelo en caliente`
+**Closing:** the "142k tokens toward a 128k window" unit test offers to compact and, on accepting, the next message reaches the new model fine. All three conflict types have a test. Commit: `feat(engine): hot-swap verification`
 
-### Paso 12 · `/compact` del lado del cliente
+### Step 12 · Client-side `/compact`
 
-Resumen de los turnos antiguos con `compact_model`, conservando `keep_last_turns` íntegros, reemplazando el bloque por un `BlockSummary`, con fallback a `drop-oldest` si el resumen falla. Disparo automático al cruzar `trigger_pct`.
+Summarizing old turns with `compact_model`, keeping `keep_last_turns` intact, replacing the block with a `BlockSummary`, with a fallback to `drop-oldest` if the summary fails. Automatic trigger on crossing `trigger_pct`.
 
-Se hace del lado del cliente a propósito, sin delegar en la compresión del gateway, para que funcione igual contra OmniRoute, contra OpenAI directo o contra lo que sea.
+It is done client-side on purpose, without delegating to the gateway’s compression, so it works the same against OmniRoute, against OpenAI directly, or against anything else.
 
-**Cierre:** compactar y seguir conversando mantiene la coherencia; el footer refleja el contexto nuevo; el JSONL conserva el historial completo y el resumen declara qué rangos reemplaza. Commit: `feat(convo): compactación con resumen y fallback`
+**Closing:** compacting and continuing the conversation keeps coherence; the footer reflects the new context; the JSONL keeps the full history and the summary declares which ranges it replaces. Commit: `feat(convo): compaction with summary and fallback`
 
-### Paso 13 · Cierre de la Fase 2
+### Step 13 · Closing Phase 2
 
-Historial de input navegable con flechas, `/copy` y `ctrl+y` vía `tea.SetClipboard` (OSC52), `/retry`, `/stats`, `ishakat doctor` completo, `ishakat --resume`. Y la pasada de aceptación en Termux desde cero contra la lista de la §11.
+Input history navigable with arrows, `/copy` and `ctrl+y` via `tea.SetClipboard` (OSC52), `/retry`, `/stats`, a complete `ishakat doctor`, `ishakat --resume`. And the acceptance pass on Termux from scratch against §11’s list.
 
-**Estado real al empezar el paso, verificado contra el código:** el historial de
-input, `/copy`, `ctrl+y`, `/retry` y `/stats` ya aterrizaron en el PR #29;
-`ishakat doctor` existe y reporta red, rutas y dialectos. **Lo que falta es
-`--resume`, y falta más de lo que su nombre sugiere.**
+**Real state at the start of the step, verified against the code:** input
+history, `/copy`, `ctrl+y`, `/retry` and `/stats` already landed in PR #29;
+`ishakat doctor` exists and reports network, paths and dialects. **What is
+missing is `--resume`, and it is missing more than its name suggests.**
 
-#### El hueco que este paso descubre: el TUI nunca guardó nada
+#### The gap this step uncovers: the TUI never saved anything
 
-`cfg.Session.Save`, `session.dir`, `keep_last` y `resume_last` se leen **solo en
-`internal/app/headless.go`**. `convo.Store` —con su `List`, `Load`, `Latest`,
-`Append` y `Rotate`, escrito y probado en el paso 2— no tiene un solo llamador en
-`internal/tui` ni en `internal/app/app.go`. `tui.Root` guarda la conversación en
-un campo `conv convo.Conversation` en memoria y la pierde al salir.
+`cfg.Session.Save`, `session.dir`, `keep_last` and `resume_last` are read **only in
+`internal/app/headless.go`**. `convo.Store` —with its `List`, `Load`, `Latest`,
+`Append` and `Rotate`, written and tested in step 2— has not a single caller in
+`internal/tui` or in `internal/app/app.go`. `tui.Root` keeps the conversation in
+a `conv convo.Conversation` field in memory and loses it on exit.
 
-O sea que **la persistencia funciona en la puerta que nadie mira y falta en la
-que todo el mundo usa.** Es el mismo patrón que el bug de los tests de frontera
-(§6.1): la pieza existía, estaba probada, y nada la conectaba — y como headless
-sí guarda, cualquier test de `convo.Store` pasaba y cualquier revisión del
-almacén se veía sana.
+In other words, **persistence works on the door nobody watches and is missing on
+the one everybody uses.** It is the same pattern as the boundary-test bug
+(§6.1): the piece existed, was tested, and nothing wired it up — and since
+headless does save, any `convo.Store` test passed and any review of the store
+looked healthy.
 
-Por qué no se notó antes: `[session] save = true` es el default, así que la
-configuración *promete* que se guarda; `ishakat -p` efectivamente guardaba; y el
-único síntoma —cerrar el TUI y no encontrar la sesión— se confunde con «todavía
-no está el `--resume`». La conclusión incómoda es que **`--resume` no era una
-función pendiente sino la primera que iba a intentar leer algo que nunca se
-escribió.**
+Why it went unnoticed: `[session] save = true` is the default, so the
+configuration *promises* it saves; `ishakat -p` did in fact save; and the
+only symptom —closing the TUI and not finding the session— gets confused with
+"`--resume` just isn't there yet." The uncomfortable conclusion is that
+**`--resume` was not a pending feature but the first one that was going to try
+to read something that was never written.**
 
-Orden obligado, entonces, y no es el del enunciado original:
+Mandatory order, then, and it is not the original statement's order:
 
-1. ✅ **Persistir desde el TUI.** `convo.Store` cableado en `app.Run` vía
+1. ✅ **Persist from the TUI.** `convo.Store` wired into `app.Run` via
    `tui.Recorder` (`internal/tui/session.go` + `internal/app/session.go`),
-   respetando `[session] save`, `dir` y `keep_last`. Un append por mensaje
-   **completo** — en `submit` para el turno del usuario, en `finishTurn` para
-   la respuesta —, nunca durante el streaming (§10): el archivo no crece token
-   a token, así que un `kill -9` a mitad de respuesta deja como máximo una
-   línea de menos, nunca una línea partida. El archivo de sesión se crea
-   perezosamente en el primer `Append` (no en `NewRoot`), porque ahí es donde
-   existe por fin un texto con el que titular la sesión — la misma regla de
-   `titleFrom` que headless ya seguía, aplicada a un llamador que no tiene el
-   prompt completo de antemano. Cubierto por tests en ambos paquetes
-   (`internal/tui/session_internal_test.go`,
+   honoring `[session] save`, `dir` and `keep_last`. One append per **complete**
+   message — in `submit` for the user's turn, in `finishTurn` for the
+   response—, never during streaming (§10): the file does not grow token by
+   token, so a `kill -9` mid-response leaves at most one missing line, never a
+   split line. The session file is created lazily on the first `Append` (not
+   in `NewRoot`), because that is where a text finally exists to title the
+   session with — the same `titleFrom` rule headless already followed, applied
+   to a caller that does not have the full prompt up front. Covered by tests
+   in both packages (`internal/tui/session_internal_test.go`,
    `internal/app/session_test.go`).
-2. ✅ **`--resume` y `resume_last`.** `app.ResumeSession` (`internal/app/session.go`)
-   carga la sesión más reciente vía `convo.Store.Latest()` cuando se pasa
-   `--resume` (flag nuevo en `cmd/ishakat/main.go`) o cuando `[session]
-   resume_last = true`; `ErrNotFound` (nada que reabrir) no es una advertencia,
-   es el estado normal de una instalación nueva. `app.Run` pasa el historial
-   cargado a `tui.Options.History` — que ya sabía volcarlo al transcript y a
-   `m.conv` desde la sesión anterior, ver `internal/tui/resume.go` — y
-   reutiliza el mismo `*convo.Store` y la misma `*convo.Conversation` para
-   construir el `Recorder`: `sessionRecorder.Append` solo crea una
-   conversación nueva cuando `conv == nil`, así que una sesión reanudada
-   anexa al archivo existente desde su primer `Append`, nunca crea un
-   segundo. Cubierto por tests nuevos en `internal/app/session_test.go`
+2. ✅ **`--resume` and `resume_last`.** `app.ResumeSession` (`internal/app/session.go`)
+   loads the most recent session via `convo.Store.Latest()` when `--resume` is
+   passed (new flag in `cmd/ishakat/main.go`) or when `[session]
+   resume_last = true`; `ErrNotFound` (nothing to reopen) is not a warning, it
+   is the normal state of a fresh install. `app.Run` passes the loaded
+   history to `tui.Options.History` — which already knew how to dump it into
+   the transcript and into `m.conv` from the previous session, see
+   `internal/tui/resume.go` — and reuses the same `*convo.Store` and the same
+   `*convo.Conversation` to build the `Recorder`: `sessionRecorder.Append`
+   only creates a new conversation when `conv == nil`, so a resumed session
+   appends to the existing file from its very first `Append`, never creating
+   a second one. Covered by new tests in `internal/app/session_test.go`
    (`TestResumeSession*`, `TestSessionRecorderAppendsToAResumedConversation`).
-3. ✅ **`/resume`.** El menú lee solo la cabecera de cada archivo y carga el
-   completo únicamente al elegir (§10), vía la interfaz nueva
-   `tui.SessionLister` (`List`/`Load` — la misma división "listar es
-   barato, cargar es diferido" que `convo.Store` ya traza en sus propios
-   métodos), implementada sobre `*convo.Store` en `internal/app/session.go`
-   y cableada en `internal/tui/root.go`/`resumemenu.go`: `ModeResume` es un
-   overlay plano, sin agrupar ni filtrar (a diferencia de `Picker`, una
-   sesión no tiene el desglose por proveedor/tier que un modelo sí), con
-   `runResumeCommand` como punto de entrada de `/resume` (`slash.KindResume`)
-   y `applySessionChosen` como el único destino de `sessionChosenMsg` —
-   reescribe `m.conv` y `m.transcript` a la vez, el mismo escritura-en-dos-
-   sitios que `NewRoot` ya hace con `Options.History`. Cubierto por tests en
-   ambos paquetes (`internal/tui/resumemenu_internal_test.go`,
+3. ✅ **`/resume`.** The menu reads only each file's header and loads the
+   complete file only when one is chosen (§10), via the new
+   `tui.SessionLister` interface (`List`/`Load` — the same "listing is
+   cheap, loading is deferred" split `convo.Store` already draws in its own
+   methods), implemented over `*convo.Store` in `internal/app/session.go`
+   and wired into `internal/tui/root.go`/`resumemenu.go`: `ModeResume` is a
+   flat overlay, with no grouping or filtering (unlike `Picker`, a session
+   has no provider/tier breakdown the way a model does), with
+   `runResumeCommand` as `/resume`'s entry point (`slash.KindResume`)
+   and `applySessionChosen` as `sessionChosenMsg`'s single destination —
+   it rewrites `m.conv` and `m.transcript` at once, the same write-in-two-
+   places `NewRoot` already does with `Options.History`. Covered by tests in
+   both packages (`internal/tui/resumemenu_internal_test.go`,
    `internal/tui/session_internal_test.go`'s
    `TestOptionsSessionListerIsWiredIntoRoot`, `internal/app/session_test.go`'s
-   `TestNewSessionLister*`). Cierra el orden obligado de esta sección.
-4. ✅ **`/models`.** `slash.KindModels` (nuevo, `internal/slash/slash.go`) con su
-   `case` real en `slashrun.go`'s `runSlashCommand`; el render vive en
-   `internal/tui/models.go` — reimplementado sobre las propias etiquetas de
-   `picker.go` (`contextLabel`, `costLabel`, `capsLabel`) en vez de importar
-   `internal/app/models_cmd.go`, porque ese paquete arrastra `net/http`
-   transitivamente y `TestTUINoImportaHTTP` (§6.1) lo prohíbe en el cierre de
-   `internal/tui`. Agrupado por proveedor igual que `ishakat models`, con el
-   modelo activo marcado y el mismo aviso de catálogo *stale*/*seeded* que ya
-   dibuja el picker (`catalogNotice`). Cubierto por
+   `TestNewSessionLister*`). Closes this section's mandatory order.
+4. ✅ **`/models`.** `slash.KindModels` (new, `internal/slash/slash.go`) with its
+   real `case` in `slashrun.go`'s `runSlashCommand`; the render lives in
+   `internal/tui/models.go` — reimplemented over `picker.go`'s own labels
+   (`contextLabel`, `costLabel`, `capsLabel`) instead of importing
+   `internal/app/models_cmd.go`, because that package transitively drags in
+   `net/http` and `TestTUINoImportaHTTP` (§6.1) forbids it inside
+   `internal/tui`. Grouped by provider just like `ishakat models`, with the
+   active model marked and the same *stale*/*seeded* catalog notice the
+   picker already draws (`catalogNotice`). Covered by
    `internal/tui/models_internal_test.go`.
 
-**Alcance recortado, decisión explícita:** `/config` y `/debug` se reasignan al
-paso 18 (§13, §17) — cada uno tiene ya un equivalente cómodo desde el binario
-(`ishakat config check`, `ishakat doctor`) y `/config` en particular tiene un
-diseño propio de tres capas en `docs/DESIGN-model-curation.md` que lo convierte
-en un mini-proyecto; bloquear el cierre de este paso — y por lo tanto 13bis —
-detrás de eso mueve el gate de sitio sin necesidad. Su `KindUnimplemented`
-ahora nombra el remedio real (`unimplementedNotice` en `slashrun.go`) en vez
-de un no-op silencioso — el pendiente sigue siendo honesto, no ambiguo.
+**Trimmed scope, an explicit decision:** `/config` and `/debug` are reassigned
+to step 18 (§13, §17) — each already has a comfortable equivalent from the
+binary (`ishakat config check`, `ishakat doctor`), and `/config` in particular
+has its own three-layer design in `docs/DESIGN-model-curation.md` that turns
+it into a mini-project; blocking this step's closing — and therefore 13bis —
+behind that would move the gate for no reason. Its `KindUnimplemented` now
+names the real remedy (`unimplementedNotice` in `slashrun.go`) instead of a
+silent no-op — the pending item stays honest, not ambiguous.
 
-**Pendiente todavía, y es lo único que falta para dar por cerrado el criterio
-completo de aceptación de la Fase 2 (§11):** la pasada de uso real en Termux
-contra la lista literal de esa sección. No bloquea el cierre de este paso —
-13bis es el siguiente gate — pero sí bloquea el cierre de la Fase 2 misma.
+**Still pending, and it is the only thing left to declare Phase 2's full
+acceptance criterion (§11) closed:** the real-usage pass on Termux against
+that section's literal list. It does not block this step's closing —
+13bis is the next gate — but it does block Phase 2's own closing.
 
-Commit: `feat: cierre de fase 2 + tag v0.1.0`
+Commit: `feat: close phase 2 + tag v0.1.0`
 
 ---
 
@@ -2629,7 +2628,7 @@ Actualizar al cerrar cada paso. Una línea por entrada: fecha, paso, resultado, 
 | 2026-08-11 | §11 fix · Step 21's roadmap row corrected to distinguish "meta-tools/governance closed" from "rung-2 script tools not started" | Auditing §11 against §13's own governance rule ("la fuente de verdad es la tabla `Commands` mas el `switch`... un `Kind` que no tiene `case` alli no esta implementado, diga lo que diga esta seccion") after `/skills` closed surfaced a second, larger instance of the same drift: §11's Step 21 row still read "**Script tools (rung 2)** + `tool_create`/`probe`/`edit` + quarantine + audit + governance", with no "— CLOSED" suffix, while the two Bitácora entries directly below it (`tool_archive`/`tool_revive`, then `toolapprove.go`) both declare "Step 21's backlog now fully empty" / "every item ... is closed." Both statements cannot be true at once. Checked the code: `internal/tools/tool_create.go` and `tool_probe.go` each say, in their own doc comments, "Only rung 1 (declarative `tool.toml`, no `run.py` sidecar) is written/probed here ... a future rung-2 script-tool executor"; `grep` for `run.py`/`run.sh`/`exec.Command` across `internal/tools` finds nothing outside `bash.go`'s unrelated shell tool and comments describing the *absence* of a rung-2 executor. §16's own "Embedded Starlark for script tools" entry is explicit: "**Explicitly undecided — do not implement without a decision**" between Python (needs a runtime Termux does not ship) and Starlark (one new dependency, §6.4 tradeoff) — a product decision this session has no standing to make unilaterally, and the reason rung 2 was never touched across PRs #101-#109 despite seven of them landing under the Step 21 banner. **Fix, docs only, no code changed:** the row now reads "`tool_create`/`probe`/`edit`/`archive`/`revive`/`delete` + quarantine + audit + governance (§19.6/§19.7) — **CLOSED for rung 1**, see §17 2026-08-11 · **script tools (rung 2) not started**, blocked on §16's open Starlark/Python decision", with the "deja funcionando" column split the same way (✅ for the rung-1 self-extension governance layer, ⬜ for rung 2 with the same two-file citation). This is deliberately the narrowest correct fix: renaming the row rather than either (a) leaving "Step 21 closed" standing, which would make a future reader believe rung-2 execution exists and go looking for a `script.go` that is not there, or (b) reopening Step 21 as a whole, which would understate the real, tested, seven-PR governance layer that is genuinely done. No `gofmt`/`build`/`vet`/`test` gate applies (documentation-only); the full suite was re-run anyway after the merge below and stayed green, 20/20 packages. |
 | 2026-08-11 | Step 21 · self-extension — the five meta-tools, gate 1, the usage ledger, and the on-disk lifecycle state machine — closed | §19's crystallization ladder's rung 2/3 machinery, landed across seven PRs (#101-#107), none of which had a Bitácora entry until now — flagged as a gap by the 2026-08-10 `tool_edit` commit message itself ("docs/PLAN.md Section 17 Bitácora entries for Step 21's work so far") and closed here in one pass covering all seven. **PR #101** shipped the foundations gate 1 and the meta-tools both need before either can exist: `internal/evolve` (new package, zero deps on `internal/config`/`internal/tools`, matching this codebase's "minimal, purpose-built argument" boundary already established for `tools.Fetch`'s egress allowlist) implements §19.6's gate 1 — `Evaluate(thresholds, candidate, existing)` runs all five criteria (repetition, no-duplicate via Jaccard similarity, stability, budget, profitability) and collects every failing reason rather than stopping at the first; `Origin` (`OriginAgent`/`OriginUserDeclared`/`OriginUserForced`) encodes §19.6's asymmetry rule for which criteria apply per origin. `internal/app/evolve.go` is the boundary translating `config.Evolve`/`config.Tools.MaxTools` and a live `*tools.Registry` into gate 1's inputs. `internal/evolve/ledger.go` implements §19.7's usage-observation mechanism: `Observe(raw, today)` merges a new bash/fetch invocation into a JSONL ledger by shape, wildcarding a token position on its first disagreement and never un-wildcarding it later — reproduces both of §19.7's worked examples (the bybit curl query-string case and the ffmpeg in/out-filename case) byte-for-byte; `LoadLedger`/`Save` round-trip atomically to `xdg.UsageFile()` (new `internal/xdg` path helper). `internal/tools/lifecycle.go` implements §19.5's full state diagram (`proposal → unverified —probe→ verified → in use → promoted`, plus `broken`/`archived`) as `ToolState` with `Probe`/`Edit`/`RecordUse`/`Archive`/`Revive` transitions, `ComputeHash`/`DetectTamper` for §19.8 mitigation 6 (an out-of-band edit to a verified tool's files demotes it back to unverified), and `LoadState`/`SaveState` as an atomic JSON sidecar next to `tool.toml` — a missing sidecar is the zero-value "never probed" `StateUnverified`, not an error, matching §19.5 rule 1 by construction. 93 new tests total (17 gate1, 6 evolve.go boundary, 26 ledger, 44 lifecycle). **PRs #102-#106** then implemented the five meta-tools from §19.5's table, one per PR, each a standalone `Tool` value in its own file: `tool_list` (#102, read-only, `DangerLow`, no gate needed since nothing is written or executed by a listing); `tool_probe` (#103, gate 3 — also added the `[selftest]` manifest field `declarative.go` had accepted-and-ignored since Step 20 — runs the tool's real request once, checks `[selftest].expect` as a substring when set, and is the only path that can move a tool from unverified/broken to verified); `tool_create` (#104, gate 1 plus the write path — unconditionally `DangerHigh` per §19.8 mitigation 1, mandatory `reason`/`sources` provenance per mitigation 2, egress-allowlist enforcement at creation time per mitigation 4, and a structural exfiltration hard block on credential-shaped paths — `.ssh`, `.aws`, `.env`, `config.toml`, etc. — per mitigation 5); `tool_edit` (#105, an exact-string `old_string`/`new_string` patch to the raw `tool.toml` text mirroring `edit_file`'s own convention, re-parses and re-runs the same §19.8 safety checks `tool_create` uses via a newly-shared `checkManifestSafety` helper, then demotes the tool back to unverified so `tool_probe` must re-run before reuse); `tool_delete` (#106, the fifth and last, gated only by a mandatory `Confirm bool` with no safe default — an omitted confirm reads as `false`, matching this codebase's existing "no safe reading, only a coin flip" rule for irreversible actions — deliberately does not hard-block deleting an in-use tool, since no meta-tool exposes `Archive`/`Revive` yet and blocking with no escape hatch would be worse than the risk guarded against). 26+13+16+9+13 new tests across the five (tool_create's suite also covers the shared safety-check extraction). **PR #107** closed the gap every one of the above still had: none of the five meta-tools were reachable by the actual running agent, only by their own unit tests. `internal/tools.WithMetaTools` registers `tool_list`/`tool_probe`/`tool_edit`/`tool_delete` unconditionally whenever `cfgTools.Dir != ""` (no Mode/TTY gating — none of the four acquire a new capability, they only observe/verify/fix/remove something already on disk, so §19.6/§19.7/§19.8's governance is out of scope for them), while `tool_create` is gated by `EvolveMode != "off" AND (HasTTY || AllowWithoutTTY)` — failing either condition means `tool_create` is fully **absent** from the registry, not present-and-refusing, per §19.7's own "with no TTY, tool_create is denied, full stop" extended to "a tool that doesn't exist can't be talked into being called by adversarial context." `buildAgentOptions` gained a `hasTTY bool` parameter (TUI passes the real `!noTTY`; headless always passed `false` at the time, since headless's `permissions.Guard` always had a `nil` reviewer — this is the exact gap `--allow-tool-create` closed the day after, in the very next Bitácora entry above). 8 new tests in `registry_test.go` covering every gating branch. **Verification, all seven PRs:** `gofmt -l .`, `go build ./...`, `go vet ./...` and `go test ./...` green across the whole module after every commit, 20/20 packages. **Still open, explicitly flagged in-line by more than one of these PRs' own commit messages, not silently dropped:** `internal/tui/toolapprove.go`'s richer manifest+provenance dialog view (the interactive approval surface still shows whatever generic dialog Step 16 built, not a self-extension-aware one); `evolve.Ledger` wiring for real repetition evidence (the package and its `Observe`/`CountFor` exist and are fully tested in isolation, but nothing outside `internal/evolve` itself calls them — `bash`/`fetch` do not record an observation on every call, so gate 1's `Candidate.Repetitions` field has no live data source yet); `tool_archive`/`tool_revive` meta-tools (`lifecycle.go`'s `Archive`/`Revive` are implemented and tested as pure state transitions, but no meta-tool exposes either, which is precisely why `tool_delete`'s own doc comment names this as the reason it cannot yet hard-block deleting an in-use tool). |
 | 2026-08-12 | Step 22 · `dispatch` (sub-agents) — closed | §19.1's eighth and last core tool, and §3's own one-line summary of the whole mechanism: "Sub-agents (dispatch, Step 22) are goroutines with isolated context, not a scheduler." Landed across two PRs. **PR #110** shipped the core implementation. `internal/tools/dispatch.go` adds `Dispatch` (unconditionally `DangerHigh`, per §19.5 rule 2 — a tier is inferred from what a tool *can* do, and a sub-agent's own registry may itself contain `bash`/`write_file`/another `dispatch`) and `SubAgentRunner`, a plain `func(ctx, task) (string, error)` injected onto `Dispatch.Runner` rather than imported — this package cannot import `internal/engine`/`internal/provider` (`internal/arch_test.go`'s boundary rules) without risking the exact import cycle `internal/app`'s own position exists to avoid. `internal/tools/registry.go` wires it into `WithMetaTools` via a new `MetaToolsOptions.DispatchRunner` field, gated only on non-nil (no `Mode`/`TTY` check the other meta-tools need, since dispatch acquires no new capability of its own — whatever it can do, the sub-agent's own registry and `permissions.Guard` already gate). `internal/permissions/guard.go` gives `dispatch` an explicit case in `tierFor`/`isNativeToolName`/`mode` (High, native, `Shell`'s policy knob) — spelled out rather than left to the default fallthrough, for the same reason `bash`'s own case is explicit: legible as the eight-tool table §19.1 documents. `internal/app/dispatch.go` is the actual capability: `newSubAgentRunner(eng, model, system, cfgTools, guard, cost, hasTTY)` closes over the parent turn's already-resolved `*engine.Engine` and reuses it as-is for a second, independent `RunAgentTurn` call — `*engine.Engine` holds no mutable per-call state, so this is no different from two ordinary turns happening one after another — against a **fresh, one-message `*convo.Conversation`** seeded with nothing but the task string (§3's entire meaning of "isolated context": a long parent history never bleeds into, or inflates the cost of, a delegated task). `buildAgentOptions`'s own recursive call inside the closure always passes a `nil` `SubAgentRunner`, which is what caps dispatch's recursion at exactly one level — a sub-agent gets every other tool the parent's configuration would offer it (same registry, same Guard, so the same approval surface authorizes its own writes/bash calls too), but can never itself see a `dispatch` entry to call. A `select` over `ctx.Done()` vs. a buffered result channel gives the caller responsive cancellation without depending on the sub-agent's own blocked call (its own `bash`, its own `fetch`) to notice on its own schedule — the entire `goroutines, context, sync`-only budget §6.4 allots this step is spent exactly here. Wired into both real call sites, `app.go`'s `Run` and `agentturn.go`'s `runAgentTurnHeadless`. **PR #111** closed the two follow-ups PR #110's own description had left open. First: `internal/app/dispatch_e2e_test.go`, the dispatch-specific sibling of `toolchain_e2e_test.go` — a fake HTTP server plays a *three*-request exchange (not two, like Step 16's own `twoTurnToolServer`): the parent's first turn asks for `dispatch`, the sub-agent's own isolated `RunAgentTurn` call resolves against the same server (told apart from the parent's requests by request content — a `role:"tool"` message, or the sub-agent's own task marker — not by counting, so a broken chain cannot accidentally keep passing), and the parent's second turn consumes the result. `TestDispatchSubAgentRoundTripsThroughToolResult` builds a *real* `newSubAgentRunner` closure — the actual production function, reusing the same `*engine.Engine` and provider the parent turn itself uses — and asserts the `BlockToolResult` for `dispatch` in history is literally the sub-agent's own answer, produced by its own nested turn, and that the parent's second turn actually used it to answer; a second test, `TestDispatchWithoutRunnerReportsAsToolErrorNotPanic`, pins `newSubAgentRunner`'s own documented `eng == nil` failure mode as tool-error data the model can react to, never a panic. This is exactly the gap Step 16's bug report (§17 2026-08-09) named for the tool-calling loop in general — every individual link (the Runner's own unit test, the registry wiring test, the guard's tier test) can pass while nothing proves the links are actually connected to each other — closed here for dispatch specifically before it could ship the same way. Second: this entry and the §11 status-table row above it, marking Step 22 **CLOSED**. **Verification:** `gofmt -l .`, `go build ./...`, `go vet ./...` and `go test ./...` green across the whole module, 20/20 packages, plus a targeted run of all five `internal/arch_test.go` boundary tests (`TestTUINoImportaHTTP`, `TestProviderNoImportaPresentacion`, `TestConvoEsPuro`, `TestEngineNoImportaProvider`, `TestToolsNoImportaTUI`) confirming dispatch's wiring did not cross any package boundary the architecture forbids. **Nothing left open for this step:** all eight of §19.1's core tools now exist, are registered, and are covered end to end — `read_file`/`write_file`/`edit_file`/`bash`/`glob`/`grep` since Step 15/16, `fetch` since Step 19, `dispatch` as of this entry. |
-| 2026-08-12 | Step 23 · `ishakat serve` (NDJSON/WebSocket) — closed | The third of §1's three front doors — "one brain, three doors: TUI, headless `-p`, and now `serve`" — landed in a single PR (#111). The premise, spelled out in `serve.go`'s own package doc comment, is that the engine never learns which door drove it: `Serve` reuses the exact same `runAgentTurnHeadless`/`runTurn`/`ResolveModelForBoot`/`SystemPrompt` machinery headless's own door already established, rather than deriving a third "config → provider → turn → persist" pipeline from scratch. `internal/app/serve.go` (795 lines) is built around four pieces. `wsServer` (`net/http.Handler`) accepts a WebSocket upgrade per connection (`checkBearerToken` gating on `ServeOptions.BearerToken` via `crypto/subtle.ConstantTimeCompare`, never a plain `==`, since a socket token compared with a timing side channel defeats the point of having one), tracks live sessions in a mutex-guarded map for `MaxSessions` enforcement and `closeAll` on shutdown, and hands each accepted connection to a fresh `serveSession`. `serveSession.run` is the session's own event loop: it reads NDJSON `clientMsg` frames (`prompt`, `permission_response`, `cancel`) off the `wsproto.Conn`, and `handlePrompt` calls `runTurn` exactly as headless's own turn loop does, streaming results back out as `serveEvent` frames (`meta`, `delta`, `reasoning`, `tool`, `toolResult`, `usage`, `warn`, `fail`, `done`) via `wsSink`, the `engine.Sink` implementation for this door — the fourth of the sink implementations alongside the TUI's Bubble Tea messages and headless's own NDJSON-to-stdout sink, all three driving the identical `engine.Sink` interface §1's "one brain" framing describes. The one genuine design decision, not just plumbing: `serveReviewer` (implementing `permissions.Reviewer`) is real and non-nil, unlike headless's own `permissions.New(..., nil)` call that fails every `tool_create` request closed per §19.7's "no human, no self-extension" rule — over `serve`, a connected client is a real decision-maker, so `serveReviewer.Review` sends a `permission_request` event and blocks (via `registerPending`/`resolvePending`, a map of pending request IDs to result channels, mirroring `toolReviewer`'s own tea.Program round trip for the TUI) until a matching `permission_response` frame arrives or the context is cancelled — the socket itself stands in for the TTY confirm dialog. `cmd/ishakat/serve.go` (49 lines) wires the CLI: `--addr`, `--token` (falls back to `[serve].bearer_token` in config), `--max-sessions`, `--idle-timeout`, matching the `[serve]` schema added to `internal/config/schema.go`/`defaults.toml` and both copies of `example.toml` (`config.example.toml` at the repo root and `internal/config/example.toml`, kept byte-identical by `TestExampleTOMLInSync`). Underneath all of this sits `internal/wsproto`, a new package: a minimal, stdlib-only (no `gorilla/websocket`, no third-party dependency — §6.4's own bias toward the standard library wherever it is not unreasonably more work) implementation of RFC 6455, `dial.go` for the client handshake, `handshake.go` for the server-side `Upgrade`, and `wsproto.go` for the shared `Conn` type's frame read/write/mask/close logic. Two real `go test -race` failures surfaced and were fixed inside `wsproto.go` before the PR closed: `Conn.closed` changed from a plain `bool` guarded by nothing to an `atomic.Bool`, with `Close()` using `CompareAndSwap(false, true)` so two goroutines racing to close the same connection (the read loop noticing EOF and the write side noticing a cancelled context, the exact shape a `serveSession` juggling reads and writes concurrently produces) cannot both believe they are the one tearing it down; and a new `writeMu sync.Mutex` field now serializes every `writeFrame` call, since concurrent event frames (a `delta` chunk arriving from the engine at the same moment a `permission_request` needs to go out) sharing one `net.Conn` without a lock is a textbook interleaved-write data race, not merely a benign reordering. `internal/app/serve_test.go` (512 lines, 8 tests, all offline against a real `net.Listener` and a fake provider — no network, matching every other e2e test's own discipline) exercises the door end to end: `TestServeRoundTripsAPromptToDone` (a full prompt → delta → done cycle over a real WebSocket client), `TestServePermissionRoundTrip` and `TestServePermissionRoundTripDenied` (a tool call that requires approval, answered over the socket both ways), `TestServeRejectsWrongToken`/`TestServeRejectsMissingToken`/`TestServeAcceptsCorrectToken` (the bearer-token gate), `TestServeEnforcesMaxSessions` (the Nth+1 connection refused), and `TestServeIdleTimeoutClosesConnection` (a session with no traffic past `IdleTimeout` is closed server-side, so a dropped client without a clean close does not leak a goroutine forever). **Verification:** `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`, and `go test -race ./...` all green across the whole module, 21/21 packages plus `cmd/ishakat`, including the two wsproto races fixed above and a targeted run of all five `internal/arch_test.go` boundary tests confirming `internal/wsproto`'s new package does not cross any forbidden boundary (in particular, `internal/tools` still does not import `internal/tui` — the property that makes a third front door possible at all without the TUI leaking into it, now stated as this repo's fifth boundary rule in README.md rather than only in §6.1's prose). **Nothing left open for this step:** all three front doors — TUI, headless `-p`, and `serve` — now exist, are wired into the same engine loop, and are covered by their own end-to-end test suite; `--resume` (step 13) and `/login` (step 24) remain separately tracked, untouched by this entry. |
+| 2026-08-12 | Step 23 · `ishakat serve` (NDJSON/WebSocket) — closed | The third of §1's three front doors — "one brain, three doors: TUI, headless `-p`, and now `serve`" — landed in a single PR (#111). The premise, spelled out in `serve.go`'s own package doc comment, is that the engine never learns which door drove it: `Serve` reuses the exact same `runAgentTurnHeadless`/`runTurn`/`ResolveModelForBoot`/`SystemPrompt` machinery headless's own door already established, rather than deriving a third "config → provider → turn → persist" pipeline from scratch. `internal/app/serve.go` (795 lines) is built around four pieces. `wsServer` (`net/http.Handler`) accepts a WebSocket upgrade per connection (`checkBearerToken` gating on `ServeOptions.BearerToken` via `crypto/subtle.ConstantTimeCompare`, never a plain `==`, since a socket token compared with a timing side channel defeats the point of having one), tracks live sessions in a mutex-guarded map for `MaxSessions` enforcement and `closeAll` on shutdown, and hands each accepted connection to a fresh `serveSession`. `serveSession.run` is the session's own event loop: it reads NDJSON `clientMsg` frames (`prompt`, `permission_response`, `cancel`) off the `wsproto.Conn`, and `handlePrompt` calls `runTurn` exactly as headless's own turn loop does, streaming results back out as `serveEvent` frames (`meta`, `delta`, `reasoning`, `tool`, `toolResult`, `usage`, `warn`, `fail`, `done`) via `wsSink`, the `engine.Sink` implementation for this door — the fourth of the sink implementations alongside the TUI's Bubble Tea messages and headless's own NDJSON-to-stdout sink, all three driving the identical `engine.Sink` interface §1's "one brain" framing describes. The one genuine design decision, not just plumbing: `serveReviewer` (implementing `permissions.Reviewer`) is real and non-nil, unlike headless's own `permissions.New(..., nil)` call that fails every `tool_create` request closed per §19.7's "no human, no self-extension" rule — over `serve`, a connected client is a real decision-maker, so `serveReviewer.Review` sends a `permission_request` event and blocks (via `registerPending`/`resolvePending`, a map of pending request IDs to result channels, mirroring `toolReviewer`'s own tea.Program round trip for the TUI) until a matching `permission_response` frame arrives or the context is cancelled — the socket itself stands in for the TTY confirm dialog. `cmd/ishakat/serve.go` (49 lines) wires the CLI: `--addr`, `--token` (falls back to `[serve].bearer_token` in config), `--max-sessions`, `--idle-timeout`, matching the `[serve]` schema added to `internal/config/schema.go`/`defaults.toml` and both copies of `example.toml` (`config.example.toml` at the repo root and `internal/config/example.toml`, kept byte-identical by `TestExampleTOMLInSync`). Underneath all of this sits `internal/wsproto`, a new package: a minimal, stdlib-only (no `gorilla/websocket`, no third-party dependency — §6.4's own bias toward the standard library wherever it is not unreasonably more work) implementation of RFC 6455, `dial.go` for the client handshake, `handshake.go` for the server-side `Upgrade`, and `wsproto.go` for the shared `Conn` type's frame read/write/mask/close logic. Two real `go test -race` failures surfaced and were fixed inside `wsproto.go` before the PR closed: `Conn.closed` changed from a plain `bool` guarded by nothing to an `atomic.Bool`, with `Close()` using `CompareAndSwap(false, true)` so two goroutines racing to close the same connection (the read loop noticing EOF and the write side noticing a cancelled context, the exact shape a `serveSession` juggling reads and writes concurrently produces) cannot both believe they are the one tearing it down; and a new `writeMu sync.Mutex` field now serializes every ` call, since concurrent event frames (a `delta` chunk arriving from the engine at the same moment a `permission_request` needs to go out) sharing one `net.Conn` without a lock is a textbook interleaved-write data race, not merely a benign reordering. `internal/app/serve_test.go` (512 lines, 8 tests, all offline against a real `net.Listener` and a fake provider — no network, matching every other e2e test's own discipline) exercises the door end to end: `TestServeRoundTripsAPromptToDone` (a full prompt → delta → done cycle over a real WebSocket client), `TestServePermissionRoundTrip` and `TestServePermissionRoundTripDenied` (a tool call that requires approval, answered over the socket both ways), `TestServeRejectsWrongToken`/`TestServeRejectsMissingToken`/`TestServeAcceptsCorrectToken` (the bearer-token gate), `TestServeEnforcesMaxSessions` (the Nth+1 connection refused), and `TestServeIdleTimeoutClosesConnection` (a session with no traffic past `IdleTimeout` is closed server-side, so a dropped client without a clean close does not leak a goroutine forever). **Verification:** `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`, and `go test -race ./...` all green across the whole module, 21/21 packages plus `cmd/ishakat`, including the two wsproto races fixed above and a targeted run of all five `internal/arch_test.go` boundary tests confirming `internal/wsproto`'s new package does not cross any forbidden boundary (in particular, `internal/tools` still does not import `internal/tui` — the property that makes a third front door possible at all without the TUI leaking into it, now stated as this repo's fifth boundary rule in README.md rather than only in §6.1's prose). **Nothing left open for this step:** all three front doors — TUI, headless `-p`, and `serve` — now exist, are wired into the same engine loop, and are covered by their own end-to-end test suite; `--resume` (step 13) and `/login` (step 24) remain separately tracked, untouched by this entry. |
 
 | 2026-08-13 | Step 25 · Crystallization by observation (`ModeSuggest`) — closed | §19.7's own second half, the one the ledger wiring under Step 21 (2026-08-11 entries above) had already built the evidence for but nothing yet consumed: `usage.jsonl` was written on every `bash`/`fetch` call, and nothing ever read it back out toward the user. Landed in six commits, each `gofmt`/`go build`/`go vet`/`go test ./...` green. **`internal/evolve/suggest.go` (a5b6382)** adds the pure decision logic §19.7 specifies without any TUI or persistence dependency: `SuggestState` (`LastShown`, `SessionCount`, `WeekCount`, `ConsecutiveRejects`, per-pattern `Dismissed` set) with `RollWeek`/`RecordShown`/`RecordAcceptance`/`RecordRejection` (the last returns whether this rejection just crossed the decay threshold, so the caller can react exactly once), and `DecideSuggestion(ledger, state, thresholds, budgets)` implementing all five civility rules from §19.7 in one place: never mid-task (the caller only invokes this at `checkEndOfTurn`, never mid-turn), once per pattern ever (`Dismissed` is checked before anything else), the 1-per-session/3-per-week suggestion budget, decay to `on_request` after three consecutive rejections, and total silence with no TTY (enforced one layer up, by `NewEvolveStore` never constructing a store at all without one). Also adds `Ledger.DismissPattern`. **`internal/xdg`/`internal/config` (cbbd7db)** add `xdg.SuggestStateFile()` (sibling of the existing `UsageFile()`) and `config.SetEvolveMode`, the write-back half `Decay()` needs to actually persist a mode drop to disk rather than only in memory for the running process. **`internal/tui` (e070fac, 8aa6643)** add `ModeSuggest` to the `Mode` enum and the full overlay: `EvolveStore` interface (mirrors the `Recorder`/`SessionLister` nil-is-safe pattern — a nil store makes `checkSuggest` a pure no-op, so every existing test and every config with `evolve.mode != "suggest"` is unaffected), `checkSuggest`/`startSuggest`/`updateSuggest`/`cancelSuggest`/`resolveSuggest`/`acceptSuggestion`/`dismissSuggestion`/`renderSuggest` in the new `suggest.go`, and `checkEndOfTurn` — a new function wrapping the existing `checkAutoCompact`, called from both `finishTurn` and `finishAgentTurn`'s tails in place of `checkAutoCompact` directly, so the two overlays (`/compact`'s auto-trigger and this one) can never stack or race: `checkSuggest` only runs once a pending compact has actually settled back into `ModeChat`. Accepting a suggestion does not hand-construct a `tool_create` payload (a bare candidate has no manifest yet); it appends a natural-language prompt asking the model to propose the tool itself via `tool_create` with `origin="agent"`, then reuses `startEngineTurn`, the same machinery `/retry` drives — the existing `ModeToolApprove` gate 2 dialog intercepts the resulting call exactly as it would any other proposal, so no new approval path was needed. Dismissing calls `Ledger.DismissPattern` plus `SuggestState.RecordRejection`, and on the decay transition, `EvolveStore.Decay()` followed by a `slashNotice` announcing the mode drop — visible, never silent. **`internal/app/evolvestore.go` (65df66e)** is the concrete `fileEvolveStore` wiring `EvolveStore` to real files (`xdg.UsageFile()`/`xdg.SuggestStateFile()`, `config.SetEvolveMode`) and `NewEvolveStore(cfgTools, hasTTY)`, returning `nil` unless tools are enabled, a TTY is present, and `cfgTools.Evolve.Mode == "suggest"` — the fifth rule enforced at construction, not inside the decision logic. Wired into `app.go`'s `tui.NewRoot(tui.Options{...})` alongside the matching threshold/budget fields. **`internal/tui/suggest_internal_test.go` (39435ec)**, 11 tests against a `fakeEvolveStore` double, covering the nil-store no-op, threshold-crossing, dismissed-pattern and session-budget gating, selection movement and cancellation, the detail toggle not closing the overlay, dismiss recording a rejection and the pattern, the decay transition firing exactly once, accept appending the prompt and starting a real turn, and `checkEndOfTurn` correctly deferring behind an open compact and firing once chat is clean. `gofmt -l .`, `go build ./...`, `go vet ./...` and `go test ./...` all green across the whole module, 22/22 packages. **Verified:** `internal/arch_test.go`'s five boundary tests stay green with `internal/tui` importing `internal/evolve` for the first time — none of the five rules forbid it, since `internal/evolve` is pure (no `net/http`, no `internal/tools`/`internal/config` import cycle). Step 25 fully closed; Phase 2.5's own acceptance criterion (§11, "Ishakat implements Step 23 of itself, with a human only approving diffs") now has a mechanism upstream of it that proposes what to implement in the first place. |
 | 2026-08-13 | Fase 3, primer incremento · `/theme [nombre]` — cambio de tema en vivo — closed (sin overlay `ctrl+t`, diferido) | Fase 3's own opening sentence (§11, line ~1458) — "Temas en archivos con `/theme` en vivo" — names this as the section's first item, and `/theme` was the one remaining `KindUnimplemented` row `unimplementedNotice`'s own doc comment (`internal/tui/slashrun.go`) explicitly flagged as "reserved for Phase 3", with no CLI-equivalent stand-in message the way `/config`/`/debug`/`/login` each have. §8's theme-as-data contract (`internal/theme/theme.go`, `theme.Load`/`theme.Available`/`theme.NewStyles`) had existed fully tested since Step 3 — only the live, in-session switch was missing. Landed in two commits, PR #115. **Commit 1** adds `slash.KindTheme` to `internal/slash/slash.go`'s `Kind` enum, migrating the `/theme` row off `KindUnimplemented`. **Commit 2** is the runner: new `internal/tui/theme.go` implements `runThemeCommand` — no argument calls `listThemes`, rendering every name `theme.Available(m.themesDir)` finds (the embedded default plus anything under `xdg.ThemesDir()`), sorted, with the active theme's row marked, mirroring `runModelsCommand`'s own read-only inline-notice shape (`models.go`); a name argument calls `switchTheme`, which resolves it via `theme.Load` (never errors — an unknown or broken name degrades to the embedded default plus a `Theme.Warnings` entry, surfaced in the notice exactly as `ishakat doctor` already would) and applies it immediately by rebuilding `m.styles = theme.NewStyles(th, m.cap, m.lay.Glyphs)` — the same "value type, method returns the next Root" pattern `commitModelSwitch` already follows for `/model`. Persistence goes through a new `tui.ThemeStore` interface (`Save(name string) error`), the same §6.1 seam `EvolveStore.Decay` already draws for its own `internal/config` write — this package still never imports `internal/config`'s write path directly. `internal/config/connection.go` gains `SetTheme(name string) error`, writing `[ui].theme` with the same flat-table pattern `SetAppModel` already uses for `[app]` (contrasted with `SetEvolveMode`'s nested `[tools.evolve]` — `[ui]` is flat, like `[app]`). `internal/app/themestore.go` adds `fileThemeStore`, the concrete `ThemeStore` over `config.SetTheme`, mirroring `fileEvolveStore`'s own role for `EvolveStore.Decay`; `app.go` wires `ThemesDir: xdg.ThemesDir()` and `ThemeStore: &fileThemeStore{}` into `tui.Options`. A persistence failure does not undo the in-memory switch — `switchTheme` reports the save error alongside the confirmation line instead, the same "the display already changed, hiding that would be a worse surprise" reasoning `commitModelSwitch`'s own comment gives for a failed engine rebuild. `internal/tui/slashrun_internal_test.go`'s `TestSlashUnimplementedCommandSaysSoInsteadOfDoingNothing` — which had hardcoded `/theme dracula` as its one `KindUnimplemented` test case — was retargeted to `/config`, the exact precedent Step 10 set when `/model` itself stopped being `KindUnimplemented`; `/config` and `/debug` are now the only two rows left on that path. New tests: `internal/tui/theme_internal_test.go` (no-arg listing, named switch, unknown-name graceful degradation via a `fakeThemeStore`, `ThemeStore.Save` wiring, save-failure-still-switches) and four new cases in `internal/config/connection_test.go` for `SetTheme` (write, empty-name rejection, preserves other `[ui]` keys, second call overwrites the first). **Verification:** `gofmt -l .`, `go build ./...`, `go vet ./...` and `go test ./...` all green across the whole module, plus all five `internal/arch_test.go` boundary tests (`TestTUINoImportaHTTP` included) explicitly re-run and passing — `internal/tui` already depended transitively on `internal/xdg` via `internal/config` before this change (confirmed via `go list -deps`), so the direct `internal/theme` calls this file makes cross no boundary the architecture forbids. **Deliberately left open, deferred to a follow-up increment to keep this one small and independently verifiable:** the `ctrl+t` picker overlay — `keys.go`'s `ThemePicker: "ctrl+t"` binding, reserved since Step 13, stays unwired to any handler; §9.7's wireframe listing it and `/theme [nombre]    cambiar tema` together is only half-answered by this entry. Fase 3's remaining prose items (Markdown/Glamour, syntax highlighting/Chroma, the two "visual product idea" animations) are untouched. |
@@ -3160,7 +3159,7 @@ The governing philosophy, in one sentence:
 
 | 2026-08-08 | Step 16 · presupuesto de coste por sesión — entregable inicial | `engine.RunAgentTurn` ahora estima el coste acumulado con las tarifas del catálogo (`in`, `out`, `cache_read`, `cache_write`) y detiene el turno antes de ejecutar otra herramienta cuando alcanza `[tools].budget_usd`; el lote pendiente se cierra con resultados sintéticos para no dejar llamadas huérfanas en el historial. `internal/app/headless.go` lee las tarifas del catálogo local sin red y las inyecta en el motor. `AgentResult.CostUSD` expone el gasto estimado y el motivo de parada se muestra como cualquier otro límite. Añadida regresión que comprueba que el runner no se ejecuta al alcanzar `$0.01`. `gofmt`, `build`, `vet`, `test` y `test -race` pasan. **Step 16 continúa abierto:** falta la superficie de aprobación interactiva del TUI y la contabilidad persistente entre turnos reanudados. |
 | 2026-08-08 | Bug report · PR #82's cost budget was a silent no-op whenever the model's price was unknown (PR #83) | Reviewing the Step 16 entry above against the actual diff surfaced a real functional gap: `buildAgentOptions` (`internal/app/agentturn.go`) only copies `cost.In`/`cost.Out`/`cost.CacheRead`/`cost.CacheWrite` into `engine.AgentOptions` when `cost != nil`; when the local catalog has no `Cost` for the resolved model — a brand-new model, a stale/offline catalog, a provider whose metadata carries no price — every `*CostUSD` field stays at its zero value. `engine.estimateCost` then prices every token at zero, so `result.CostUSD` can never reach a positive `[tools].budget_usd` no matter how many tool calls run: the exact guard §15/§16 exist for (stopping a model from spending real money in minutes) was armed in config but inert in practice, with nothing printed to say so — and an *unknown* price skews toward the newest/least-vetted models, i.e. the ones most likely to need the ceiling. Fixed in `internal/app/headless.go`: when `cfg.Tools.Enabled && cfg.Tools.BudgetUSD > 0` and the resolved model's catalog cost is unknown, `Headless` now warns once on stderr that the budget cannot be enforced for this turn. The nil check is written explicitly as `modelCost == nil \|\| modelCost.Zero()` rather than `modelCost.Zero()` alone, because `catalog.Cost.Zero()`'s receiver is deliberately nil-safe and returns `false` for a nil `*Cost` — nil means "price unknown", which `Zero()`'s own doc comment already distinguishes from the genuinely-free-model case it exists to detect; a bare `Zero()` call would have silently missed the one case this fix targets. `TestHeadlessWarnsWhenBudgetCannotBePriced` added as the regression pin, confirmed red against the pre-fix code and green after. `gofmt -l .`, `go vet ./...`, `go test ./...` all green, no other package touched. |
-| 2026-08-08 | PR #85 review · persisted session cost accounting — CI failures fixed, coverage gap closed | PR #85 (`persist estimated message cost` through `test(convo): cover persisted session cost totals`) added `convo.Usage.CostUSD` persistence and seeded `engine.AgentOptions.SpentUSD` from `hist.Usage()` so a resumed session keeps its budget instead of resetting it every process launch — but every CI run on the branch was red. Two real defects, not CI flakes: (1) `gofmt -l cmd internal` failed on `internal/convo/message.go` and `internal/engine/agentloop.go` — both had misaligned struct-field whitespace from a manual edit that never ran `gofmt -w`; fixed by running `gofmt -w` on both files, no logic changed. (2) `TestUsageCostPersistsAndAccumulates` (`internal/convo/convo_test.go`) compared `float64` `CostUSD` against literal decimals with `!=`, which fails under `-race` (and deterministically, race or not) because `0.0012 + 0.0023` is `0.0034999999999999996` in IEEE-754 binary, not exactly `0.0035` — a textbook float-equality bug, unrelated to the feature's actual correctness. Fixed by comparing with an epsilon (`math.Abs(got-want) > 1e-9`) instead of `==`/`!=`, which is the correct way to assert on accumulated float64 sums; the underlying `Usage.Add` accounting itself was already correct. Separately, `dda056c` ("seed agent budget from persisted session spend") shipped with zero test coverage of its own — no test constructed a `hist` with prior `Usage.CostUSD` and checked the seed actually reached `engine.AgentOptions.SpentUSD`. Added `TestRunAgentTurnHeadlessSeedsBudgetFromPersistedSpend` in `internal/app/agentturn_test.go`: builds a `hist` whose one prior assistant message already carries `Usage.CostUSD = 0.02` against a `budget_usd = 0.01`, runs `runAgentTurnHeadless` against a fake server that always offers a tool call, and asserts the provider is hit exactly once (the budget check after the first iteration's tool calls stops the loop, using spend seeded from `hist`) with `"cost budget reached"` on stderr. Verified by mutation testing: disabled the `hist.Usage()` seed, confirmed the test fails with the provider called twice and `"loop detected"` on stderr instead (SpentUSD stuck at 0, so the budget alone can never fire and loop detection has to catch it a request later — exactly the silent-reset regression this pins), restored the fix, confirmed green. Toolchain note: the sandbox had no Go install; `go1.23.4` (linux/amd64) was downloaded to `/home/user/gotools` (outside the repo, not committed) specifically to run the real `build`/`vet`/`gofmt`/`test`/`test -race` suite locally instead of trusting a diff read. All four CI jobs (`build · vet · fmt · test`, `race detector`) now pass locally: `go build ./...`, `go vet ./...`, `gofmt -l cmd internal` (empty), `go test ./...` and `go test -race ./...` all green, 17/17 packages. No behavioral change to the budget/cost logic itself — both fixes are test-correctness fixes, plus the added regression test for the previously-uncovered seed feature. |
+| 2026-08-08 | PR #85 review · persisted session cost accounting — CI failures fixed, coverage gap closed | PR #85 (`persist estimated message cost` through `test(convo): cover persisted session cost totals`) added `convo.Usage.CostUSD` persistence and seeded `engine.AgentOptions.SpentUSD` from `hist.Usage()` so a resumed session keeps its budget instead of resetting it every process launch — but every CI run on the branch was red. Two real defects, not CI flakes: (1) `gofmt -l cmd internal` failed on `internal/convo/message.go` and `internal/engine/agentloop.go` — both had misaligned struct-field whitespace from a manual edit that never ran `gofmt -w`; fixed by running `gofmt -w` on both files, no logic changed. (2) `TestUsageCostPersistsAndAccumulates` (`internal/convo/convo_test.go`) compared `float64` `CostUSD` against literal decimals with `!=`, which fails under `-race` (and deterministically, race or not) because `0.0012 + 0.0023` is `0.0034999999999999996` in IEEE-754 binary, not exactly `0.0035` — a textbook float-equality bug, unrelated to the feature's actual correctness. Fixed by comparing with an epsilon (`math.Abs(got-want) > 1e-9`) instead of `==`/`!=`, which is the correct way to assert on accumulated float64 sums; the underlying `Usage.Add` accounting itself was already correct. Separately, `dda056c` ("seed agent budget from persisted session spend") shipped with zero test coverage of its own — no test constructed a `hist` with prior `Usage.CostUSD` and checked the seed actually reached `engine.AgentOptions.SpentUSD`. Added `TestRunAgentTurnHeadlessSeedsBudgetFromPersistedSpend` in `internal/app/agentturn_test.go`: builds a `hist` whose one prior assistant message already carries `Usage.CostUSD = 0.02` against a `budget_usd = 0.01`, runs `runAgentTurnHeadless` against a fake server that always offers a tool call, and asserts the provider is hit exactly once (the budget check after the first iteration's tool calls stops the loop, using spend seeded from `hist`) with `"cost budget reached"` on stderr. Verified by mutation testing: disabled the `hist.Usage()` seed, confirmed the test fails with the provider called twice and `"loop detected"` on stderr instead (SpentUSD stuck at 0, so the budget alone can never fire and loop detection has to catch it a request later — exactly the silent-reset regression this pins), restored the fix, confirmed green. Toolchain note: the sandbox had no Go install; `go1.23.4` (linux/amd64) was downloaded to `/home/user/gotools` (outside the repo, not commit not committed) specifically to run the real `build`/`vet`/`gofmt`/`test`/`test -race` suite locally instead of trusting a diff read. All four CI jobs (`build · vet · fmt · test`, `race detector`) now pass locally: `go build ./...`, `go vet ./...`, `gofmt -l cmd internal` (empty), `go test ./...` and `go test -race ./...` all green, 17/17 packages. No behavioral change to the budget/cost logic itself — both fixes are test-correctness fixes, plus the added regression test for the previously-uncovered seed feature. |
 
 | 2026-08-09 | Bug report · Gemini rejected every tool turn after the first with `HTTP 400: [{` (PR #92) | With the previous entry's fix in place the approval dialog finally opened, and the user reported three new facts that together identified the cause precisely: DeepSeek through OmniRoute executed `bash`, `write_file` and `read_file` flawlessly; Gemini's *first* `write_file` created the file and only *then* failed; and a retry produced the same 400 followed by a 429. **Root cause.** `internal/provider/openai/wire.go` used one `wireToolCall` struct for both directions of the dialect. Inbound it is right and the `index` field is load-bearing — streaming responses fragment a tool call across deltas and `stream.go`'s `toolAccumulator.add` keys `t.byIndex[tc.Index]` to reassemble them, so `index` must carry no `omitempty` because index 0 is a real index. Outbound that same struct put `"index": 0` inside every `tool_calls` entry of the assistant message replayed in history. OpenAI ignores unknown request fields, which is why this survived the entire development of the tool layer unnoticed; Gemini's OpenAI-compatibility layer validates them and rejects the request. That explains the exact reported shape with nothing left over: turn one carries no prior `tool_calls` in history and succeeds, every later turn replays one and 400s, and a lenient provider never shows it at all. The 429 on retry was ordinary rate limiting stacked on top, not a second bug. **Fix.** Split the struct by direction — `wireToolCall` (inbound, keeps `Index`) and a new `wireToolCallOut` (outbound, with no `Index` field to send), over a shared `wireToolFuncCall`; `ChatMessage.ToolCalls` and `serialize.go` now use the outbound type. **Second defect, same report:** the diagnostic itself was `HTTP 400: [{`, which is useless. Gemini wraps errors in a JSON *array* (`[{"error":{…}}]`) where OpenAI uses an object, so `httpError`'s object decode found nothing, and the raw-body fallback `firstLine` cut a pretty-printed body at its first newline — returning the opening bracket and hiding the one sentence that said what was wrong. `httpError` now also decodes the array envelope, and the fallback uses a new `collapseJSON`, which flattens whitespace and truncates on rune boundaries so a multi-line body still yields a readable sentence. **Tests.** `requestshape_test.go` asserts on serialized bytes rather than structs — the absence of `index`, the presence of everything required (`id`, `type`, `function.name`, `arguments` as a JSON string, `tool_call_id` on the tool message), and a key allow-list so the next well-meaning field addition trips a test instead of a provider. `httperror_test.go` covers both envelopes, a non-JSON HTML body, and `collapseJSON`'s truncation and whitespace behaviour. Both re-verified by re-injecting each bug. **Lesson, continuous with the previous entry:** the wire is the contract, and a struct shared by request and response is two contracts wearing one name. Asserting on serialized bytes is what makes dialect asymmetries visible; asserting on Go structs cannot see them at all. |
 
@@ -3632,5 +3631,8 @@ The governing sentence, matching §19's:
 ---
 
 *Fin del documento.*
+.*
+
+ documento.*
 .*
 
