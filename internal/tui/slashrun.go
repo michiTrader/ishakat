@@ -124,31 +124,31 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.startLogin(args)
 	case slash.KindTheme:
 		return m.runThemeCommand(args)
+	case slash.KindConfig:
+		return m.runConfigCommand()
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}
 }
 
-// unimplementedNotice is what a KindUnimplemented command reports. /config
-// and /debug already have a binary-side equivalent that answers the same
-// question today (ishakat config check, ishakat doctor); pointing at it is
-// an honest pending, not a silent no-op, until Step 18 gives them a real
-// in-session screen (§13, §17: "un pendiente marcado como hecho es una
-// funcion que nadie va a construir" applies just as much to a pending with
-// no remedy attached). /login (Step 24) joins them for the same reason: the
-// OAuth device flow itself is real and tested (cmd/ishakat/login.go), just
-// not yet driven from inside a running TUI session — internal/tui cannot
-// import net/http (internal/arch_test.go's TestTUINoImportaHTTP), so a real
-// in-session wizard needs the HTTP-driving half injected via a factory the
-// way EngineFactory already is, not written here directly. /theme (Fase 3's
-// first increment) has since moved off this path entirely — it is a real
-// KindTheme with its own runner (theme.go) — so /config and /debug are now
-// the only two rows left here, and both keep the generic message for the
-// same reason: neither has a stand-in command to point at yet.
+// unimplementedNotice is what a KindUnimplemented command reports. /debug
+// already has a binary-side equivalent that answers the same question
+// today (ishakat doctor); pointing at it is an honest pending, not a
+// silent no-op, until it gets a real in-session screen of its own (§13,
+// §17: "un pendiente marcado como hecho es una funcion que nadie va a
+// construir" applies just as much to a pending with no remedy attached).
+// /login (Step 24) joins it for the same reason: the OAuth device flow
+// itself is real and tested (cmd/ishakat/login.go), just not yet driven
+// from inside a running TUI session — internal/tui cannot import net/http
+// (internal/arch_test.go's TestTUINoImportaHTTP), so a real in-session
+// wizard needs the HTTP-driving half injected via a factory the way
+// EngineFactory already is, not written here directly. /theme (Fase 3's
+// first increment) and /config (this increment, configcmd.go) have both
+// since moved off this path entirely into their own real Kind/runner, so
+// /debug is now the only row left here, and it keeps the generic message
+// for the same reason: it has no stand-in command to point at yet.
 func unimplementedNotice(cmd slash.Command) string {
 	switch cmd.Name {
-	case "config":
-		return cmd.Usage() + " todavia no: usa `ishakat config check` desde la terminal"
 	case "debug":
 		return cmd.Usage() + " todavia no: usa `ishakat doctor` desde la terminal"
 	case "login":
