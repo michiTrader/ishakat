@@ -78,25 +78,41 @@ var providerPresets = map[string]ProviderPreset{
 	// Anthropic ships an OpenAI-compatible chat/completions endpoint,
 	// verified directly against the live API: POST /v1/chat/completions
 	// with a bad key returns an OpenAI-shaped 401 error body, and GET
-	// /v1/models accepts a plain Bearer token. kind = "anthropic" was
-	// never registered by any adapter in this build — the only kinds any
-	// init() registers are "openai" and "responses" (see
-	// internal/provider/openai/openai.go) — so `validKind` accepted the
-	// string anyway, and `provider add anthropic` used to collect the
-	// user's real API key, write it to disk, print "Configured
-	// Anthropic", and leave a provider that failed on its very first turn
-	// with "kind = \"anthropic\", which this build cannot speak yet".
-	// Routing through the real OpenAI-compatible shim actually works, at
-	// the cost documented in Notes below. `presetByID`/`ResolveProviderPreset`
-	// keep exposing this id as "anthropic" for the user-facing name; only
-	// the wire dialect changed.
+	// /v1/models accepts a plain Bearer token. kind = "anthropic" used to
+	// be accepted by validKind with zero registered adapter — the only
+	// kinds any init() registered were "openai" and "responses" (see
+	// internal/provider/openai/openai.go) — so `provider add anthropic`
+	// used to collect the user's real API key, write it to disk, print
+	// "Configured Anthropic", and leave a provider that failed on its
+	// very first turn with "kind = \"anthropic\", which this build cannot
+	// speak yet". Routing through the OpenAI-compatible shim fixed that,
+	// at the cost documented in Notes below.
+	//
+	// internal/provider/anthropic now exists and registers the native
+	// "anthropic" kind (Fase 4), but this preset's Kind deliberately
+	// stays "openai": this preset is the one every new user hits first
+	// (`provider add anthropic`), and the shim is the path this codebase
+	// has actually exercised end-to-end against the live API, while the
+	// native adapter has only run against httptest fakes built from
+	// public docs (no live Anthropic key was available to verify it — see
+	// docs/PLAN.md §17). Someone who wants the native dialect's extra
+	// capabilities (prompt caching, extended thinking) can write
+	// kind = "anthropic" in config.toml by hand today; switching this
+	// preset's default is a separate decision for once the native
+	// adapter has real-traffic mileage behind it, not a byproduct of
+	// merely having written the code. `presetByID`/`ResolveProviderPreset`
+	// keep exposing this id as "anthropic" for the user-facing name either
+	// way; only the wire dialect would change.
 	"anthropic": {
 		ID: "anthropic", Name: "Anthropic", Kind: "openai",
 		BaseURL: "https://api.anthropic.com/v1", Discover: true,
 		Environment: "ANTHROPIC_API_KEY", VerifyModel: "claude-3-5-haiku-20241022",
 		Notes: "Anthropic is reached through its OpenAI-compatible shim, not " +
 			"the native API: no prompt caching, no extended thinking, and " +
-			"tool-use may not carry every field the native API supports.",
+			"tool-use may not carry every field the native API supports. " +
+			"A native adapter exists (kind = \"anthropic\" in config.toml) " +
+			"for anyone who wants those capabilities before this preset " +
+			"switches its default.",
 	},
 	"nvidia": {
 		ID: "nvidia", Name: "NVIDIA NIM", Kind: "openai",

@@ -176,11 +176,16 @@ api_key = "$OPENAI_API_KEY"
 discover = true
 enabled = false
 
-# Anthropic has no native adapter in this build (see internal/provider's
-# registry: only "openai" and "responses" kinds are registered). It is
-# reached through Anthropic's own OpenAI-compatible chat/completions shim,
-# verified directly against the live API. That shim does not support prompt
-# caching, extended thinking, or the full native tool-use format.
+# A native adapter for Anthropic's own Messages API exists too
+# (internal/provider/anthropic registers kind = "anthropic"), but this
+# preset deliberately keeps kind = "openai": Anthropic's OpenAI-compatible
+# chat/completions shim has been verified directly against the live API,
+# while the native adapter has so far only been verified against httptest
+# fakes built from public docs (no live Anthropic key was used to test it).
+# The shim also does not support prompt caching, extended thinking, or the
+# full native tool-use format. Anyone who wants those can set
+# kind = "anthropic" below by hand; the default switches once the native
+# adapter has real-traffic mileage behind it.
 [[provider]]
 id = "anthropic"
 name = "Anthropic"

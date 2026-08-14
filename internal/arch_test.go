@@ -55,8 +55,8 @@ func TestTUINoImportaHTTP(t *testing.T) {
 // TestProviderNoImportaPresentacion es el simétrico prometido en §6.1: el
 // adaptador no puede saber nada de colores, estilos ni del bucle de la
 // interfaz. Si esto falla, la traducción del historial y la presentación
-// quedaron pegadas y el siguiente dialecto (Anthropic, Fase 4) hereda el
-// problema.
+// quedaron pegadas — la misma regla que ya cubría a openai cubre ahora
+// también a anthropic (Fase 4).
 func TestProviderNoImportaPresentacion(t *testing.T) {
 	prohibidos := []string{
 		"lipgloss",
@@ -68,7 +68,7 @@ func TestProviderNoImportaPresentacion(t *testing.T) {
 		"ishakat/internal/config",
 	}
 
-	for _, pkg := range []string{"internal/provider", "internal/provider/openai"} {
+	for _, pkg := range []string{"internal/provider", "internal/provider/openai", "internal/provider/anthropic"} {
 		list := string(deps(t, pkg))
 		for _, mal := range prohibidos {
 			if strings.Contains(list, mal) {

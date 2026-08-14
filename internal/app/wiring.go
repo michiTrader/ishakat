@@ -17,6 +17,14 @@ import (
 	// —in the wiring package— because neither provider nor tui get to decide
 	// which dialects exist.
 	_ "github.com/MichiTrader/ishakat/internal/provider/openai"
+
+	// Same switch, for kind = "anthropic" (Fase 4's native Messages API
+	// adapter). The built-in "anthropic" preset in credentials.go still
+	// defaults to the openai dialect against Anthropic's own
+	// OpenAI-compatible shim; this import is what makes a hand-written
+	// kind = "anthropic" in config.toml actually resolve instead of
+	// failing validation with "unknown kind".
+	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
 )
 
 // Settings translates a [[provider]] TOML entry into provider.Settings.

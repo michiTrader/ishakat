@@ -18,6 +18,12 @@ import (
 	// add` from depending on the whole application wiring just to place one
 	// HTTP call.
 	_ "github.com/MichiTrader/ishakat/internal/provider/openai"
+
+	// Anthropic's own native Messages API adapter (Fase 4): needed so
+	// `provider add` can verify a hand-written kind = "anthropic"
+	// connection too, not just the openai-shim default the built-in preset
+	// still uses.
+	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
 )
 
 // verifyTimeout bounds the one probe request `provider add` makes. Long
