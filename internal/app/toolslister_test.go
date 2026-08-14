@@ -500,3 +500,204 @@ func TestToolsListerDeleteToolNeverUsedStatusLine(t *testing.T) {
 		t.Errorf("status = %q, want it to report never having been used", status)
 	}
 }
+
+// --- EditTool (§13/§19.5): Step 21's own edit row ---
+//
+// EditTool delegates to a real tools.ToolEdit's own Run method (see
+// toolsLister's own doc comment for why) so these tests are real
+// filesystem round trips against t.TempDir() — the same discipline every
+// other *ToolTool test in this file already follows — not mocks of
+// tools.ToolEdit itself: the point of these tests is to confirm the
+// wiring (NewToolsListerWithEgress threading allow/allowAll through,
+// EditTool correctly marshaling its four arguments into toolEditArgs'
+// own JSON shape, and this method's own Go-error-vs-string split) is
+// correct, which a mock could not catch as reliably as a real
+// tools.ToolEdit.Run call underneath.
+
+func TestNewToolsListerWithEgressDisabledReturnsNil(t *testing.T) {
+	if l := NewToolsListerWithEgress(t.TempDir(), false, []string{"example.com"}, false); l != nil {
+		t.Errorf("NewToolsListerWithEgress(dir, false, ...) = %v, want nil", l)
+	}
+}
+
+func TestNewToolsListerWithEgressEmptyDirReturnsNil(t *testing.T) {
+	if l := NewToolsListerWithEgress("", true, nil, true); l != nil {
+		t.Errorf("NewToolsListerWithEgress(\"\", true, ...) = %v, want nil", l)
+	}
+}
+
+func TestNewToolsListerWithEgressEnabledWithDirReturnsNonNil(t *testing.T) {
+	if l := NewToolsListerWithEgress(t.TempDir(), true, nil, true); l == nil {
+		t.Error("NewToolsListerWithEgress(dir, true, ...) = nil, want a usable ToolsLister")
+	}
+}
+
+func TestToolsListerEditToolEmptyNameIsGoError(t *testing.T) {
+	l := NewToolsListerWithEgress(t.TempDir(), true, nil, true)
+	if _, err := l.EditTool("", "a", "b", false); err == nil {
+		t.Error("EditTool(\"\", ...) should error on an empty name")
+	}
+}
+
+func TestToolsListerEditToolEmptyOldStringIsGoError(t *testing.T) {
+	l := NewToolsListerWithEgress(t.TempDir(), true, nil, true)
+	if _, err := l.EditTool("greet", "", "b", false); err == nil {
+		t.Error("EditTool with an empty old_string should error")
+	}
+}
+
+func TestToolsListerEditToolIdenticalOldNewIsGoError(t *testing.T) {
+	l := NewToolsListerWithEgress(t.TempDir(), true, nil, true)
+	if _, err := l.EditTool("greet", "same", "same", false); err == nil {
+		t.Error("EditTool with old_string == new_string should error")
+	}
+}
+
+func TestToolsListerEditToolUnknownNameIsErrorString(t *testing.T) {
+	// Unlike the three Go-error preconditions above (checked by EditTool
+	// itself before ever constructing a tools.ToolEdit), an unknown tool
+	// name is tool_edit.go's own ErrorResult, not a Go error -- surfaced
+	// here as EditTool's returned string, matching tui.ToolsLister's own
+	// documented convention that only "could not even attempt it" is a
+	// Go error on this interface.
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "greet"), "greet", "say hello")
+
+	l := NewToolsListerWithEgress(dir, true, nil, true)
+	status, err := l.EditTool("does_not_exist", "a", "b", false)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "no tool named") {
+		t.Errorf("status = %q, want it to report the unknown tool", status)
+	}
+}
+
+func TestToolsListerEditToolOldStringNotFoundIsErrorString(t *testing.T) {
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "greet"), "greet", "say hello")
+
+	l := NewToolsListerWithEgress(dir, true, nil, true)
+	status, err := l.EditTool("greet", "this text does not appear anywhere", "x", false)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "was not found") {
+		t.Errorf("status = %q, want it to report old_string was not found", status)
+	}
+}
+
+func TestToolsListerEditToolSuccessDemotesVerifiedToolToUnverified(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "fixable")
+	writeToolManifest(t, toolDir, "fixable", "say hello")
+	if err := tools.SaveState(toolDir, tools.ToolState{State: tools.StateVerified, UseCount: 3}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	l := NewToolsListerWithEgress(dir, true, nil, true)
+	status, err := l.EditTool("fixable", "https://example.com/x", "https://example.com/right-path", false)
+	if err != nil {
+		t.Fatalf("EditTool: %v", err)
+	}
+	if !strings.Contains(status, "unverified") {
+		t.Errorf("status = %q, want it to mention the tool is now unverified", status)
+	}
+
+	body, err := os.ReadFile(filepath.Join(toolDir, tools.ManifestFileName))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if !strings.Contains(string(body), "/right-path") {
+		t.Errorf("manifest = %s, want the fix applied", body)
+	}
+
+	state, err := tools.LoadState(toolDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.State != tools.StateUnverified {
+		t.Errorf("state.State = %q, want %q after a successful edit (§19.5)", state.State, tools.StateUnverified)
+	}
+	if state.UseCount != 3 {
+		t.Errorf("state.UseCount = %d, want preserved (3)", state.UseCount)
+	}
+}
+
+func TestToolsListerEditToolReplaceAllReplacesEveryOccurrence(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "dup")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := "name = \"dup\"\n" +
+		"description = \"hello hello\"\n\n" +
+		"[request]\n" +
+		"method = \"GET\"\n" +
+		"url = \"https://example.com/x\"\n"
+	if err := os.WriteFile(filepath.Join(toolDir, tools.ManifestFileName), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	l := NewToolsListerWithEgress(dir, true, nil, true)
+	status, err := l.EditTool("dup", "hello", "hi", true)
+	if err != nil {
+		t.Fatalf("EditTool: %v", err)
+	}
+	if !strings.Contains(status, "unverified") {
+		t.Errorf("status = %q, want it to mention the tool is now unverified", status)
+	}
+
+	body, err := os.ReadFile(filepath.Join(toolDir, tools.ManifestFileName))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if strings.Contains(string(body), "hello") {
+		t.Errorf("manifest still contains \"hello\" after replace_all: %s", body)
+	}
+	if !strings.Contains(string(body), "hi hi") {
+		t.Errorf("manifest = %s, want both occurrences replaced", body)
+	}
+}
+
+func TestToolsListerEditToolEgressAllowlistIsThreadedThrough(t *testing.T) {
+	// Confirms NewToolsListerWithEgress's own allow/allowAll parameters
+	// actually reach the real tools.ToolEdit this method constructs: an
+	// edit that points the tool at a host outside allow (and allowAll
+	// left false) must be refused, the same egress hard block
+	// tool_edit_test.go's own TestToolEditUnallowlistedHostAfterEditIsResultErrorAndWritesNothing
+	// already covers at the internal/tools layer -- this test exists to
+	// confirm the wiring one layer up, in this package, threads the same
+	// two values through rather than silently dropping them (e.g. by
+	// defaulting to AllowAll: true regardless of what was passed in).
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "reroute")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := "name = \"reroute\"\n" +
+		"description = \"say hello\"\n\n" +
+		"[request]\n" +
+		"method = \"GET\"\n" +
+		"url = \"http://allowed.example.com/x\"\n"
+	if err := os.WriteFile(filepath.Join(toolDir, tools.ManifestFileName), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	l := NewToolsListerWithEgress(dir, true, []string{"allowed.example.com"}, false)
+	status, err := l.EditTool("reroute", "allowed.example.com", "not-allowed.example.com", false)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "egress allowlist") {
+		t.Errorf("status = %q, want it to mention the egress allowlist", status)
+	}
+
+	body, err := os.ReadFile(filepath.Join(toolDir, tools.ManifestFileName))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if string(body) != manifest {
+		t.Error("expected the on-disk manifest to be untouched after an egress-refused edit")
+	}
+}

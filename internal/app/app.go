@@ -300,13 +300,18 @@ func Run(version string, resume bool) int {
 		History:       history,
 		SessionLister: lister,
 
-		// ToolsLister is /tools' own read side (§13, Step 20) — see
-		// internal/app/toolslister.go's own doc comment for why this
-		// package is the one place allowed to import both internal/tools
-		// and internal/tui at once. nil (tools.enabled = false, or an
-		// empty tools.dir) is the supported "cannot list" value, matching
-		// what runToolsCommand already expects.
-		ToolsLister: NewToolsLister(cfg.Tools.Dir, cfg.Tools.Enabled),
+		// ToolsLister is /tools' own read (and, since /tools edit, write)
+		// side (§13, Step 20/21) — see internal/app/toolslister.go's own
+		// doc comment for why this package is the one place allowed to
+		// import both internal/tools and internal/tui at once. nil
+		// (tools.enabled = false, or an empty tools.dir) is the supported
+		// "cannot list" value, matching what runToolsCommand already
+		// expects. NewToolsListerWithEgress (not the plain NewToolsLister)
+		// is used here because EditTool needs the same egress allowlist
+		// cfgTools.Egress.Allow/AllowAll already threaded into
+		// tools.WithMetaTools' own ToolEdit construction in
+		// buildAgentOptions — see toolsLister's own doc comment.
+		ToolsLister: NewToolsListerWithEgress(cfg.Tools.Dir, cfg.Tools.Enabled, cfg.Tools.Egress.Allow, cfg.Tools.Egress.AllowAll),
 
 		ToolsEnabled: cfg.Tools.Enabled,
 		AgentOptions: agentOpts,

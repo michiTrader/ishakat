@@ -9,9 +9,12 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/tui"
@@ -40,8 +43,19 @@ func describeToolState(name string, s tools.ToolState) string {
 // than caching a snapshot at construction time — see tui.ToolsLister's own
 // doc comment for why (§19.7's tool_create can add a layer-2 tool
 // mid-session).
+//
+// allow/allowAll mirror config.Egress's own two fields ([tools.egress]'s
+// allow/allow_all) — EditTool needs them to construct a real
+// tools.ToolEdit value (see tui.ToolsLister's own doc comment for why
+// EditTool, unlike every other method here, delegates to that type's own
+// Run rather than being built from exported internal/tools functions
+// directly). Every other method on this type ignores both fields
+// entirely, matching the fact that ListTools/AuditTools/ToolManifest/
+// ReviveTool/DeleteTool never touch egress at all.
 type toolsLister struct {
-	dir string
+	dir      string
+	allow    []string
+	allowAll bool
 }
 
 var _ tui.ToolsLister = toolsLister{}
@@ -50,11 +64,32 @@ var _ tui.ToolsLister = toolsLister{}
 // configured — [tools].enabled = false or an empty tools.dir — matching
 // tui.ToolsLister's own documented nil-is-safe contract, the same rule
 // NewSessionLister already follows for its own concern.
+//
+// This constructor's own signature is deliberately left unchanged (no
+// allow/allowAll parameters) even though EditTool needs them: it has one
+// production call site and dozens of existing test call sites that all
+// predate EditTool, and growing this specific signature would be a
+// breaking change to every one of them for a value most callers (every
+// method except EditTool) never use. NewToolsListerWithEgress is the
+// additive alternative — see its own doc comment.
 func NewToolsLister(dir string, enabled bool) tui.ToolsLister {
+	return NewToolsListerWithEgress(dir, enabled, nil, false)
+}
+
+// NewToolsListerWithEgress is NewToolsLister plus the egress allowlist
+// EditTool needs to construct its own tools.ToolEdit value (allow/allowAll
+// mirror config.Egress's own allow/allow_all fields exactly — the real
+// production call site passes cfg.Tools.Egress.Allow/AllowAll straight
+// through). NewToolsLister itself is kept as a thin wrapper over this
+// function (allow=nil, allowAll=false) rather than replaced by it, so
+// every pre-existing call site — the one production call and the dozens
+// of test call sites that only ever exercise ListTools/AuditTools/
+// ToolManifest/ReviveTool/DeleteTool — keeps compiling unchanged.
+func NewToolsListerWithEgress(dir string, enabled bool, allow []string, allowAll bool) tui.ToolsLister {
 	if !enabled || dir == "" {
 		return nil
 	}
-	return toolsLister{dir: dir}
+	return toolsLister{dir: dir, allow: allow, allowAll: allowAll}
 }
 
 // ListTools mirrors tool_list.go's own two calls (DiscoverDeclarative then
@@ -241,4 +276,66 @@ func (l toolsLister) DeleteTool(name string, confirm bool) (string, error) {
 		return "", fmt.Errorf("no se pudo borrar %q: %w", dir, err)
 	}
 	return fmt.Sprintf("%q borrada de forma permanente. %s", name, statusLine), nil
+}
+
+// EditTool implements /tools edit <name> (§13, §19.5's fourth meta-tool)
+// by constructing a real tools.ToolEdit and calling its Run method
+// directly through the generic tools.Tool interface — see
+// tui.ToolsLister's own doc comment for why this is the one method on
+// this type that delegates to a tools.Tool's Run rather than being built
+// from exported internal/tools functions directly (tools.ToolEdit.Run's
+// own flow depends on two unexported helpers, parseManifest and
+// checkManifestSafety, that enforce §19.8's egress and structural-
+// exfiltration checks on the edited result).
+//
+// context.Background() is used here, not a context threaded in from the
+// caller: a human-typed slash command has no existing per-turn context
+// the way an agent-turn tool call does (runToolsCommand's own call chain
+// carries no context.Context today, matching ReviveTool/DeleteTool's own
+// context-free signatures on this interface), and tools.ToolEdit.Run's
+// own filesystem work (one read, one string replace, one write) is fast
+// enough that an uncancellable context poses no real risk here — the
+// same reasoning that already applies to ReviveTool/DeleteTool never
+// taking one either.
+//
+// Only "could not even attempt it" outcomes are a Go error here,
+// matching this interface's own documented convention: a JSON marshal
+// failure of the arguments themselves (never expected in practice, since
+// every field is caller-supplied Go data, not attacker-controlled bytes)
+// or a Go error from Run itself (bad arguments per tool_edit.go's own
+// validation — empty name, empty old_string, old_string == new_string —
+// all already rejected by this method's own preconditions below, or a
+// cancelled context, which context.Background() never is). Every other
+// outcome tool_edit.go's own Run documents as an ErrorResult (unknown
+// name, old_string not found, ambiguous match without replace_all, a
+// result that no longer parses, a result that fails the safety check) is
+// surfaced here as res.Text, not a Go error — the caller sees exactly the
+// same wording a model would see from tool_edit itself.
+func (l toolsLister) EditTool(name, oldString, newString string, replaceAll bool) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("el nombre de la herramienta no puede estar vacio")
+	}
+	if oldString == "" {
+		return "", fmt.Errorf("old_string no puede estar vacio (usa tool_create para hacer una herramienta nueva)")
+	}
+	if oldString == newString {
+		return "", fmt.Errorf("old_string y new_string son identicos, no hay nada que hacer")
+	}
+
+	te := tools.ToolEdit{Dir: l.dir, Allow: l.allow, AllowAll: l.allowAll}
+	rawArgs, err := json.Marshal(map[string]any{
+		"name":        name,
+		"old_string":  oldString,
+		"new_string":  newString,
+		"replace_all": replaceAll,
+	})
+	if err != nil {
+		return "", fmt.Errorf("no se pudieron preparar los argumentos de edicion: %w", err)
+	}
+
+	res, err := te.Run(context.Background(), rawArgs)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo editar %q: %w", name, err)
+	}
+	return res.Text, nil
 }

@@ -104,7 +104,24 @@ type ToolsAuditResult struct {
 // command); DeleteTool powers "/tools delete <name> [confirm]" (§19.5's
 // own text: "removes it, with confirmation" — the same
 // tools.ToolDelete.Run flow, called from a second, human-initiated
-// entry point).
+// entry point); EditTool powers "/tools edit <name>" (§19.5's fourth
+// meta-tool, "fixes a tool; demotes it to unverified until re-probed").
+//
+// Unlike ReviveTool/DeleteTool (built entirely from exported
+// internal/tools functions the concrete adapter can call directly),
+// tools.ToolEdit.Run's own flow depends on two unexported internal/tools
+// helpers (parseManifest, checkManifestSafety) that enforce §19.8's
+// egress-allowlist and structural-exfiltration hard blocks on the
+// edited result. Rather than widen internal/tools' exported surface
+// around a security-sensitive check just for this one caller, EditTool
+// is implemented by constructing a real tools.ToolEdit value and calling
+// its Run method directly through the generic Tool interface (the same
+// (ctx, json.RawMessage) -> (Result, error) shape every meta-tool
+// already exposes) — reusing the entire vetted code path, safety check
+// included, rather than duplicating any part of it. This is why EditTool
+// takes oldString/newString/replaceAll instead of a full replacement
+// manifest: it mirrors toolEditArgs field for field, for the exact three
+// reasons tool_edit.go's own doc comment gives for that shape.
 //
 // Every method's error return is reserved for "could not even attempt
 // it" (unknown tool name, an unreadable state.json, a failed os.RemoveAll)
@@ -119,11 +136,17 @@ type ToolsAuditResult struct {
 // DeleteTool's refusal-without-confirm path is deliberately *not* an
 // error: like tool_delete.go's own ErrorResult (not a Go error) for the
 // identical case, refusing without confirmation is an attempted,
-// informative outcome, not a failure to attempt.
+// informative outcome, not a failure to attempt. EditTool follows the
+// same rule: an unknown name or a bad old_string/new_string pair (empty,
+// identical) is a Go error (could not even attempt it); "old_string not
+// found", "ambiguous match", "no longer parses", or "fails the safety
+// check" are all reported as the returned string, matching
+// tool_edit.go's own ErrorResult (not a Go error) for each of those.
 type ToolsLister interface {
 	ListTools() ToolsListResult
 	ToolManifest(name string) (string, error)
 	AuditTools() ToolsAuditResult
 	ReviveTool(name string) (string, error)
 	DeleteTool(name string, confirm bool) (string, error)
+	EditTool(name, oldString, newString string, replaceAll bool) (string, error)
 }
