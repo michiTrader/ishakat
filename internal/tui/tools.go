@@ -3,9 +3,9 @@
 // (declarative/script) tool that exists right now, /tools code <name> to
 // view one's manifest in full, /tools audit to see each tool's provenance
 // (origin, sources, session_id) and current SHA-256 (§19.8 mitigations 2
-// and 6), and /tools revive <name> to bring an archived tool back
-// (§19.5). create/edit/delete remain Step 21's still-open rows — the
-// harder write/governance-gated half, not this file's concern yet.
+// and 6), /tools revive <name> to bring an archived tool back (§19.5),
+// and /tools delete <name> [confirm] to remove one permanently.
+// create/edit remain Step 21's still-open rows.
 //
 // internal/tui may never import internal/tools directly: declarative.go's
 // HTTP client (and Fetch, registry.go's Core) pull net/http transitively
@@ -101,19 +101,29 @@ type ToolsAuditResult struct {
 // Revive pair, tools.ToolArchive/ToolRevive's exact state transition,
 // called here directly rather than through the JSON-args Tool interface
 // since there is no model call involved in a human typing a slash
-// command).
+// command); DeleteTool powers "/tools delete <name> [confirm]" (§19.5's
+// own text: "removes it, with confirmation" — the same
+// tools.ToolDelete.Run flow, called from a second, human-initiated
+// entry point).
 //
-// ReviveTool's error return is reserved for "could not even attempt it"
-// (unknown tool name, an unreadable state.json) — matching every meta-tool
-// in internal/tools' own convention that a Go error means the operation
-// was never attempted, not that it failed after being attempted. The
-// string it returns on success is a human-readable status line (e.g. "is
-// now verified" or "was not archived; nothing changed") for the slash
-// command to show verbatim, the same "let the adapter phrase it" split
+// Every method's error return is reserved for "could not even attempt
+// it" (unknown tool name, an unreadable state.json, a failed os.RemoveAll)
+// — matching every meta-tool in internal/tools' own convention that a Go
+// error means the operation was never attempted, not that it failed
+// after being attempted. The string returned on success is a
+// human-readable status line (e.g. "is now verified", "was not
+// archived; nothing changed", or — DeleteTool's own unconfirmed case —
+// "refused to delete ... without confirmation") for the slash command to
+// show verbatim, the same "let the adapter phrase it" split
 // ToolManifest's own (string, error) signature already establishes.
+// DeleteTool's refusal-without-confirm path is deliberately *not* an
+// error: like tool_delete.go's own ErrorResult (not a Go error) for the
+// identical case, refusing without confirmation is an attempted,
+// informative outcome, not a failure to attempt.
 type ToolsLister interface {
 	ListTools() ToolsListResult
 	ToolManifest(name string) (string, error)
 	AuditTools() ToolsAuditResult
 	ReviveTool(name string) (string, error)
+	DeleteTool(name string, confirm bool) (string, error)
 }

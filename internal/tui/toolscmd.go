@@ -1,20 +1,24 @@
 // toolscmd.go implements /tools (§13, Step 20's own listing plus Step
-// 21's own audit and revive rows): see tools.go's doc comment for the
+// 21's own audit/revive/delete rows): see tools.go's doc comment for the
 // §6.1 boundary that shaped this as an interface (ToolsLister) rather
 // than a direct internal/tools import, and for why nil is a supported
 // Root.toolsLister value.
 //
-// Four shapes, mirroring §13's own rows: bare "/tools" renders every
+// Five shapes, mirroring §13's own rows: bare "/tools" renders every
 // layer-2 tool's status/danger/usage as a row each (the in-session
 // counterpart to tool_list's LLM-facing text blob); "/tools code <name>"
 // renders one tool's manifest in full; "/tools audit" renders every
 // tool's provenance (created_by/reason/repetitions/session_id/sources)
 // plus its current SHA-256 and a tamper flag (§19.8 mitigations 2 and 6);
 // "/tools revive <name>" calls ToolsLister.ReviveTool and reports its
-// status line. The first three are read-only; revive is the first
-// write/governance-gated row to land (§19.5's Archive/Revive pair is
-// DangerLow and idempotent by construction, so it needs no confirmation
-// step, unlike Step 21's still-open create/edit/delete rows).
+// status line; "/tools delete <name> [confirm]" calls ToolsLister.
+// DeleteTool and reports its status line. The first three are read-only.
+// revive needs no confirmation step (§19.5's Archive/Revive pair is
+// DangerLow and idempotent by construction); delete does — the trailing
+// literal word "confirm" is this command's own explicit, typed gate,
+// the slash-command counterpart to tool_delete's own required boolean
+// argument (§19.5: "removes it, with confirmation"). create/edit remain
+// Step 21's still-open rows.
 package tui
 
 import (
@@ -58,6 +62,14 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 			return m.slashNotice(g.warnMark + " " + err.Error())
 		}
 		return m.slashNotice(g.assistantMark + " tools revive " + g.dot + " " + status)
+	}
+
+	if name, confirm, ok := parseToolsDeleteArg(args); ok {
+		status, err := m.toolsLister.DeleteTool(name, confirm)
+		if err != nil {
+			return m.slashNotice(g.warnMark + " " + err.Error())
+		}
+		return m.slashNotice(g.assistantMark + " tools delete " + g.dot + " " + status)
 	}
 
 	res := m.toolsLister.ListTools()
@@ -193,6 +205,59 @@ func parseToolsReviveArg(args string) (string, bool) {
 		return "", false
 	}
 	return rest, true
+}
+
+// parseToolsDeleteArg recognizes the "delete <name>" and "delete <name>
+// confirm" shapes of /tools' own args string. The trailing literal word
+// "confirm" is this command's own explicit, typed gate — matching
+// tool_delete's own required boolean argument (§19.5: "removes it, with
+// confirmation") — so confirm is reported true only when that exact
+// trailing word is present; "delete weather" (no confirm) reports
+// confirm=false, the safe default, the same "no safe reading, only a
+// coin flip" logic tool_delete.go's own toolDeleteArgs.Confirm doc
+// comment already applies to a fatal action. Anything past the name and
+// an optional "confirm" (e.g. "delete weather confirm now") is not
+// recognized as this subcommand at all — the caller falls back to the
+// bare listing rather than silently ignoring trailing garbage after a
+// destructive command's own confirmation word.
+func parseToolsDeleteArg(args string) (name string, confirm bool, ok bool) {
+	args = strings.TrimSpace(args)
+	rest, matched := cutPrefixWord(args, "delete")
+	if !matched {
+		return "", false, false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", false, false
+	}
+	if withoutConfirm, hasConfirm := cutSuffixWord(rest, "confirm"); hasConfirm {
+		name = strings.TrimSpace(withoutConfirm)
+		if name == "" {
+			return "", false, false
+		}
+		return name, true, true
+	}
+	if strings.ContainsAny(rest, " \t") {
+		// A second word that is not exactly "confirm" (e.g. "weather now")
+		// is not this subcommand's shape at all.
+		return "", false, false
+	}
+	return rest, false, true
+}
+
+// cutSuffixWord is cutPrefixWord's mirror: reports whether s ends with
+// word as a whole word (word itself, or preceded by whitespace) and
+// returns whatever precedes it. "unconfirm" must not match "confirm" —
+// only "confirm" or "<name> confirm" should.
+func cutSuffixWord(s, word string) (string, bool) {
+	if !strings.HasSuffix(s, word) {
+		return "", false
+	}
+	prefix := s[:len(s)-len(word)]
+	if prefix != "" && !strings.HasSuffix(prefix, " ") && !strings.HasSuffix(prefix, "\t") {
+		return "", false
+	}
+	return prefix, true
 }
 
 // cutPrefixWord reports whether s begins with word as a whole word (word

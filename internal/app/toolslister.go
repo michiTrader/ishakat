@@ -17,6 +17,24 @@ import (
 	"github.com/MichiTrader/ishakat/internal/tui"
 )
 
+// describeToolState renders a tools.ToolState as the one-sentence status
+// line DeleteTool's own refusal and success paths both quote verbatim —
+// a deliberate duplicate of tool_delete.go's own unexported describeState
+// (same wording, same fields) rather than an exported shared helper: this
+// package already independently reproduces internal/tools' own field
+// shapes wherever a slash command needs to render them (see
+// writeToolManifestWithOrigin's own test-fixture precedent), and
+// exporting one unexported helper from internal/tools purely for one
+// caller here would widen that package's own surface for no other
+// benefit.
+func describeToolState(name string, s tools.ToolState) string {
+	used := "nunca usada"
+	if s.UseCount > 0 {
+		used = fmt.Sprintf("usada %d vez/veces, la ultima el %s", s.UseCount, s.LastUsed)
+	}
+	return fmt.Sprintf("%q esta actualmente %s (%s).", name, s.State, used)
+}
+
 // toolsLister is the real, filesystem-backed tui.ToolsLister. It
 // deliberately re-runs DiscoverDeclarative/LoadState on every call rather
 // than caching a snapshot at construction time — see tui.ToolsLister's own
@@ -178,4 +196,49 @@ func (l toolsLister) ReviveTool(name string) (string, error) {
 		return "", fmt.Errorf("no se pudo guardar el estado de %q: %w", name, err)
 	}
 	return fmt.Sprintf("%q revivida; su estado ahora es %s.", name, next.State), nil
+}
+
+// DeleteTool implements /tools delete <name> [confirm] (§13, §19.5's own
+// "removes it, with confirmation"), a second, human-initiated caller of
+// tool_delete.go's own two-path contract: without confirm, nothing on
+// disk is touched and the returned string reports the tool's current
+// state, use_count and last_used (describeToolState, tool_delete.go's
+// own describeState reproduced here for the reason that function's own
+// doc comment gives) so the decision to confirm is made with that
+// information in hand; with confirm=true, the tool's entire directory is
+// removed via os.RemoveAll. Only an unknown name or a failed removal are
+// a Go error — refusing without confirmation is an attempted, reported
+// outcome, matching tool_delete.go's own ErrorResult (not a Go error) for
+// the identical case.
+func (l toolsLister) DeleteTool(name string, confirm bool) (string, error) {
+	disc := tools.DiscoverDeclarative(l.dir)
+	var found bool
+	var dir string
+	for _, m := range disc.Tools {
+		if m.Name == name {
+			found = true
+			dir = m.Dir
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("no existe ninguna herramienta llamada %q", name)
+	}
+
+	state, err := tools.LoadState(dir)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo leer el estado de %q: %w", name, err)
+	}
+	statusLine := describeToolState(name, state)
+
+	if !confirm {
+		return fmt.Sprintf(
+			"se rehuso a borrar %q sin confirmacion. %s Repeti el comando como \"/tools delete %s confirm\" para borrarla de forma permanente -- esto no se puede revertir con tool_edit.",
+			name, statusLine, name), nil
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("no se pudo borrar %q: %w", dir, err)
+	}
+	return fmt.Sprintf("%q borrada de forma permanente. %s", name, statusLine), nil
 }
