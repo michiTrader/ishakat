@@ -207,6 +207,18 @@ discover = true
 enabled = false
 
 # Direct Gemini access through Google's OpenAI-compatible API.
+#
+# A native adapter for Gemini's own generateContent/streamGenerateContent
+# API exists too (internal/provider/gemini registers kind = "gemini"), but
+# this preset deliberately keeps kind = "openai": the OpenAI-compatible
+# chat/completions shim has been verified directly against the live API,
+# while the native adapter has so far only been verified against httptest
+# fakes built from the public Discovery Document (no live Gemini key was
+# used to test it). The shim also does not expose Gemini-native features
+# such as thoughtSignature-carrying tool calls the same way the native
+# wire format does. Anyone who wants those can set kind = "gemini" below
+# by hand; the default switches once the native adapter has real-traffic
+# mileage behind it.
 # export GEMINI_API_KEY=...
 [[provider]]
 id = "gemini-direct"
