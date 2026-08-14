@@ -1,17 +1,20 @@
 // toolscmd.go implements /tools (§13, Step 20's own listing plus Step
-// 21's own audit row): see tools.go's doc comment for the §6.1 boundary
-// that shaped this as an interface (ToolsLister) rather than a direct
-// internal/tools import, and for why nil is a supported Root.toolsLister
-// value.
+// 21's own audit and revive rows): see tools.go's doc comment for the
+// §6.1 boundary that shaped this as an interface (ToolsLister) rather
+// than a direct internal/tools import, and for why nil is a supported
+// Root.toolsLister value.
 //
-// Three shapes, mirroring §13's own three rows: bare "/tools" renders
-// every layer-2 tool's status/danger/usage as a row each (the in-session
+// Four shapes, mirroring §13's own rows: bare "/tools" renders every
+// layer-2 tool's status/danger/usage as a row each (the in-session
 // counterpart to tool_list's LLM-facing text blob); "/tools code <name>"
 // renders one tool's manifest in full; "/tools audit" renders every
 // tool's provenance (created_by/reason/repetitions/session_id/sources)
-// plus its current SHA-256 and a tamper flag (§19.8 mitigations 2 and 6).
-// All three are read-only — there is no write/mutate path here (that is
-// Step 21's remaining, governance-gated rows: create/edit/delete/revive).
+// plus its current SHA-256 and a tamper flag (§19.8 mitigations 2 and 6);
+// "/tools revive <name>" calls ToolsLister.ReviveTool and reports its
+// status line. The first three are read-only; revive is the first
+// write/governance-gated row to land (§19.5's Archive/Revive pair is
+// DangerLow and idempotent by construction, so it needs no confirmation
+// step, unlike Step 21's still-open create/edit/delete rows).
 package tui
 
 import (
@@ -47,6 +50,14 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 
 	if isToolsAuditArg(args) {
 		return m.renderToolsAudit()
+	}
+
+	if name, ok := parseToolsReviveArg(args); ok {
+		status, err := m.toolsLister.ReviveTool(name)
+		if err != nil {
+			return m.slashNotice(g.warnMark + " " + err.Error())
+		}
+		return m.slashNotice(g.assistantMark + " tools revive " + g.dot + " " + status)
 	}
 
 	res := m.toolsLister.ListTools()
@@ -156,6 +167,24 @@ func isToolsAuditArg(args string) bool {
 func parseToolsCodeArg(args string) (string, bool) {
 	args = strings.TrimSpace(args)
 	rest, ok := cutPrefixWord(args, "code")
+	if !ok {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
+}
+
+// parseToolsReviveArg recognizes the "revive <name>" shape of /tools' own
+// args string, the exact mirror of parseToolsCodeArg for the other
+// single-argument subcommand. Anything else (empty, a different first
+// word, "revive" alone with no name) is not the revive subcommand — the
+// caller falls back to the bare listing.
+func parseToolsReviveArg(args string) (string, bool) {
+	args = strings.TrimSpace(args)
+	rest, ok := cutPrefixWord(args, "revive")
 	if !ok {
 		return "", false
 	}

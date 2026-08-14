@@ -1,11 +1,11 @@
-// tools.go defines /tools' own read side (§13, Step 20's own listing plus
-// Step 21's own audit row): a listing of every layer-2 (declarative/
-// script) tool that exists right now, /tools code <name> to view one's
-// manifest in full, and /tools audit to see each tool's provenance
+// tools.go defines /tools' own surface (§13, Step 20's own listing plus
+// Step 21's own audit and write rows): a listing of every layer-2
+// (declarative/script) tool that exists right now, /tools code <name> to
+// view one's manifest in full, /tools audit to see each tool's provenance
 // (origin, sources, session_id) and current SHA-256 (§19.8 mitigations 2
-// and 6). All three are read-only — Step 21's remaining rows (create,
-// edit, delete, revive) are the write/governance-gated half, not this
-// file's concern.
+// and 6), and /tools revive <name> to bring an archived tool back
+// (§19.5). create/edit/delete remain Step 21's still-open rows — the
+// harder write/governance-gated half, not this file's concern yet.
 //
 // internal/tui may never import internal/tools directly: declarative.go's
 // HTTP client (and Fetch, registry.go's Core) pull net/http transitively
@@ -92,14 +92,28 @@ type ToolsAuditResult struct {
 	Warn  string
 }
 
-// ToolsLister is /tools' own read side. ListTools powers the bare
-// "/tools" listing; ToolManifest powers "/tools code <name>" (returns the
-// manifest file's raw text, or an error if no tool by that name exists);
+// ToolsLister is /tools' own surface. ListTools powers the bare "/tools"
+// listing; ToolManifest powers "/tools code <name>" (returns the manifest
+// file's raw text, or an error if no tool by that name exists);
 // AuditTools powers "/tools audit" (§19.8 mitigation 2 and mitigation 7's
 // "origin, use count, last used" together with mitigation 6's tamper
-// check).
+// check); ReviveTool powers "/tools revive <name>" (§19.5's Archive/
+// Revive pair, tools.ToolArchive/ToolRevive's exact state transition,
+// called here directly rather than through the JSON-args Tool interface
+// since there is no model call involved in a human typing a slash
+// command).
+//
+// ReviveTool's error return is reserved for "could not even attempt it"
+// (unknown tool name, an unreadable state.json) — matching every meta-tool
+// in internal/tools' own convention that a Go error means the operation
+// was never attempted, not that it failed after being attempted. The
+// string it returns on success is a human-readable status line (e.g. "is
+// now verified" or "was not archived; nothing changed") for the slash
+// command to show verbatim, the same "let the adapter phrase it" split
+// ToolManifest's own (string, error) signature already establishes.
 type ToolsLister interface {
 	ListTools() ToolsListResult
 	ToolManifest(name string) (string, error)
 	AuditTools() ToolsAuditResult
+	ReviveTool(name string) (string, error)
 }

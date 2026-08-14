@@ -139,3 +139,43 @@ func (l toolsLister) ToolManifest(name string) (string, error) {
 	}
 	return "", fmt.Errorf("no existe ninguna herramienta llamada %q", name)
 }
+
+// ReviveTool implements /tools revive <name> (§13, §19.5) by calling the
+// exact same LoadState -> ToolState.Revive -> SaveState sequence
+// tools.ToolRevive.Run already runs for the model-initiated tool_revive
+// meta-tool — this is a second, human-initiated caller of the same pure
+// state transition, not a reimplementation of it. Unlike ToolRevive.Run
+// (which reports a no-op as a successful Result so the model sees it as
+// data, not a failure), a slash command's caller distinguishes "could not
+// even find the tool" from "found it, nothing to do" via the (string,
+// error) split ToolManifest already established for this interface: an
+// unknown name is an error here, a no-op is a normal string.
+func (l toolsLister) ReviveTool(name string) (string, error) {
+	disc := tools.DiscoverDeclarative(l.dir)
+	var found bool
+	var dir string
+	for _, m := range disc.Tools {
+		if m.Name == name {
+			found = true
+			dir = m.Dir
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("no existe ninguna herramienta llamada %q", name)
+	}
+
+	state, err := tools.LoadState(dir)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo leer el estado de %q: %w", name, err)
+	}
+	if state.State != tools.StateArchived {
+		return fmt.Sprintf("%q no esta archivada (estado actual: %s); no se cambio nada.", name, state.State), nil
+	}
+
+	next := state.Revive()
+	if err := tools.SaveState(dir, next); err != nil {
+		return "", fmt.Errorf("no se pudo guardar el estado de %q: %w", name, err)
+	}
+	return fmt.Sprintf("%q revivida; su estado ahora es %s.", name, next.State), nil
+}
