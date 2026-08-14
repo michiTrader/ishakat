@@ -127,14 +127,21 @@ func (p *Provider) pumpSSE(ctx context.Context, body io.Reader, ch chan<- provid
 	sc := newSSEScanner(body)
 	var usage wireUsageMetadata
 	haveUsage := false
-	sawCandidate := false
+	sawFinish := false
 
 	for {
 		ev, err := sc.Next()
 		if err != nil {
 			switch {
 			case errors.Is(err, io.EOF):
-				if !sawCandidate {
+				// A diferencia de Anthropic (que manda un evento
+				// "message_stop" explícito) o de OpenAI (un literal
+				// "data: [DONE]"), Gemini no tiene una señal de cierre
+				// propia del transporte SSE: la única forma de saber que
+				// la respuesta terminó de verdad —y no que la conexión se
+				// cortó a medias— es haber visto un candidate con
+				// finishReason no vacío. sawFinish rastrea justo eso.
+				if !sawFinish {
 					return provider.ErrStreamTruncated
 				}
 				if haveUsage {
@@ -180,7 +187,9 @@ func (p *Provider) pumpSSE(ctx context.Context, body io.Reader, ch chan<- provid
 		}
 
 		for _, cand := range chunk.Candidates {
-			sawCandidate = true
+			if cand.FinishReason != "" {
+				sawFinish = true
+			}
 			for _, part := range cand.Content.Parts {
 				if !emitPart(ctx, ch, part) {
 					return ctx.Err()

@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hola, "}]},"index":0}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ishakat"}]},"index":0}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":" en línea."}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":24,"candidatesTokenCount":12,"totalTokenCount":36}}
+

@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"clima","args":{"ciudad":"Madrid"}},"thoughtSignature":"sig_abc123"}]},"index":0}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
+
