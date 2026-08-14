@@ -15,6 +15,7 @@ type fakeToolsLister struct {
 	res         ToolsListResult
 	manifests   map[string]string
 	manifestErr error
+	auditRes    ToolsAuditResult
 }
 
 func (f *fakeToolsLister) ListTools() ToolsListResult { return f.res }
@@ -28,6 +29,8 @@ func (f *fakeToolsLister) ToolManifest(name string) (string, error) {
 	}
 	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
 }
+
+func (f *fakeToolsLister) AuditTools() ToolsAuditResult { return f.auditRes }
 
 // withToolsLister mirrors withSessionLister/withRecorder: it assigns the
 // private field directly for every test in this file except the one
@@ -164,6 +167,123 @@ func TestSlashToolsCodeWithUnknownNameReportsTheError(t *testing.T) {
 	got := m.(Root)
 	if !strings.Contains(got.transcript[0].text, "no existe ninguna herramienta llamada") {
 		t.Errorf("notice should report the missing tool, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsAuditWithNoneConfiguredSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools audit")
+
+	root := m.(Root)
+	if !strings.Contains(root.transcript[0].text, "no hay herramientas de capa 2 configuradas") {
+		t.Errorf("notice should explain tools are not configured, got %q", root.transcript[0].text)
+	}
+}
+
+func TestSlashToolsAuditWithNoneCreatedSaysSo(t *testing.T) {
+	root := withToolsLister(newHeadlessRoot(), &fakeToolsLister{})
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools audit")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "no se ha creado ninguna herramienta") {
+		t.Errorf("notice should explain no tools exist yet, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsAuditListsOriginAndHash(t *testing.T) {
+	tl := &fakeToolsLister{auditRes: ToolsAuditResult{Tools: []ToolAuditEntry{
+		{
+			Name:        "weather",
+			CreatedBy:   "model",
+			Reason:      "user asked for the forecast",
+			Repetitions: 2,
+			SessionID:   "sess-42",
+			Sources:     []string{"https://example.com/api-docs"},
+			Hash:        "abc123",
+		},
+		{
+			Name:      "wire-transfer",
+			CreatedBy: "user",
+			Hash:      "def456",
+			Tampered:  true,
+		},
+	}}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools audit")
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	for _, want := range []string{
+		"weather", "created_by=model", "repetitions=2", "session_id=sess-42",
+		"user asked for the forecast", "https://example.com/api-docs", "sha256=abc123",
+		"wire-transfer", "created_by=user", "session_id=never", "sources=none", "sha256=def456",
+		"tampered",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("notice missing %q, got:\n%s", want, text)
+		}
+	}
+}
+
+func TestSlashToolsAuditReportsHashError(t *testing.T) {
+	tl := &fakeToolsLister{auditRes: ToolsAuditResult{Tools: []ToolAuditEntry{
+		{Name: "weather", HashError: "could not read tool.toml for hashing: no such file"},
+	}}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools audit")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "sha256 unavailable") {
+		t.Errorf("notice should report the hash error, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsAuditSurfacesTheDiscoverWarning(t *testing.T) {
+	tl := &fakeToolsLister{auditRes: ToolsAuditResult{
+		Tools: []ToolAuditEntry{{Name: "weather", Hash: "abc123"}},
+		Warn:  "could not parse tool.toml in /tmp/tools/broken: missing [request]",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools audit")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "could not parse tool.toml") {
+		t.Errorf("notice should surface the discovery warning, got %q", got.transcript[0].text)
+	}
+}
+
+func TestIsToolsAuditArg(t *testing.T) {
+	cases := []struct {
+		args string
+		want bool
+	}{
+		{"", false},
+		{"audit", true},
+		{"  audit  ", true},
+		{"auditx", false},
+		{"audit weather", false},
+		{"code weather", false},
+	}
+	for _, c := range cases {
+		if got := isToolsAuditArg(c.args); got != c.want {
+			t.Errorf("isToolsAuditArg(%q) = %v, want %v", c.args, got, c.want)
+		}
 	}
 }
 
