@@ -68,7 +68,7 @@ func TestProviderNoImportaPresentacion(t *testing.T) {
 		"ishakat/internal/config",
 	}
 
-	for _, pkg := range []string{"internal/provider", "internal/provider/openai", "internal/provider/anthropic"} {
+	for _, pkg := range []string{"internal/provider", "internal/provider/openai", "internal/provider/anthropic", "internal/provider/gemini"} {
 		list := string(deps(t, pkg))
 		for _, mal := range prohibidos {
 			if strings.Contains(list, mal) {

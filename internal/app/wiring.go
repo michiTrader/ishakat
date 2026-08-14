@@ -25,6 +25,14 @@ import (
 	// kind = "anthropic" in config.toml actually resolve instead of
 	// failing validation with "unknown kind".
 	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
+
+	// Same switch, for kind = "gemini" (Fase 4's native
+	// generateContent/streamGenerateContent adapter). The built-in "gemini"
+	// preset in credentials.go still defaults to the openai dialect against
+	// Google's own OpenAI-compatible layer; this import is what makes a
+	// hand-written kind = "gemini" in config.toml actually resolve instead
+	// of failing validation with "unknown kind".
+	_ "github.com/MichiTrader/ishakat/internal/provider/gemini"
 )
 
 // Settings translates a [[provider]] TOML entry into provider.Settings.
