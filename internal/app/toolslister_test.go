@@ -420,3 +420,83 @@ func TestToolsListerReviveToolNotArchivedIsNoOp(t *testing.T) {
 		t.Errorf("state.State = %q, want it left unchanged at %q", state.State, tools.StateVerified)
 	}
 }
+
+// --- DeleteTool (§13/§19.5): Step 21's own delete row ---
+
+func TestToolsListerDeleteToolUnknownName(t *testing.T) {
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "greet"), "greet", "say hello")
+
+	l := NewToolsLister(dir, true)
+	if _, err := l.DeleteTool("ghost", true); err == nil {
+		t.Error("DeleteTool(\"ghost\", true) should error when no such tool exists")
+	}
+}
+
+func TestToolsListerDeleteToolWithoutConfirmLeavesToolOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	writeToolManifest(t, toolDir, "greet", "say hello")
+	if err := tools.SaveState(toolDir, tools.ToolState{
+		State:    tools.StateVerified,
+		UseCount: 3,
+		LastUsed: "2026-08-10",
+	}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	l := NewToolsLister(dir, true)
+	status, err := l.DeleteTool("greet", false)
+	if err != nil {
+		t.Fatalf("DeleteTool: %v", err)
+	}
+	if !strings.Contains(status, "se rehuso a borrar") {
+		t.Errorf("status = %q, want it to report the refusal", status)
+	}
+	for _, want := range []string{"verified", "3 vez", "2026-08-10"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("status = %q, want it to mention %q", status, want)
+		}
+	}
+
+	if _, err := os.Stat(toolDir); err != nil {
+		t.Errorf("os.Stat(%s) = %v, want the tool directory to still exist without confirm", toolDir, err)
+	}
+}
+
+func TestToolsListerDeleteToolConfirmedRemovesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	writeToolManifest(t, toolDir, "greet", "say hello")
+	if err := tools.SaveState(toolDir, tools.ToolState{State: tools.StateVerified}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	l := NewToolsLister(dir, true)
+	status, err := l.DeleteTool("greet", true)
+	if err != nil {
+		t.Fatalf("DeleteTool: %v", err)
+	}
+	if !strings.Contains(status, "borrada de forma permanente") {
+		t.Errorf("status = %q, want it to report the successful deletion", status)
+	}
+
+	if _, err := os.Stat(toolDir); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%s) error = %v, want os.IsNotExist after a confirmed delete", toolDir, err)
+	}
+}
+
+func TestToolsListerDeleteToolNeverUsedStatusLine(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	writeToolManifest(t, toolDir, "greet", "say hello")
+
+	l := NewToolsLister(dir, true)
+	status, err := l.DeleteTool("greet", false)
+	if err != nil {
+		t.Fatalf("DeleteTool: %v", err)
+	}
+	if !strings.Contains(status, "nunca usada") {
+		t.Errorf("status = %q, want it to report never having been used", status)
+	}
+}

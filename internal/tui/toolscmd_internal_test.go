@@ -18,6 +18,8 @@ type fakeToolsLister struct {
 	auditRes    ToolsAuditResult
 	reviveOK    map[string]string
 	reviveErr   map[string]error
+	deleteOK    map[string]string
+	deleteErr   map[string]error
 }
 
 func (f *fakeToolsLister) ListTools() ToolsListResult { return f.res }
@@ -39,6 +41,16 @@ func (f *fakeToolsLister) ReviveTool(name string) (string, error) {
 		return "", err
 	}
 	if status, ok := f.reviveOK[name]; ok {
+		return status, nil
+	}
+	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
+}
+
+func (f *fakeToolsLister) DeleteTool(name string, confirm bool) (string, error) {
+	if err, ok := f.deleteErr[name]; ok {
+		return "", err
+	}
+	if status, ok := f.deleteOK[name]; ok {
 		return status, nil
 	}
 	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
@@ -325,6 +337,67 @@ func TestSlashToolsReviveWithNoneConfiguredSaysSo(t *testing.T) {
 	}
 }
 
+func TestSlashToolsDeleteReportsSuccess(t *testing.T) {
+	tl := &fakeToolsLister{deleteOK: map[string]string{
+		"weather": "\"weather\" borrada de forma permanente. \"weather\" esta actualmente verified (nunca usada).",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools delete weather confirm")
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	if !strings.Contains(text, "tools delete") || !strings.Contains(text, "borrada de forma permanente") {
+		t.Errorf("notice should report the delete status, got %q", text)
+	}
+}
+
+func TestSlashToolsDeleteWithoutConfirmReportsRefusal(t *testing.T) {
+	tl := &fakeToolsLister{deleteOK: map[string]string{
+		"weather": "se rehuso a borrar \"weather\" sin confirmacion. \"weather\" esta actualmente verified (nunca usada).",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools delete weather")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "se rehuso a borrar") {
+		t.Errorf("notice should report the refusal, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsDeleteWithUnknownNameReportsTheError(t *testing.T) {
+	tl := &fakeToolsLister{}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools delete ghost confirm")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "no existe ninguna herramienta llamada") {
+		t.Errorf("notice should report the missing tool, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsDeleteWithNoneConfiguredSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools delete weather confirm")
+
+	root := m.(Root)
+	if !strings.Contains(root.transcript[0].text, "no hay herramientas de capa 2 configuradas") {
+		t.Errorf("notice should explain tools are not configured, got %q", root.transcript[0].text)
+	}
+}
+
 func TestParseToolsReviveArg(t *testing.T) {
 	cases := []struct {
 		args     string
@@ -344,6 +417,40 @@ func TestParseToolsReviveArg(t *testing.T) {
 		name, ok := parseToolsReviveArg(c.args)
 		if ok != c.wantOK || name != c.wantName {
 			t.Errorf("parseToolsReviveArg(%q) = (%q, %v), want (%q, %v)", c.args, name, ok, c.wantName, c.wantOK)
+		}
+	}
+}
+
+func TestParseToolsDeleteArg(t *testing.T) {
+	cases := []struct {
+		args        string
+		wantName    string
+		wantConfirm bool
+		wantOK      bool
+	}{
+		{"", "", false, false},
+		{"delete", "", false, false},
+		{"delete ", "", false, false},
+		{"delete weather", "weather", false, true},
+		{"delete weather confirm", "weather", true, true},
+		{"  delete   weather   confirm  ", "weather", true, true},
+		// "confirm" alone as the bare argument is consumed as the trailing
+		// confirm-word first, leaving an empty name — ambiguous, so this is
+		// rejected rather than guessed at (matching the "no safe reading"
+		// philosophy behind Confirm itself).
+		{"delete confirm", "", false, false},
+		{"delete confirm confirm", "confirm", true, true},
+		{"delete weather confirm now", "", false, false},
+		{"delete weather now", "", false, false},
+		{"deletex weather", "", false, false},
+		{"weather", "", false, false},
+		{"revive weather", "", false, false},
+	}
+	for _, c := range cases {
+		name, confirm, ok := parseToolsDeleteArg(c.args)
+		if ok != c.wantOK || name != c.wantName || confirm != c.wantConfirm {
+			t.Errorf("parseToolsDeleteArg(%q) = (%q, %v, %v), want (%q, %v, %v)",
+				c.args, name, confirm, ok, c.wantName, c.wantConfirm, c.wantOK)
 		}
 	}
 }
