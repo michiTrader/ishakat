@@ -106,25 +106,42 @@ func TestSlashConfigWithNoConfigSaysSo(t *testing.T) {
 	}
 }
 
-func TestSlashDebugAndLoginPointAtTheirBinaryEquivalent(t *testing.T) {
-	cases := []struct {
-		line string
-		want string
-	}{
-		{"/debug", "ishakat doctor"},
-		{"/login", "ishakat login <proveedor>"},
-	}
-	for _, tc := range cases {
-		var m tea.Model = newHeadlessRoot()
-		m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		m = typeAndEnter(m, tc.line)
+func TestSlashLoginPointsAtItsBinaryEquivalent(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/login")
 
-		root := m.(Root)
-		if len(root.transcript) != 1 {
-			t.Fatalf("%s: expected one notice entry, got %d: %v", tc.line, len(root.transcript), root.transcript)
-		}
-		if !strings.Contains(root.transcript[0].text, tc.want) {
-			t.Errorf("%s: notice should point at %q, got %q", tc.line, tc.want, root.transcript[0].text)
+	root := m.(Root)
+	if len(root.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
+	}
+	if !strings.Contains(root.transcript[0].text, "ishakat login <proveedor>") {
+		t.Errorf("notice should point at the binary equivalent, got %q", root.transcript[0].text)
+	}
+}
+
+// TestSlashDebugRendersLocalDiagnostics is /debug's own closing test,
+// mirroring TestSlashConfigRendersRedactedProvidersAndMasksAPIKey's shape:
+// a live command through the real Update path, checked for the sections
+// runDebugCommand (debugcmd.go) promises, and confirming it works with no
+// config loaded at all (m.cfg nil, newHeadlessRoot's default) since most
+// of this screen's value has nothing to do with config.toml.
+func TestSlashDebugRendersLocalDiagnostics(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/debug")
+
+	root := m.(Root)
+	if root.mode != ModeChat {
+		t.Fatalf("mode = %v, want ModeChat: /debug reports inline, it does not open an overlay", root.mode)
+	}
+	if len(root.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(root.transcript), root.transcript)
+	}
+	text := root.transcript[0].text
+	for _, want := range []string{"[network]", "cgo", "termux", "[paths]", "[agents.md]", "[terminal]", "ishakat doctor"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("notice missing %q, got:\n%s", want, text)
 		}
 	}
 }

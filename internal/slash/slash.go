@@ -101,6 +101,18 @@ const (
 	// (§6.1) — `ishakat config init`/a text editor remain how it is
 	// actually changed.
 	KindConfig
+	// KindDebug implements /debug (§13, Step 18's other left-over half,
+	// closed alongside /config's own §17 2026-08-13 entry): a local-only
+	// diagnostic snapshot — version, platform, cgo/termux, config paths,
+	// AGENTS.md layers, the terminal's own already-resolved color/glyph
+	// decision — the in-session counterpart to `ishakat doctor`'s
+	// non-network half. Deliberately does not repeat doctor's DNS/HTTPS
+	// probes: those need either a live netfix.Install() re-run (real I/O,
+	// unsafe to block Update on) or net/http itself, so `ishakat doctor`
+	// remains the answer for "is the network actually reachable",
+	// pointed at explicitly, the same "here is the remedy" honesty
+	// KindConfig's own docstring already establishes for its own gaps.
+	KindDebug
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -152,7 +164,7 @@ var Commands = []Command{
 	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
-	{Name: "debug", Describe: "diagnostico", Kind: KindUnimplemented},
+	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }
