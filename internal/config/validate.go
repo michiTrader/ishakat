@@ -193,20 +193,21 @@ func validEvolveMode(m string) bool {
 
 // validKind lists the wire dialects an adapter actually exists for.
 //
-// "anthropic" and "gemini" used to be accepted here even though no init() in
-// the tree ever registers either string with internal/provider (grep
-// provider.Register across the codebase: only "openai", "responses" and,
-// in tests, "fake"). The practical effect was that a provider preset or a
-// hand-written config.toml with kind = "anthropic" loaded successfully,
-// looked enabled in `provider list`, and only failed — with a confusing
-// message naming a kind the user never typed — on its very first turn.
-// Anthropic and Gemini are both reachable through the "openai" dialect (see
-// the provider presets in credentials.go); the day a native adapter for
-// either exists, its kind string belongs back in this list next to its
+// "anthropic" is accepted since internal/provider/anthropic's init()
+// registers it (Fase 4). "gemini" is not yet: no init() in the tree
+// registers that string with internal/provider (grep provider.Register
+// across the codebase: only "openai", "responses", "anthropic" and, in
+// tests, "fake"). The practical effect of accepting an unregistered kind
+// was that a provider preset or a hand-written config.toml loaded
+// successfully, looked enabled in `provider list`, and only failed — with a
+// confusing message naming a kind the user never typed — on its very first
+// turn. Gemini is still reachable through the "openai" dialect (see the
+// provider presets in credentials.go); the day a native adapter for it
+// exists too, its kind string belongs back in this list next to its
 // init()'s provider.Register call, not before.
 func validKind(k string) bool {
 	switch strings.ToLower(k) {
-	case "openai", "responses", "fake":
+	case "openai", "responses", "anthropic", "fake":
 		return true
 	default:
 		return false

@@ -201,7 +201,13 @@ func TestSettingsPerProviderTimeout(t *testing.T) {
 func TestNewProviderUnknownKind(t *testing.T) {
 	cfg := cfgWithProviders()
 	p := cfg.Providers[0]
-	p.Kind = "anthropic" // valid in the schema, no adapter yet
+	// "anthropic" used to be this test's example of "valid in the schema,
+	// no adapter yet" — that was exactly the bug Fase 4 fixed by giving it
+	// a real adapter (internal/provider/anthropic). "gemini" is next in
+	// line for the same treatment (see validate.go's validKind doc
+	// comment): valid per validKind, but nothing calls
+	// provider.Register("gemini", ...) yet.
+	p.Kind = "gemini" // valid in the schema, no adapter yet
 
 	_, err := NewProvider(cfg, p, "dev")
 	if err == nil {

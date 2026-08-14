@@ -54,6 +54,11 @@ import (
 	// verify.go's own copy of this import states.
 	_ "github.com/MichiTrader/ishakat/internal/provider/openai"
 
+	// Anthropic's own native Messages API adapter (Fase 4), for the same
+	// reason: a hand-written kind = "anthropic" connection must be able to
+	// run this same login wizard, not just `provider add`/the real binary.
+	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
+
 	"github.com/MichiTrader/ishakat/internal/tui"
 )
 
