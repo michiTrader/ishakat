@@ -41,7 +41,7 @@ func TestDefaultRegistryCoversTheFullPlanTable(t *testing.T) {
 	// or /help and the dropdown would silently disagree with the PLAN.
 	want := []string{
 		"help", "model", "models", "skills", "theme", "compact", "new", "resume",
-		"clear", "copy", "retry", "stats", "config", "debug", "login", "exit",
+		"clear", "copy", "retry", "stats", "config", "debug", "tools", "login", "exit",
 	}
 	r := slash.Default()
 	if got := len(r.All()); got != len(want) {

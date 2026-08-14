@@ -128,6 +128,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runConfigCommand()
 	case slash.KindDebug:
 		return m.runDebugCommand()
+	case slash.KindTools:
+		return m.runToolsCommand(args)
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}

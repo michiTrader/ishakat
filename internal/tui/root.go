@@ -398,6 +398,14 @@ type Root struct {
 	// that instead of opening a menu with nothing behind it.
 	sessionLister SessionLister
 
+	// toolsLister is /tools' own read side (§13, Step 20, tools.go's own
+	// doc comment on why this is an interface rather than a direct
+	// internal/tools import). nil means "cannot list layer-2 tools" —
+	// [tools].enabled = false, an empty tools.dir, or any test in this
+	// package, none of which set it — the same nil-is-safe convention
+	// Recorder/SessionLister already establish for their own concern.
+	toolsLister ToolsLister
+
 	// resume is the §13 /resume overlay's own state, live only while
 	// mode == ModeResume.
 	resume resumeMenu
@@ -636,6 +644,12 @@ type Options struct {
 	// not be a reason to refuse to start.
 	SessionLister SessionLister
 
+	// ToolsLister is /tools' own read side (§13, Step 20) — see
+	// Root.toolsLister's own comment for the §6.1 boundary this crosses
+	// (internal/tools pulls net/http in transitively, so this package
+	// never imports it directly) and why nil is a supported value.
+	ToolsLister ToolsLister
+
 	// ToolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false —
 	// the zero value, and every caller before Step 16 — keeps
 	// startEngineTurn on the exact plain-streaming path it always took;
@@ -778,6 +792,13 @@ func NewRoot(o Options) Root {
 		// TestOptionsSessionListerIsWiredIntoRoot for the regression test
 		// this line exists to satisfy.
 		sessionLister: o.SessionLister,
+
+		// toolsLister is /tools' own read side (§13, Step 20) — see
+		// TestOptionsToolsListerIsWiredIntoRoot for the regression test
+		// this line exists to satisfy, the same shape
+		// TestOptionsSessionListerIsWiredIntoRoot already established for
+		// sessionLister above.
+		toolsLister: o.ToolsLister,
 
 		// toolsEnabled/agentOpts are Step 16's fork in startEngineTurn
 		// (root.go) — see Options.ToolsEnabled's own comment for why a
