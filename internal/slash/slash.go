@@ -113,6 +113,19 @@ const (
 	// pointed at explicitly, the same "here is the remedy" honesty
 	// KindConfig's own docstring already establishes for its own gaps.
 	KindDebug
+	// KindTools implements /tools (§13, Step 20's own left-over UI half):
+	// a listing of every layer-2 (declarative/script) tool that has been
+	// created, with its lifecycle state, danger tier and usage stats — the
+	// in-session counterpart to tool_list's own LLM-facing meta-tool,
+	// drawn as structured rows instead of the single text blob a model
+	// reads. No argument lists every tool; an argument is a tool's own
+	// name, showing its manifest in full ("/tools code <name>", §13's own
+	// second row for this step). Read-only, like KindModels/KindSkills/
+	// KindConfig: there is no "edit"/"create"/"delete" Kind here — §19.6's
+	// governance gates (Step 21's remaining `/tools audit`, `/tools
+	// create`, `/tools edit`, `/tools delete`, `/tools revive` rows) are a
+	// separate, larger increment, deliberately not folded into this one.
+	KindTools
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -165,6 +178,7 @@ var Commands = []Command{
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
+	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
 	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }

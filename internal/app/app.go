@@ -300,6 +300,14 @@ func Run(version string, resume bool) int {
 		History:       history,
 		SessionLister: lister,
 
+		// ToolsLister is /tools' own read side (§13, Step 20) — see
+		// internal/app/toolslister.go's own doc comment for why this
+		// package is the one place allowed to import both internal/tools
+		// and internal/tui at once. nil (tools.enabled = false, or an
+		// empty tools.dir) is the supported "cannot list" value, matching
+		// what runToolsCommand already expects.
+		ToolsLister: NewToolsLister(cfg.Tools.Dir, cfg.Tools.Enabled),
+
 		ToolsEnabled: cfg.Tools.Enabled,
 		AgentOptions: agentOpts,
 
