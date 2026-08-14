@@ -58,6 +58,7 @@ import (
 	// reason: a hand-written kind = "anthropic" connection must be able to
 	// run this same login wizard, not just `provider add`/the real binary.
 	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
+	_ "github.com/MichiTrader/ishakat/internal/provider/gemini"
 
 	"github.com/MichiTrader/ishakat/internal/tui"
 )

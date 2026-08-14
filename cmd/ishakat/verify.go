@@ -24,6 +24,7 @@ import (
 	// connection too, not just the openai-shim default the built-in preset
 	// still uses.
 	_ "github.com/MichiTrader/ishakat/internal/provider/anthropic"
+	_ "github.com/MichiTrader/ishakat/internal/provider/gemini"
 )
 
 // verifyTimeout bounds the one probe request `provider add` makes. Long

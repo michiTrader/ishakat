@@ -134,7 +134,12 @@ var providerPresets = map[string]ProviderPreset{
 			"if a turn fails that way, add [provider.params] stream_options " +
 			"= {} for this provider in config.toml. Model ids also come back " +
 			"prefixed (\"models/gemini-...\"): discovery normalizes that, but " +
-			"a hand-written model ref should use the bare id.",
+			"a hand-written model ref should use the bare id. A native " +
+			"adapter also exists (kind = \"gemini\" in config.toml) for " +
+			"anyone who wants generateContent's own quirks (thoughtSignature " +
+			"round-trip, native tool schema) instead of the shim; switching " +
+			"this preset's default is a separate decision for once the " +
+			"native adapter has real-traffic mileage behind it.",
 	},
 }
 
