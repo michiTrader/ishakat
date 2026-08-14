@@ -2361,7 +2361,7 @@ documented.
 | `/copy`, `/retry`, `/stats` | copy, retry, usage and cost | ✅ |
 | `/resume` | reopen a previous session | ✅ |
 | `/config` | view config with secrets redacted | ✅ step 18 closed 2026-08-13 · `KindConfig`/`configcmd.go`, first real caller of `config.Redacted()`/`Mask()` |
-| `/debug` | diagnostics | ⬜ step 18 · today `KindUnimplemented` points at `ishakat doctor` instead of a silent no-op |
+| `/debug` | diagnostics | ✅ step 18 closed 2026-08-14 · `KindDebug`/`debugcmd.go`, local-only snapshot (network/paths/agents.md/terminal); DNS/HTTPS probes stay on `ishakat doctor` |
 | `/login` | authenticate via OAuth device flow | ✅ step 24 closed 2026-08-12 · full wizard inside the TUI (`ModeLogin`) with `internal/app.NewLoginFactory` driving the real HTTP flow (device code → poll → verify → save), with `internal/tui` never importing `net/http` |
 | `/exit` | quit | ✅ |
 | `/tools` | list tools: status, origin, times used, last used | ⬜ step 20 |
