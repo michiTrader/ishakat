@@ -1,7 +1,7 @@
 # ISHAKAT — Project master document
 
-**Version:** 1.2 · **Last updated:** 2026-08-13
-**Status:** Phase 1, Phase 2.5 and **Phase 3 closed** (Steps 0–25 · live `/theme` + `ctrl+t` overlay + colour degradation + input box/footer/autocomplete + syntax highlighting/Chroma + Markdown/Glamour) · **Phase 4 (robustness) in progress** — retries/backoff, timeouts, readable errors, offline mode and automatic `fallback_model` switching are closed (see §17 2026-08-13, `checkFallback`); Anthropic/Gemini native dialect adapters and the full security-review pass remain open (see §11 Phase 4)
+**Version:** 1.2 · **Last updated:** 2026-08-14
+**Status:** Phase 1, Phase 2.5 and **Phase 3 closed** (Steps 0–25 · live `/theme` + `ctrl+t` overlay + colour degradation + input box/footer/autocomplete + syntax highlighting/Chroma + Markdown/Glamour) · **Phase 4 (robustness) in progress** — retries/backoff, timeouts, readable errors, offline mode, automatic `fallback_model` switching and the Anthropic native dialect adapter are closed (see §17 2026-08-13 `checkFallback` and §17 2026-08-14 `internal/provider/anthropic`); the Gemini native dialect adapter and the full security-review pass remain open (see §11 Phase 4)
 **Nature of the project:** ishakat is a **general-purpose agent runtime** for the terminal; the chat is its interface, not the product (§0.1, CLOSED).
 **Nature of this file:** single source of truth. It contains everything conceived and nothing discarded. Whoever reads it — person or AI — can execute the whole project without needing prior context or previous conversations.
 
