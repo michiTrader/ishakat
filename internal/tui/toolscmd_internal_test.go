@@ -20,6 +20,8 @@ type fakeToolsLister struct {
 	reviveErr   map[string]error
 	deleteOK    map[string]string
 	deleteErr   map[string]error
+	editOK      map[string]string
+	editErr     map[string]error
 }
 
 func (f *fakeToolsLister) ListTools() ToolsListResult { return f.res }
@@ -51,6 +53,23 @@ func (f *fakeToolsLister) DeleteTool(name string, confirm bool) (string, error) 
 		return "", err
 	}
 	if status, ok := f.deleteOK[name]; ok {
+		return status, nil
+	}
+	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
+}
+
+// EditTool ignores oldString/newString/replaceAll's own values: every
+// test in this file that exercises /tools edit cares about the
+// dispatch/parsing/rendering path, not about what a real tools.ToolEdit
+// would do with those specific strings (that behavior is already covered
+// by tool_edit_test.go and toolslister_test.go's own real-round-trip
+// tests) -- keyed on name alone, the same shape reviveOK/reviveErr and
+// deleteOK/deleteErr already use.
+func (f *fakeToolsLister) EditTool(name, oldString, newString string, replaceAll bool) (string, error) {
+	if err, ok := f.editErr[name]; ok {
+		return "", err
+	}
+	if status, ok := f.editOK[name]; ok {
 		return status, nil
 	}
 	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
@@ -398,6 +417,114 @@ func TestSlashToolsDeleteWithNoneConfiguredSaysSo(t *testing.T) {
 	}
 }
 
+// typeToolsEditAndEnter feeds "/tools edit <name>", then old_string,
+// then a literal "---" separator line, then new_string, each of those
+// three body lines terminated by ctrl+j (a literal newline inserted into
+// the textarea without submitting, exactly what a human would press) —
+// never a literal "\n" rune, which typeAndEnter would otherwise submit
+// prematurely on. Enter is pressed exactly once at the very end, mirroring
+// how a human actually drives the ctrl+j-then-enter multi-line input
+// mechanism root.go's own updateChat documents.
+func typeToolsEditAndEnter(m tea.Model, firstLine string, bodyLines ...string) tea.Model {
+	for _, r := range firstLine {
+		m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+	}
+	for _, line := range bodyLines {
+		m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+		for _, r := range line {
+			m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+		}
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	return m
+}
+
+func TestSlashToolsEditReportsSuccess(t *testing.T) {
+	tl := &fakeToolsLister{editOK: map[string]string{
+		"weather": "replaced 1 occurrence in \"weather\"'s tool.toml. State: unverified -- run tool_probe before using it again.",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsEditAndEnter(m, "/tools edit weather",
+		`url = "http://example.com/wrong"`,
+		"---",
+		`url = "http://example.com/right"`,
+	)
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	if !strings.Contains(text, "tools edit") || !strings.Contains(text, "unverified") {
+		t.Errorf("notice should report the edit status, got %q", text)
+	}
+}
+
+func TestSlashToolsEditWithUnknownNameReportsTheError(t *testing.T) {
+	tl := &fakeToolsLister{}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsEditAndEnter(m, "/tools edit ghost", "old", "---", "new")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "no existe ninguna herramienta llamada") {
+		t.Errorf("notice should report the missing tool, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsEditWithNoneConfiguredSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsEditAndEnter(m, "/tools edit weather", "old", "---", "new")
+
+	root := m.(Root)
+	if !strings.Contains(root.transcript[0].text, "no hay herramientas de capa 2 configuradas") {
+		t.Errorf("notice should explain tools are not configured, got %q", root.transcript[0].text)
+	}
+}
+
+func TestSlashToolsEditWithReplaceAllPassesItThrough(t *testing.T) {
+	var gotReplaceAll bool
+	tl := &fakeToolsListerCapturingEdit{fakeToolsLister: &fakeToolsLister{
+		editOK: map[string]string{"dup": "replaced 2 occurrence(s) in \"dup\"'s tool.toml. State: unverified -- run tool_probe before using it again."},
+	}, onEdit: func(name, oldString, newString string, replaceAll bool) {
+		gotReplaceAll = replaceAll
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsEditAndEnter(m, "/tools edit dup", "hello", "---", "hi", "replace_all")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "tools edit") {
+		t.Fatalf("notice should report the edit status, got %q", got.transcript[0].text)
+	}
+	if !gotReplaceAll {
+		t.Error("expected replace_all to be passed through as true")
+	}
+}
+
+// fakeToolsListerCapturingEdit wraps fakeToolsLister to additionally
+// observe EditTool's own arguments -- a second, deliberately narrow test
+// double rather than adding an observer field to fakeToolsLister itself,
+// since no other test in this file needs to inspect EditTool's own
+// arguments this closely.
+type fakeToolsListerCapturingEdit struct {
+	*fakeToolsLister
+	onEdit func(name, oldString, newString string, replaceAll bool)
+}
+
+func (f *fakeToolsListerCapturingEdit) EditTool(name, oldString, newString string, replaceAll bool) (string, error) {
+	f.onEdit(name, oldString, newString, replaceAll)
+	return f.fakeToolsLister.EditTool(name, oldString, newString, replaceAll)
+}
+
 func TestParseToolsReviveArg(t *testing.T) {
 	cases := []struct {
 		args     string
@@ -452,6 +579,67 @@ func TestParseToolsDeleteArg(t *testing.T) {
 			t.Errorf("parseToolsDeleteArg(%q) = (%q, %v, %v), want (%q, %v, %v)",
 				c.args, name, confirm, ok, c.wantName, c.wantConfirm, c.wantOK)
 		}
+	}
+}
+
+func TestParseToolsEditArg(t *testing.T) {
+	cases := []struct {
+		name           string
+		args           string
+		wantName       string
+		wantOld        string
+		wantNew        string
+		wantReplaceAll bool
+		wantOK         bool
+	}{
+		{
+			name:     "basic single-line old/new",
+			args:     "edit weather\nold_text\n---\nnew_text",
+			wantName: "weather", wantOld: "old_text", wantNew: "new_text", wantOK: true,
+		},
+		{
+			name:     "multi-line old and new bodies",
+			args:     "edit weather\nline1\nline2\n---\nreplacement1\nreplacement2",
+			wantName: "weather", wantOld: "line1\nline2", wantNew: "replacement1\nreplacement2", wantOK: true,
+		},
+		{
+			name:           "trailing replace_all line",
+			args:           "edit dup\nhello\n---\nhi\nreplace_all",
+			wantName:       "dup",
+			wantOld:        "hello",
+			wantNew:        "hi",
+			wantReplaceAll: true,
+			wantOK:         true,
+		},
+		{
+			name:     "empty new_string is allowed (a pure deletion)",
+			args:     "edit weather\nold_text\n---\n",
+			wantName: "weather", wantOld: "old_text", wantNew: "", wantOK: true,
+		},
+		{name: "empty args", args: "", wantOK: false},
+		{name: "just the word edit, nothing else", args: "edit", wantOK: false},
+		{name: "name with no body at all", args: "edit weather", wantOK: false},
+		{name: "no separator line", args: "edit weather\nold_text\nnew_text", wantOK: false},
+		{name: "empty old_string is rejected", args: "edit weather\n---\nnew_text", wantOK: false},
+		{name: "name with embedded whitespace is rejected", args: "edit weather now\nold\n---\nnew", wantOK: false},
+		{name: "different first word falls through", args: "revive weather\nold\n---\nnew", wantOK: false},
+		{name: "editx falls through (whole-word match only)", args: "editx weather\nold\n---\nnew", wantOK: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			name, oldString, newString, replaceAll, ok := parseToolsEditArg(c.args)
+			if ok != c.wantOK {
+				t.Fatalf("parseToolsEditArg(%q) ok = %v, want %v", c.args, ok, c.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if name != c.wantName || oldString != c.wantOld || newString != c.wantNew || replaceAll != c.wantReplaceAll {
+				t.Errorf("parseToolsEditArg(%q) = (%q, %q, %q, %v), want (%q, %q, %q, %v)",
+					c.args, name, oldString, newString, replaceAll,
+					c.wantName, c.wantOld, c.wantNew, c.wantReplaceAll)
+			}
+		})
 	}
 }
 

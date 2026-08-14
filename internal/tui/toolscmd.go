@@ -1,10 +1,10 @@
 // toolscmd.go implements /tools (§13, Step 20's own listing plus Step
-// 21's own audit/revive/delete rows): see tools.go's doc comment for the
-// §6.1 boundary that shaped this as an interface (ToolsLister) rather
+// 21's own audit/revive/delete/edit rows): see tools.go's doc comment for
+// the §6.1 boundary that shaped this as an interface (ToolsLister) rather
 // than a direct internal/tools import, and for why nil is a supported
 // Root.toolsLister value.
 //
-// Five shapes, mirroring §13's own rows: bare "/tools" renders every
+// Six shapes, mirroring §13's own rows: bare "/tools" renders every
 // layer-2 tool's status/danger/usage as a row each (the in-session
 // counterpart to tool_list's LLM-facing text blob); "/tools code <name>"
 // renders one tool's manifest in full; "/tools audit" renders every
@@ -12,13 +12,20 @@
 // plus its current SHA-256 and a tamper flag (§19.8 mitigations 2 and 6);
 // "/tools revive <name>" calls ToolsLister.ReviveTool and reports its
 // status line; "/tools delete <name> [confirm]" calls ToolsLister.
-// DeleteTool and reports its status line. The first three are read-only.
-// revive needs no confirmation step (§19.5's Archive/Revive pair is
-// DangerLow and idempotent by construction); delete does — the trailing
-// literal word "confirm" is this command's own explicit, typed gate,
-// the slash-command counterpart to tool_delete's own required boolean
-// argument (§19.5: "removes it, with confirmation"). create/edit remain
-// Step 21's still-open rows.
+// DeleteTool and reports its status line; "/tools edit <name>" (a
+// multi-line shape, see parseToolsEditArg's own doc comment) calls
+// ToolsLister.EditTool and reports its status line. The first three are
+// read-only. revive needs no confirmation step (§19.5's Archive/Revive
+// pair is DangerLow and idempotent by construction); delete does — the
+// trailing literal word "confirm" is this command's own explicit, typed
+// gate, the slash-command counterpart to tool_delete's own required
+// boolean argument (§19.5: "removes it, with confirmation"). edit takes
+// no separate confirmation step either: like revive, tool_edit.go's own
+// hard blocks (checkManifestSafety, the re-parse check) already refuse
+// anything dangerous before a single byte reaches disk, and the
+// resulting demotion to unverified (not a silent success) is itself the
+// safety net a confirmation step would otherwise exist to provide.
+// create remains Step 21's one still-open row.
 package tui
 
 import (
@@ -70,6 +77,14 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 			return m.slashNotice(g.warnMark + " " + err.Error())
 		}
 		return m.slashNotice(g.assistantMark + " tools delete " + g.dot + " " + status)
+	}
+
+	if name, oldString, newString, replaceAll, ok := parseToolsEditArg(args); ok {
+		status, err := m.toolsLister.EditTool(name, oldString, newString, replaceAll)
+		if err != nil {
+			return m.slashNotice(g.warnMark + " " + err.Error())
+		}
+		return m.slashNotice(g.assistantMark + " tools edit " + g.dot + " " + status)
 	}
 
 	res := m.toolsLister.ListTools()
@@ -243,6 +258,94 @@ func parseToolsDeleteArg(args string) (name string, confirm bool, ok bool) {
 		return "", false, false
 	}
 	return rest, false, true
+}
+
+// parseToolsEditArg recognizes /tools edit's own multi-line shape:
+//
+//	edit <name>
+//	<old_string, one or more lines>
+//	---
+//	<new_string, zero or more lines>
+//	[replace_all]
+//
+// old_string/new_string are typed across multiple literal lines (the
+// TUI's own ctrl+j binding inserts a real "\n" into the input without
+// submitting — see root.go's own keys.Newline doc comment; slash.Parse
+// only ever cuts on the first space, so this whole multi-line string
+// survives intact into args) because tool_edit's own old_string/
+// new_string contract is exact-text, verbatim, arbitrary-length TOML —
+// the same shape edit_file's own arguments have, and just as unsuited to
+// a single space-separated command line as edit_file's own arguments
+// would be. The literal separator line "---" (its own line, nothing
+// else on it once trimmed) is this command's own invented convention —
+// no existing delimiter convention for a multi-field slash-command
+// argument exists elsewhere in this package to reuse, and "---" was
+// chosen because it cannot occur as a bare line inside valid TOML
+// (TOML's own table/array-of-tables headers always begin with "[", never
+// "---", and a "---" is not a value bareword any parser would accept
+// unquoted). An optional trailing "replace_all" line (its own line,
+// after new_string) mirrors toolEditArgs.ReplaceAll, the same trailing-
+// literal-word convention parseToolsDeleteArg already uses for "confirm"
+// — except here it is a separate line, not a trailing word on the same
+// line, since new_string's own last line must be free to end in
+// anything (including whitespace) without a same-line suffix silently
+// eating part of it.
+//
+// Anything not matching this shape (no name, no old_string body at all,
+// no "---" separator line found) is not recognized as this subcommand —
+// the caller falls back to the bare listing, the same "fall through,
+// don't error" rule every other parseTools*Arg function here already
+// follows for its own unmatched shape.
+func parseToolsEditArg(args string) (name, oldString, newString string, replaceAll bool, ok bool) {
+	args = strings.TrimSpace(args)
+	rest, matched := cutPrefixWord(args, "edit")
+	if !matched {
+		return "", "", "", false, false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", "", "", false, false
+	}
+
+	nameAndBody := strings.SplitN(rest, "\n", 2)
+	if len(nameAndBody) < 2 {
+		// "edit <name>" alone, with no old_string/new_string body at all,
+		// is not this subcommand's shape -- there is nothing to edit.
+		return "", "", "", false, false
+	}
+	name = strings.TrimSpace(nameAndBody[0])
+	if name == "" || strings.ContainsAny(name, " \t") {
+		// A name with embedded whitespace ("edit foo bar\n...") is not a
+		// single tool name -- reject rather than guess which word is the
+		// real name.
+		return "", "", "", false, false
+	}
+
+	lines := strings.Split(nameAndBody[1], "\n")
+	sepIdx := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "---" {
+			sepIdx = i
+			break
+		}
+	}
+	if sepIdx == -1 {
+		// No separator line found -- not this subcommand's shape.
+		return "", "", "", false, false
+	}
+	oldString = strings.Join(lines[:sepIdx], "\n")
+	if oldString == "" {
+		return "", "", "", false, false
+	}
+
+	after := lines[sepIdx+1:]
+	if len(after) > 0 && strings.TrimSpace(after[len(after)-1]) == "replace_all" {
+		replaceAll = true
+		after = after[:len(after)-1]
+	}
+	newString = strings.Join(after, "\n")
+
+	return name, oldString, newString, replaceAll, true
 }
 
 // cutSuffixWord is cutPrefixWord's mirror: reports whether s ends with
