@@ -74,6 +74,56 @@ func (l toolsLister) ListTools() tui.ToolsListResult {
 	return res
 }
 
+// AuditTools mirrors tool_probe.go's own ComputeHash/DetectTamper call
+// pair (§19.8 mitigations 2 and 6) but, unlike a probe, never mutates
+// state.json — this is a read-only report, not a re-verification: a
+// currently-unverified tool's tamper flag is still worth showing (it
+// answers "did the content change since it was last touched", which is
+// meaningful even for a tool that has never passed a probe), so this
+// does not skip tools by state the way CanUse's own gate would.
+func (l toolsLister) AuditTools() tui.ToolsAuditResult {
+	disc := tools.DiscoverDeclarative(l.dir)
+	res := tui.ToolsAuditResult{Warn: disc.Warn}
+	for _, m := range disc.Tools {
+		entry := tui.ToolAuditEntry{
+			Name:        m.Name,
+			CreatedBy:   m.Origin.CreatedBy,
+			Reason:      m.Origin.Reason,
+			Repetitions: m.Origin.Repetitions,
+			SessionID:   m.Origin.SessionID,
+			Sources:     m.Origin.Sources,
+		}
+
+		hash, err := tools.ComputeHash(m.Dir, tools.ManifestFileName)
+		if err != nil {
+			// The manifest existed a moment ago (DiscoverDeclarative just
+			// read it) but could not be hashed now — report it on the row
+			// rather than dropping the tool from the audit entirely,
+			// matching ListTools' own "surface, don't hide" leniency for
+			// a LoadState failure.
+			entry.HashError = err.Error()
+			res.Tools = append(res.Tools, entry)
+			continue
+		}
+		entry.Hash = hash
+
+		state, err := tools.LoadState(m.Dir)
+		if err != nil {
+			// A corrupt state.json means "tamper status unknown", not
+			// "assume tampered" — the hash itself is still valid and
+			// shown; only the comparison against a last-probed hash is
+			// unavailable.
+			entry.HashError = err.Error()
+			res.Tools = append(res.Tools, entry)
+			continue
+		}
+		_, tampered := tools.DetectTamper(state, hash)
+		entry.Tampered = tampered
+		res.Tools = append(res.Tools, entry)
+	}
+	return res
+}
+
 // ToolManifest returns one tool's manifest file verbatim, or an error if
 // no declarative tool by that name exists under l.dir.
 func (l toolsLister) ToolManifest(name string) (string, error) {

@@ -1,6 +1,11 @@
-// tools.go defines /tools' own read side (§13, Step 20's left-over UI
-// half): a listing of every layer-2 (declarative/script) tool that exists
-// right now, plus /tools code <name> to view one's manifest in full.
+// tools.go defines /tools' own read side (§13, Step 20's own listing plus
+// Step 21's own audit row): a listing of every layer-2 (declarative/
+// script) tool that exists right now, /tools code <name> to view one's
+// manifest in full, and /tools audit to see each tool's provenance
+// (origin, sources, session_id) and current SHA-256 (§19.8 mitigations 2
+// and 6). All three are read-only — Step 21's remaining rows (create,
+// edit, delete, revive) are the write/governance-gated half, not this
+// file's concern.
 //
 // internal/tui may never import internal/tools directly: declarative.go's
 // HTTP client (and Fetch, registry.go's Core) pull net/http transitively
@@ -50,10 +55,51 @@ type ToolsListResult struct {
 	Warn  string
 }
 
+// ToolAuditEntry is one row of a "/tools audit" listing: §19.8 mitigation
+// 2, verbatim — "Every tool records sources (URLs read to build it) and
+// session_id. /tools audit lists everything with origin and SHA-256." —
+// plus the tamper signal §19.8 mitigation 6 already computes elsewhere
+// (tool_probe's own DetectTamper call), surfaced here read-only rather
+// than re-run: a mismatch between the last-recorded (probed) hash and the
+// tool's current on-disk content means it changed without going through
+// tool_edit, exactly the event a provenance audit exists to catch.
+type ToolAuditEntry struct {
+	Name        string
+	CreatedBy   string // "user" / "model" / "community" — never self-declared danger, only who/why
+	Reason      string
+	Repetitions int
+	SessionID   string
+	Sources     []string // URLs read to build the tool, as claimed by Origin — displayed, never verified
+
+	// Hash is the tool's current on-disk SHA-256 (ComputeHash over its
+	// manifest right now, not the last-probed value from state.json).
+	// HashError is set instead when the hash could not even be computed
+	// (e.g. the manifest went missing between discovery and this call) —
+	// the two are mutually exclusive, matching ToolSummary's own
+	// State/LastError split for a listing row that could not be read.
+	Hash      string
+	HashError string
+	// Tampered is true when Hash differs from the tool's last successful
+	// probe (an empty last-probed hash — never probed — never counts as
+	// tampering, matching DetectTamper's own documented rule).
+	Tampered bool
+}
+
+// ToolsAuditResult is what AuditTools returns, mirroring ToolsListResult's
+// own Tools+Warn shape for the same "warn, don't fail" reason.
+type ToolsAuditResult struct {
+	Tools []ToolAuditEntry
+	Warn  string
+}
+
 // ToolsLister is /tools' own read side. ListTools powers the bare
 // "/tools" listing; ToolManifest powers "/tools code <name>" (returns the
-// manifest file's raw text, or an error if no tool by that name exists).
+// manifest file's raw text, or an error if no tool by that name exists);
+// AuditTools powers "/tools audit" (§19.8 mitigation 2 and mitigation 7's
+// "origin, use count, last used" together with mitigation 6's tamper
+// check).
 type ToolsLister interface {
 	ListTools() ToolsListResult
 	ToolManifest(name string) (string, error)
+	AuditTools() ToolsAuditResult
 }

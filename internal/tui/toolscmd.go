@@ -1,14 +1,17 @@
-// toolscmd.go implements /tools (§13, Step 20's own left-over UI half):
-// see tools.go's doc comment for the §6.1 boundary that shaped this as an
-// interface (ToolsLister) rather than a direct internal/tools import, and
-// for why nil is a supported Root.toolsLister value.
+// toolscmd.go implements /tools (§13, Step 20's own listing plus Step
+// 21's own audit row): see tools.go's doc comment for the §6.1 boundary
+// that shaped this as an interface (ToolsLister) rather than a direct
+// internal/tools import, and for why nil is a supported Root.toolsLister
+// value.
 //
-// Two shapes, mirroring §13's own two rows for this step: bare "/tools"
-// renders every layer-2 tool's status/danger/usage as a row each (the
-// in-session counterpart to tool_list's LLM-facing text blob); "/tools
-// code <name>" renders one tool's manifest in full. Both are read-only —
-// there is no write/mutate path here (that is Step 21's larger,
-// governance-gated increment: audit/create/edit/delete/revive).
+// Three shapes, mirroring §13's own three rows: bare "/tools" renders
+// every layer-2 tool's status/danger/usage as a row each (the in-session
+// counterpart to tool_list's LLM-facing text blob); "/tools code <name>"
+// renders one tool's manifest in full; "/tools audit" renders every
+// tool's provenance (created_by/reason/repetitions/session_id/sources)
+// plus its current SHA-256 and a tamper flag (§19.8 mitigations 2 and 6).
+// All three are read-only — there is no write/mutate path here (that is
+// Step 21's remaining, governance-gated rows: create/edit/delete/revive).
 package tui
 
 import (
@@ -42,6 +45,10 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 		return m.slashNotice(b.String())
 	}
 
+	if isToolsAuditArg(args) {
+		return m.renderToolsAudit()
+	}
+
 	res := m.toolsLister.ListTools()
 	if len(res.Tools) == 0 {
 		msg := g.warnMark + " no se ha creado ninguna herramienta de capa 2 todavia"
@@ -69,6 +76,77 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 	}
 
 	return m.slashNotice(b.String())
+}
+
+// renderToolsAudit implements "/tools audit" (§19.8 mitigation 2,
+// verbatim: "Every tool records sources ... and session_id. /tools audit
+// lists everything with origin and SHA-256.") plus mitigation 6's tamper
+// signal, one line per field per tool (rather than tools' single dense
+// line) since a provenance report is read closely, not skimmed the way
+// the bare listing's status line is.
+func (m Root) renderToolsAudit() (tea.Model, tea.Cmd) {
+	g := m.lay.glyphs()
+	res := m.toolsLister.AuditTools()
+	if len(res.Tools) == 0 {
+		msg := g.warnMark + " no se ha creado ninguna herramienta de capa 2 todavia"
+		if res.Warn != "" {
+			msg += "\n  " + g.warnMark + " " + res.Warn
+		}
+		return m.slashNotice(msg)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s tools audit %s %d", g.assistantMark, g.dot, len(res.Tools))
+	if res.Warn != "" {
+		fmt.Fprintf(&b, "\n  %s %s", g.warnMark, res.Warn)
+	}
+	for _, t := range res.Tools {
+		createdBy := t.CreatedBy
+		if createdBy == "" {
+			createdBy = "unknown"
+		}
+		fmt.Fprintf(&b, "\n  %s %s", g.modelMark, t.Name)
+		fmt.Fprintf(&b, "\n    created_by=%s repetitions=%d session_id=%s", createdBy, t.Repetitions, orNever(t.SessionID))
+		if t.Reason != "" {
+			fmt.Fprintf(&b, "\n    reason=%q", t.Reason)
+		}
+		if len(t.Sources) > 0 {
+			fmt.Fprintf(&b, "\n    sources=%s", strings.Join(t.Sources, ", "))
+		} else {
+			fmt.Fprintf(&b, "\n    sources=none")
+		}
+		if t.HashError != "" {
+			fmt.Fprintf(&b, "\n    %s sha256 unavailable: %s", g.warnMark, t.HashError)
+			continue
+		}
+		fmt.Fprintf(&b, "\n    sha256=%s", t.Hash)
+		if t.Tampered {
+			fmt.Fprintf(&b, "\n    %s tampered: on-disk content changed since the last successful probe", g.warnMark)
+		}
+	}
+
+	return m.slashNotice(b.String())
+}
+
+// orNever returns s, or the literal "never" when s is empty — the same
+// convention runToolsCommand already uses for an unset LastUsed, reused
+// here for an unset SessionID (a tool created outside any recorded
+// session, or hand-written before this bookkeeping existed).
+func orNever(s string) string {
+	if s == "" {
+		return "never"
+	}
+	return s
+}
+
+// isToolsAuditArg reports whether args (already known not to be the
+// "code <name>" shape) is the bare "audit" subcommand — the same
+// whole-word matching cutPrefixWord already applies to "code", so
+// "auditx" cannot false-match. Unlike "code", "audit" takes no further
+// argument: anything after it is not recognized as this subcommand and
+// falls through to the bare listing instead of silently being ignored.
+func isToolsAuditArg(args string) bool {
+	return strings.TrimSpace(args) == "audit"
 }
 
 // parseToolsCodeArg recognizes the "code <name>" shape of /tools' own
