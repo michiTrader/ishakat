@@ -356,3 +356,67 @@ func TestToolsListerAuditToolsSurfacesDiscoveryWarnWithoutFailing(t *testing.T) 
 		t.Error("Warn must be non-empty when a manifest fails to parse")
 	}
 }
+
+// --- ReviveTool (§13/§19.5): Step 21's own revive row ---
+
+func TestToolsListerReviveToolUnknownName(t *testing.T) {
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "greet"), "greet", "say hello")
+
+	l := NewToolsLister(dir, true)
+	if _, err := l.ReviveTool("ghost"); err == nil {
+		t.Error("ReviveTool(\"ghost\") should error when no such tool exists")
+	}
+}
+
+func TestToolsListerReviveToolRestoresArchivedState(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	writeToolManifest(t, toolDir, "greet", "say hello")
+	if err := tools.SaveState(toolDir, tools.ToolState{State: tools.StateVerified}.Archive()); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	l := NewToolsLister(dir, true)
+	status, err := l.ReviveTool("greet")
+	if err != nil {
+		t.Fatalf("ReviveTool: %v", err)
+	}
+	if !strings.Contains(status, "verified") {
+		t.Errorf("status = %q, want it to mention the restored state", status)
+	}
+
+	state, err := tools.LoadState(toolDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.State != tools.StateVerified {
+		t.Errorf("state.State = %q, want %q", state.State, tools.StateVerified)
+	}
+}
+
+func TestToolsListerReviveToolNotArchivedIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "greet")
+	writeToolManifest(t, toolDir, "greet", "say hello")
+	if err := tools.SaveState(toolDir, tools.ToolState{State: tools.StateVerified}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	l := NewToolsLister(dir, true)
+	status, err := l.ReviveTool("greet")
+	if err != nil {
+		t.Fatalf("ReviveTool: %v", err)
+	}
+	if !strings.Contains(status, "no esta archivada") {
+		t.Errorf("status = %q, want it to report the no-op", status)
+	}
+
+	state, err := tools.LoadState(toolDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.State != tools.StateVerified {
+		t.Errorf("state.State = %q, want it left unchanged at %q", state.State, tools.StateVerified)
+	}
+}

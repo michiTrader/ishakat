@@ -16,6 +16,8 @@ type fakeToolsLister struct {
 	manifests   map[string]string
 	manifestErr error
 	auditRes    ToolsAuditResult
+	reviveOK    map[string]string
+	reviveErr   map[string]error
 }
 
 func (f *fakeToolsLister) ListTools() ToolsListResult { return f.res }
@@ -31,6 +33,16 @@ func (f *fakeToolsLister) ToolManifest(name string) (string, error) {
 }
 
 func (f *fakeToolsLister) AuditTools() ToolsAuditResult { return f.auditRes }
+
+func (f *fakeToolsLister) ReviveTool(name string) (string, error) {
+	if err, ok := f.reviveErr[name]; ok {
+		return "", err
+	}
+	if status, ok := f.reviveOK[name]; ok {
+		return status, nil
+	}
+	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
+}
 
 // withToolsLister mirrors withSessionLister/withRecorder: it assigns the
 // private field directly for every test in this file except the one
@@ -265,6 +277,74 @@ func TestSlashToolsAuditSurfacesTheDiscoverWarning(t *testing.T) {
 	got := m.(Root)
 	if !strings.Contains(got.transcript[0].text, "could not parse tool.toml") {
 		t.Errorf("notice should surface the discovery warning, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsReviveReportsSuccess(t *testing.T) {
+	tl := &fakeToolsLister{reviveOK: map[string]string{
+		"weather": "\"weather\" revivida; su estado ahora es verified.",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools revive weather")
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	if !strings.Contains(text, "tools revive") || !strings.Contains(text, "revivida") {
+		t.Errorf("notice should report the revive status, got %q", text)
+	}
+}
+
+func TestSlashToolsReviveWithUnknownNameReportsTheError(t *testing.T) {
+	tl := &fakeToolsLister{}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools revive ghost")
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "no existe ninguna herramienta llamada") {
+		t.Errorf("notice should report the missing tool, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsReviveWithNoneConfiguredSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/tools revive weather")
+
+	root := m.(Root)
+	if !strings.Contains(root.transcript[0].text, "no hay herramientas de capa 2 configuradas") {
+		t.Errorf("notice should explain tools are not configured, got %q", root.transcript[0].text)
+	}
+}
+
+func TestParseToolsReviveArg(t *testing.T) {
+	cases := []struct {
+		args     string
+		wantName string
+		wantOK   bool
+	}{
+		{"", "", false},
+		{"revive", "", false},
+		{"revive ", "", false},
+		{"revive weather", "weather", true},
+		{"  revive   weather  ", "weather", true},
+		{"revivex weather", "", false},
+		{"weather", "", false},
+		{"code weather", "", false},
+	}
+	for _, c := range cases {
+		name, ok := parseToolsReviveArg(c.args)
+		if ok != c.wantOK || name != c.wantName {
+			t.Errorf("parseToolsReviveArg(%q) = (%q, %v), want (%q, %v)", c.args, name, ok, c.wantName, c.wantOK)
+		}
 	}
 }
 
