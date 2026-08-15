@@ -11,15 +11,27 @@
 // (Step 15). That keeps internal/tools out of engine's import graph, which is
 // what makes Step 21's auto-extension injectable without a refactor.
 //
-// The five semantics below are part of the contract, not implementation
-// details (§12bis): the hard cap, loop detection, cancellation, error-is-data
-// and output truncation. Each is small on its own; together they are what
-// stops a stuck loop from burning real money on an expensive model.
+// The six semantics below are part of the contract, not implementation
+// details (§12bis, §21.9): the hard cap, loop detection, cancellation,
+// error-is-data, output truncation, and — added by step 26 — refusal ends the
+// turn. Each is small on its own; together they are what stops a stuck loop
+// from burning real money on an expensive model.
+//
+// The sixth is the exception that keeps the fourth honest. Error-is-data is
+// what lets the reactive loop handle the unforeseen without a Planner (§3), so
+// it is deliberately broad: a tool that ran and failed, a tool that does not
+// exist, a malformed argument, all of it goes back to the model to react to.
+// A human's refusal is the one case where that is wrong, because the thing
+// blocking progress is a decision rather than a fact about the world, and no
+// further request in this turn can change it. Treating it as data is what
+// turned an over-asking agent into a rate-limited one for a real user
+// (docs/BUG-rate-limit-amplifier.md).
 package engine
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -376,6 +388,38 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 					return result, ctx.Err()
 				}
+
+				// A human's refusal is the one runner failure that is NOT data
+				// (§21.9 fix 1, docs/BUG-rate-limit-amplifier.md). Handing it
+				// back to the model invites a variant of the same request, and
+				// every variant is another provider request carrying the whole
+				// grown history — the amplifier that took a real user's account
+				// offline. The turn ends here instead.
+				//
+				//	A denial is a decision, not a hint. When the human says no,
+				//	the turn ends.
+				//
+				// This is not the loop refusing to handle the unforeseen: the
+				// user has already considered the alternatives and declined. If
+				// they want one, "find another way" starts a new turn —
+				// explicitly, and at human speed.
+				//
+				// Returning a nil error (like the cap and loop detection do) is
+				// deliberate: a denial is a normal, expected outcome of a turn,
+				// not a failure of the engine. The caller surfaces Stopped.
+				var denied deniedHint
+				if errors.As(rerr, &denied) && denied.Denied() {
+					result.Stopped = fmt.Sprintf("stopped: %s", rerr.Error())
+					result.Text = text.String()
+					// The refused call still needs its own tool reply before
+					// the rest are closed out, or the assistant message keeps
+					// an orphaned tool_call and the next request 400s (Bug 2).
+					history.Add(convo.NewMessage(convo.RoleTool,
+						convo.ToolErrorBlock(tc.id, tc.name, rerr.Error())))
+					notExecuted(history, toolCalls[i+1:], "the turn ended when permission was refused")
+					return result, nil
+				}
+
 				outText = rerr.Error()
 				isError = true
 			} else {

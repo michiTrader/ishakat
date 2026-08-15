@@ -47,6 +47,52 @@ type Reviewer interface {
 // the tool request. Its message is safe to return to the model as tool output.
 var ErrDenied = errors.New("tool permission denied")
 
+// refusal builds a denial that ENDS THE TURN, as opposed to one that is
+// ordinary tool-error data. Both satisfy errors.Is(err, ErrDenied); only this
+// one satisfies the Denied() contract internal/engine matches with errors.As
+// (§21.9 fix 1, docs/BUG-rate-limit-amplifier.md).
+//
+// The line between the two is not "how bad is it" — it is a question about
+// whether another provider request could possibly change the answer:
+//
+//   - **Turn-ending** (this function). A human refused, or no human can be
+//     reached to ask. Nothing the model does next in this turn can be
+//     approved, so every further request is pure amplification. This is the
+//     defect that took a real user's account offline: the model receives the
+//     refusal as data, tries a variant, and each variant is another request
+//     carrying the whole grown history.
+//
+//   - **Data** (plain fmt.Errorf with %w). A configuration boundary refused
+//     *these arguments* or *this tool*. A different path or a different tool
+//     may well be allowed, and the model choosing one is correct recovery —
+//     the error-is-data mechanism of §12bis working as intended (§3), which
+//     is the reason ishakat needs no Planner. Bounding the abuse of that is
+//     loop detection's job (fix 3), not this function's.
+//
+// So a `write_file` blocked by write_deny stays data: writing somewhere legal
+// instead is the right next move. A human pressing "no" does not, because
+// the human already considered the alternatives and declined.
+func refusal(format string, a ...any) error {
+	return &deniedError{msg: ErrDenied.Error() + ": " + fmt.Sprintf(format, a...)}
+}
+
+// deniedError is a refusal that ends the turn. It unwraps to ErrDenied so
+// every existing errors.Is(err, ErrDenied) call site keeps working unchanged,
+// and it reports Denied() so internal/engine can recognize it structurally
+// without importing this package — the same technique provider.Error already
+// uses for the retry hint.
+type deniedError struct{ msg string }
+
+func (e *deniedError) Error() string { return e.msg }
+
+// Unwrap keeps errors.Is(err, ErrDenied) true for callers that only care that
+// permission was refused, regardless of which kind of refusal it was.
+func (e *deniedError) Unwrap() error { return ErrDenied }
+
+// Denied satisfies the contract internal/engine matches with errors.As. It is
+// the whole reason this type exists rather than a plain wrapped sentinel.
+func (e *deniedError) Denied() bool { return true }
+
 // Guard applies configured hard denies, policy modes, optional session grants,
 // and an injected reviewer. It is safe for sequential or concurrent callers.
 type Guard struct {
@@ -118,16 +164,22 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if req.Tier == Medium && g.hasSessionGrant(key) {
 		return nil
 	}
+	// The three refusals below all end the turn (§21.9 fix 1). They share one
+	// property the configuration refusals above do not: no human is available
+	// to change the answer within this turn — either because there is nobody
+	// to ask, because asking failed, or because the person was asked and said
+	// no. Retrying a variant against any of them cannot succeed, so returning
+	// them as data would buy nothing and cost a provider request each time.
 	if g.reviewer == nil {
-		return fmt.Errorf("%w: %s requires interactive approval", ErrDenied, req.Name)
+		return refusal("%s requires interactive approval, and no reviewer is available", req.Name)
 	}
 
 	decision, err := g.reviewer.Review(ctx, req)
 	if err != nil {
-		return fmt.Errorf("%w: approval failed: %v", ErrDenied, err)
+		return refusal("approval failed: %v", err)
 	}
 	if !decision.Allow {
-		return fmt.Errorf("%w: user declined %s", ErrDenied, req.Name)
+		return refusal("user declined %s", req.Name)
 	}
 	if decision.AllowSession && req.Tier == Medium && g.permissions.AllowSession {
 		g.mu.Lock()

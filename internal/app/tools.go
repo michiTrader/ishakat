@@ -12,6 +12,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/permissions"
@@ -48,13 +49,42 @@ func ToolRunnerFrom(reg *tools.Registry) engine.ToolRunner {
 	return ToolRunnerWithGuard(reg, nil)
 }
 
-// ToolRunnerWithGuard checks a tool request before dispatching it. A denied
-// request is normal tool-error data, not an engine failure: the model receives
-// the reason and can choose a non-destructive alternative on its next turn.
+// ToolRunnerWithGuard checks a tool request before dispatching it.
+//
+// A refusal takes one of two paths, and choosing between them is this
+// function's whole responsibility (§21.9 fix 1,
+// docs/BUG-rate-limit-amplifier.md):
+//
+//   - A refusal a human made, or that no human was available to make, is
+//     returned as a Go **error**. engine's loop recognizes it structurally and
+//     ends the turn. Nothing further in this turn could be approved, so any
+//     additional provider request is pure cost.
+//
+//   - Every other refusal is returned as normal tool-error **data**: the model
+//     receives the reason and can choose a legal alternative on the next
+//     iteration, which is §12bis's error-is-data contract and the reason §3
+//     needs no Planner.
+//
+// This function used to return every refusal as data, and its own doc comment
+// stated that intent — which is precisely the defect. Returning `nil` as the
+// error means "this tool ran and produced a result", so nothing upstream could
+// tell that a person had said no. The model then tried variants (`ls` →
+// `ls -la` → `find .`), each one a fresh provider request carrying the whole
+// grown history, and a real user's account was rate-limited into an outage.
+//
+// The discrimination is deliberately NOT `errors.Is(err, permissions.ErrDenied)`:
+// that sentinel is true for both kinds. It is the narrower Denied() contract,
+// matched the same way engine matches it.
 func ToolRunnerWithGuard(reg *tools.Registry, guard *permissions.Guard) engine.ToolRunner {
 	return func(ctx context.Context, name string, args json.RawMessage) (engine.ToolResult, error) {
 		if guard != nil {
 			if err := guard.Authorize(ctx, name, args); err != nil {
+				var denied interface{ Denied() bool }
+				if errors.As(err, &denied) && denied.Denied() {
+					// Ends the turn. The message still reaches the user and
+					// the transcript through AgentResult.Stopped.
+					return engine.ToolResult{}, err
+				}
 				return engine.ToolResult{Text: err.Error(), IsError: true}, nil
 			}
 		}
