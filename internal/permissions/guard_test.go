@@ -223,3 +223,123 @@ func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
 		t.Fatalf("reviewer calls = %d, want 2", reviewer.calls)
 	}
 }
+
+// --- §21.9 fix 1: which refusals end the turn -------------------------------
+//
+// The tests below pin the distinction refusal()/deniedError draw. They matter
+// more than their size suggests: getting this line wrong in either direction
+// reintroduces a defect that already reached a real user. Too narrow, and a
+// human's "no" comes back as data the model routes around, one provider
+// request per attempt (docs/BUG-rate-limit-amplifier.md). Too wide, and an
+// ordinary configuration boundary kills the turn instead of letting the model
+// write somewhere legal — which would break the error-is-data mechanism §3
+// relies on to avoid needing a Planner.
+
+// asksDenied reports whether err carries the turn-ending contract
+// internal/engine matches with errors.As. It is deliberately written the same
+// way engine matches it, rather than with a type assertion on *deniedError, so
+// these tests fail if the structural contract stops being satisfied even
+// though the concrete type is unchanged.
+func asksDenied(err error) bool {
+	var d interface{ Denied() bool }
+	return errors.As(err, &d) && d.Denied()
+}
+
+func TestUserDeclineEndsTheTurn(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: false}}
+	guard := New(testPermissions(), false, reviewer)
+
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	if err == nil {
+		t.Fatal("a declined request must return an error")
+	}
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("errors.Is(err, ErrDenied) = false, want true: every refusal stays recognizable to existing call sites")
+	}
+	if !asksDenied(err) {
+		t.Error("a human pressing \"no\" must end the turn: the model must not be handed the refusal as data to route around")
+	}
+}
+
+func TestNoReviewerEndsTheTurn(t *testing.T) {
+	// No reviewer is the headless/serve-without-a-human case. Nothing in this
+	// turn can produce an approval, so retrying variants is pure cost.
+	guard := New(testPermissions(), false, nil)
+
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	if err == nil {
+		t.Fatal("no reviewer must refuse an ask-tier request")
+	}
+	if !asksDenied(err) {
+		t.Error("with nobody to ask, the turn must end rather than loop asking")
+	}
+}
+
+func TestReviewerFailureEndsTheTurn(t *testing.T) {
+	guard := New(testPermissions(), false, failingReviewer{})
+
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	if err == nil {
+		t.Fatal("a failing reviewer must refuse")
+	}
+	if !asksDenied(err) {
+		t.Error("if asking itself is broken, asking again in the same turn cannot work: the turn must end")
+	}
+}
+
+// TestConfigurationDenialsStayData is the other half, and the one that keeps
+// fix 1 from overreaching. A boundary that refused *these arguments* leaves
+// legal alternatives open, and the model picking one is correct recovery
+// rather than a loop. These must NOT end the turn.
+func TestConfigurationDenialsStayData(t *testing.T) {
+	perms := testPermissions()
+	perms.Write = "deny"
+	guard := New(perms, false, &recordingReviewer{decision: Decision{Allow: true}})
+
+	cases := []struct {
+		name string
+		tool string
+		args string
+		why  string
+	}{
+		{
+			name: "hard deny on a shell pattern",
+			tool: "bash",
+			args: `{"command":"rm -rf /"}`,
+			why:  "another command may be perfectly legal",
+		},
+		{
+			name: "hard deny on a protected path",
+			tool: "write_file",
+			args: `{"path":"/home/u/.ssh/config","content":"x"}`,
+			why:  "writing to a different path is the right next move",
+		},
+		{
+			name: "tool disabled by configuration",
+			tool: "write_file",
+			args: `{"path":"/tmp/ok.txt","content":"x"}`,
+			why:  "the model can still read, search and report instead",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := guard.Authorize(context.Background(), tc.tool, json.RawMessage(tc.args))
+			if err == nil {
+				t.Fatalf("%s must be refused", tc.tool)
+			}
+			if !errors.Is(err, ErrDenied) {
+				t.Errorf("errors.Is(err, ErrDenied) = false, want true")
+			}
+			if asksDenied(err) {
+				t.Errorf("this refusal must stay tool-error data, not end the turn: %s", tc.why)
+			}
+		})
+	}
+}
+
+type failingReviewer struct{}
+
+func (failingReviewer) Review(context.Context, Request) (Decision, error) {
+	return Decision{}, errors.New("no tty")
+}
