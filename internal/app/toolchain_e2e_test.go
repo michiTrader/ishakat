@@ -221,8 +221,8 @@ func TestToolChainApprovedWriteReachesDisk(t *testing.T) {
 	if reqs[0].Name != "write_file" {
 		t.Errorf("reviewed tool = %q, want write_file", reqs[0].Name)
 	}
-	if reqs[0].Tier != permissions.Medium {
-		t.Errorf("write_file tier = %v, want Medium (the tier that may offer a session grant)", reqs[0].Tier)
+	if reqs[0].Tier != permissions.Sensitive {
+		t.Errorf("write_file tier = %v, want Sensitive (the tier that may offer a session grant)", reqs[0].Tier)
 	}
 
 	// The actual point: the file is on disk.

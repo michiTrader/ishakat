@@ -101,20 +101,23 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		// Every tool beyond the native seven (declarative tools chief
 		// among them) gets its real Tool.Danger()-inferred Tier registered
 		// here, so permissions.Guard's own tierFor/mode default (safe but
-		// blind: High/"ask" for any name it does not recognize) becomes
+		// blind: Critical/"ask" for any name it does not recognize) becomes
 		// aware of what declarative.go's inferDanger actually computed for
 		// each manifest, without permissions ever importing tools (see
 		// Guard.SetToolTiers' own doc comment on why the translation lives
-		// on this side of the boundary).
+		// on this side of the boundary). tools.Danger is still a 3-value
+		// enum (§19.5 rule #2); this mapping can never produce Controlled,
+		// since no manifest declares that property yet -- only bash's own
+		// per-argument classifier (guard.go's bashTier) currently does.
 		tiers := make(map[string]permissions.Tier)
 		for _, t := range reg.Tools() {
 			switch t.Danger() {
 			case tools.DangerLow:
-				tiers[t.Name()] = permissions.Low
+				tiers[t.Name()] = permissions.Safe
 			case tools.DangerMedium:
-				tiers[t.Name()] = permissions.Medium
+				tiers[t.Name()] = permissions.Sensitive
 			default:
-				tiers[t.Name()] = permissions.High
+				tiers[t.Name()] = permissions.Critical
 			}
 		}
 		guard.SetToolTiers(tiers)

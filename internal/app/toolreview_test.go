@@ -44,7 +44,7 @@ func TestToolReviewerHonorsContextCancellation(t *testing.T) {
 	decision, err := reviewer.Review(ctx, permissions.Request{
 		Name:      "write_file",
 		Arguments: json.RawMessage(`{"path":"notes.txt"}`),
-		Tier:      permissions.Medium,
+		Tier:      permissions.Sensitive,
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Review error = %v, want context.Canceled", err)

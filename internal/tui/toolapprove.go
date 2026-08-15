@@ -72,11 +72,11 @@ type toolApproveDialog struct {
 // newToolApproveDialog builds the dialog's rows from req.Tier: a High-tier
 // request never offers "allow for this session" — §19.5's own rule, already
 // enforced independently inside Guard.Authorize
-// ("decision.AllowSession && req.Tier == Medium"), repeated here so the
+// ("decision.AllowSession && req.Tier == Sensitive"), repeated here so the
 // dialog never even shows a choice the guard would silently ignore anyway.
-// The middle "allow for session" row is present for Medium only, matching
-// exactly the one case Guard.Authorize's own decision.AllowSession check
-// can act on.
+// The middle "allow for session" row is present for Sensitive only,
+// matching exactly the one case Guard.Authorize's own decision.AllowSession
+// check can act on.
 func newToolApproveDialog(req permissions.Request, reply chan<- permissions.Decision) toolApproveDialog {
 	var askOptions []ask.Option
 	var options []toolApproveOption
@@ -86,7 +86,7 @@ func newToolApproveDialog(req permissions.Request, reply chan<- permissions.Deci
 		options = append(options, toolApproveOption{decision: decision, label: label})
 	}
 	add(toolApproveOnce, "permitir una vez", permissions.Decision{Allow: true})
-	if req.Tier == permissions.Medium {
+	if req.Tier == permissions.Sensitive {
 		add(toolApproveSession, "permitir para esta sesión", permissions.Decision{Allow: true, AllowSession: true})
 	}
 	add(toolApproveDeny, "denegar", permissions.Decision{Allow: false})
@@ -216,11 +216,13 @@ func (m Root) renderToolApprove() string {
 // reason to know how a tier is displayed).
 func tierLabel(t permissions.Tier) string {
 	switch t {
-	case permissions.Low:
+	case permissions.Safe:
 		return "riesgo bajo"
-	case permissions.Medium:
+	case permissions.Controlled:
+		return "riesgo controlado"
+	case permissions.Sensitive:
 		return "riesgo medio"
-	case permissions.High:
+	case permissions.Critical:
 		return "riesgo alto"
 	default:
 		return "riesgo desconocido"

@@ -189,8 +189,8 @@ func TestDispatchSubAgentRoundTripsThroughToolResult(t *testing.T) {
 	if reqs[0].Name != "dispatch" {
 		t.Errorf("reviewed tool = %q, want dispatch", reqs[0].Name)
 	}
-	if reqs[0].Tier != permissions.High {
-		t.Errorf("dispatch tier = %v, want High", reqs[0].Tier)
+	if reqs[0].Tier != permissions.Critical {
+		t.Errorf("dispatch tier = %v, want Critical", reqs[0].Tier)
 	}
 
 	if !historyHasToolCall(hist, "dispatch") {
