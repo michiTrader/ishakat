@@ -89,6 +89,20 @@ type AgentOptions struct {
 	// not block.
 	OnWait func(wait time.Duration, attempt int)
 
+	// MinInterval is a floor on the time between one iteration's provider
+	// request and the next (step 26, fix 5). Zero -- the default -- disables
+	// it, and that default is deliberate.
+	//
+	// The bug report sequences this last and warns why: "a sleep that hides
+	// an amplification defect is worse than no fix: it makes the defect
+	// harder to observe and it will come back at scale". Fixes 1-3 remove
+	// the amplification itself, and the suite proves they do so with this
+	// at zero (closing criterion 4). What remains for this knob is the
+	// honest case it was always meant for -- a provider whose limit is
+	// requests-per-minute rather than tokens, where even a correct agent
+	// wants a floor -- not the defects above.
+	MinInterval time.Duration
+
 	// BudgetUSD is the maximum estimated provider spend for this session. Zero
 	// disables the budget. Prices are USD per million tokens; unknown prices are
 	// represented by all-zero rates and do not consume the budget.
@@ -181,12 +195,31 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 	var lastFailure string
 	futileRun := 0
 
+	// lastRequest paces the loop when MinInterval is set (fix 5). It is the
+	// zero Time on the first iteration, so the first request is never
+	// delayed: the floor is between requests, not before the user's own.
+	var lastRequest time.Time
+
 	// The loop. One body = one model turn + its tool executions.
 	for iteration := 0; ; iteration++ {
 		if err := ctx.Err(); err != nil {
 			result.Aborted = true
 			return result, err
 		}
+
+		if opts.MinInterval > 0 && !lastRequest.IsZero() {
+			if since := time.Since(lastRequest); since < opts.MinInterval {
+				// Interruptible: a user hitting esc during the floor must not
+				// have to wait it out (§7.4).
+				select {
+				case <-time.After(opts.MinInterval - since):
+				case <-ctx.Done():
+					result.Aborted = true
+					return result, ctx.Err()
+				}
+			}
+		}
+		lastRequest = time.Now()
 
 		// Rebuild the request each iteration with the grown history. The model
 		// has to see the tool calls and results from the previous iteration;

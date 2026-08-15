@@ -76,6 +76,13 @@ max_output_bytes = 32768
 # 0 = sin límite de gasto.
 budget_usd = 0.0
 timeout_s = 120
+# Suelo, en milisegundos, entre una petición al proveedor y la siguiente
+# dentro de un mismo turno (§21.9 fix 5). 0 = desactivado, que es lo normal.
+# Las causas reales de la avalancha de peticiones ya están corregidas (una
+# denegación termina el turno, se respeta Retry-After, y una cadena de
+# variantes que fallan igual se corta), y la suite lo demuestra con esto en 0.
+# Ponerlo solo si tu proveedor limita por peticiones por minuto.
+min_interval_ms = 0
 
 [tools.permissions]
 # Leer no rompe nada, así que no interrumpe. Escribir y ejecutar sí pueden,

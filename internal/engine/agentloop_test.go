@@ -1514,3 +1514,147 @@ func TestRunAgentTurnFutilityStopsMidBatchWithoutOrphans(t *testing.T) {
 		t.Error("skipped calls were left unanswered; the next request would 400 permanently")
 	}
 }
+
+// TestRunAgentTurnMinIntervalPacesIterations covers fix 5: with a floor set,
+// consecutive provider requests in one turn are spaced by at least that
+// much. The first request is never delayed -- the floor is between requests,
+// not in front of the user's own question.
+func TestRunAgentTurnMinIntervalPacesIterations(t *testing.T) {
+	const floor = 120 * time.Millisecond
+
+	// Distinct arguments: identical ones would trip loop detection and end
+	// the turn early, which would make this test measure the wrong thing.
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "ok", `{"n":1}`), doneEvent()},
+		{toolCallEvent("c2", "ok", `{"n":2}`), doneEvent()},
+		{deltaEvent("finished"), doneEvent()},
+	}}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	start := time.Now()
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools:       []ToolDef{{Name: "ok"}},
+		Runner:      runner.run,
+		MinInterval: floor,
+	}, hist)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Text != "finished" {
+		t.Errorf("Text = %q, want the model's answer", res.Text)
+	}
+	// Three requests means two gaps.
+	if want := 2 * floor; elapsed < want {
+		t.Errorf("three paced requests took %v, want at least %v", elapsed, want)
+	}
+}
+
+// TestRunAgentTurnMinIntervalIsInterruptible keeps the floor from becoming a
+// new way to make the agent feel stuck: esc during the pause must return
+// immediately (§7.4), not after the sleep finishes.
+func TestRunAgentTurnMinIntervalIsInterruptible(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "ok", `{}`), doneEvent()},
+		{deltaEvent("never reached"), doneEvent()},
+	}}
+	runner := newFakeRunner()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+
+	// Cancel while the loop is sitting in the (very long) interval.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	res, err := eng.RunAgentTurn(ctx, Request{}, AgentOptions{
+		Tools:       []ToolDef{{Name: "ok"}},
+		Runner:      runner.run,
+		MinInterval: 10 * time.Second,
+	}, hist)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if !res.Aborted {
+		t.Error("Aborted = false, want true")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("cancellation took %v: the pace floor is not interruptible", elapsed)
+	}
+}
+
+// TestClosingCriterion4 is criterion 4 of docs/BUG-rate-limit-amplifier.md
+// and the reason fix 5 was sequenced last: "regression coverage that fix 5's
+// sleep is *not* what makes criteria 1-3 pass: they must hold with
+// min_interval_ms = 0."
+//
+// The report's warning is that a pacing sleep can mask an amplification
+// defect, making it harder to observe and guaranteeing it returns at scale.
+// This runs the two criteria that count provider requests with the floor
+// explicitly at zero, so the suite can never come to depend on the sleep.
+// MinInterval is zero by default, which is what makes every other test in
+// this file part of the same guarantee; stating it here makes the guarantee
+// deliberate rather than incidental.
+func TestClosingCriterion4(t *testing.T) {
+	t.Run("criterion 1: a refusal costs one request", func(t *testing.T) {
+		ss := &scriptedStreamer{scripts: [][]Event{
+			{toolCallEvent("c1", "write_file", `{"path":"/etc/hosts"}`), doneEvent()},
+			{deltaEvent("this second turn must never be requested"), doneEvent()},
+		}}
+		runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, deniedErr{}
+		}
+		eng := New(ss.stream, 0)
+		hist := &convo.Conversation{}
+		res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+			Tools:       []ToolDef{{Name: "write_file"}},
+			Runner:      runner,
+			MinInterval: 0, // explicit: no pacing is involved
+		}, hist)
+		if err != nil {
+			t.Fatalf("RunAgentTurn: %v", err)
+		}
+		if res.Stopped == "" {
+			t.Error("a refusal must end the turn")
+		}
+		if n := ss.callCount(); n != 1 {
+			t.Errorf("provider requests = %d, want 1 with no pacing", n)
+		}
+	})
+
+	t.Run("criterion 3: a variant hunt stops", func(t *testing.T) {
+		ss := &scriptedStreamer{scripts: [][]Event{
+			{toolCallEvent("c1", "bash", `{"command":"ls"}`), doneEvent()},
+			{toolCallEvent("c2", "bash", `{"command":"ls -la"}`), doneEvent()},
+			{toolCallEvent("c3", "bash", `{"command":"find ."}`), doneEvent()},
+			{toolCallEvent("c4", "bash", `{"command":"du -sh"}`), doneEvent()},
+			{deltaEvent("gave up"), doneEvent()},
+		}}
+		runner := &failingRunner{text: "permission denied: shell is not allowed"}
+		eng := New(ss.stream, 0)
+		hist := &convo.Conversation{}
+		res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+			Tools:       []ToolDef{{Name: "bash"}},
+			Runner:      runner.run,
+			MinInterval: 0, // explicit: no pacing is involved
+		}, hist)
+		if err != nil {
+			t.Fatalf("RunAgentTurn: %v", err)
+		}
+		if res.Stopped == "" {
+			t.Error("a variant hunt must stop the turn")
+		}
+		if n := ss.callCount(); n != 3 {
+			t.Errorf("provider requests = %d, want 3 with no pacing", n)
+		}
+	})
+}

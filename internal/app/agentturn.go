@@ -136,6 +136,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		MaxToolCalls:   cfgTools.MaxCallsPerTurn,
 		MaxOutputBytes: cfgTools.MaxOutputBytes,
 		BudgetUSD:      cfgTools.BudgetUSD,
+		MinInterval:    time.Duration(cfgTools.MinIntervalMS) * time.Millisecond,
 	}
 	if cost != nil {
 		opts.InputCostUSD = cost.In
