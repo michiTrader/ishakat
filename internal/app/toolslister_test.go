@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MichiTrader/ishakat/internal/evolve"
 	"github.com/MichiTrader/ishakat/internal/tools"
 )
 
@@ -699,5 +700,244 @@ func TestToolsListerEditToolEgressAllowlistIsThreadedThrough(t *testing.T) {
 	}
 	if string(body) != manifest {
 		t.Error("expected the on-disk manifest to be untouched after an egress-refused edit")
+	}
+}
+
+// --- CreateTool (§13/§19.6): Step 21's own create row, the backlog's
+// final slice ---
+//
+// CreateTool delegates to a real tools.ToolCreate's own Run method
+// (see toolsLister's own doc comment for why) so these tests are real
+// filesystem round trips against t.TempDir() -- the same discipline
+// EditTool's own tests above already follow, and for the same reason:
+// the point is to confirm the wiring (NewToolsListerWithEvolve
+// threading allow/allowAll/thresholds through, CreateTool correctly
+// marshaling its arguments into toolCreateArgs' own JSON shape, force's
+// dual meaning as both Origin and SkipGate1, and this method's own
+// Go-error-vs-string split) is correct, which a mock could not catch as
+// reliably as a real tools.ToolCreate.Run call underneath.
+
+func TestNewToolsListerWithEvolveDisabledReturnsNil(t *testing.T) {
+	if l := NewToolsListerWithEvolve(t.TempDir(), false, nil, true, evolve.Thresholds{}); l != nil {
+		t.Errorf("NewToolsListerWithEvolve(dir, false, ...) = %v, want nil", l)
+	}
+}
+
+func TestNewToolsListerWithEvolveEmptyDirReturnsNil(t *testing.T) {
+	if l := NewToolsListerWithEvolve("", true, nil, true, evolve.Thresholds{}); l != nil {
+		t.Errorf("NewToolsListerWithEvolve(\"\", true, ...) = %v, want nil", l)
+	}
+}
+
+func TestNewToolsListerWithEvolveEnabledWithDirReturnsNonNil(t *testing.T) {
+	if l := NewToolsListerWithEvolve(t.TempDir(), true, nil, true, evolve.Thresholds{}); l == nil {
+		t.Error("NewToolsListerWithEvolve(dir, true, ...) = nil, want a usable ToolsLister")
+	}
+}
+
+func TestToolsListerCreateToolEmptyNameIsGoError(t *testing.T) {
+	l := NewToolsListerWithEvolve(t.TempDir(), true, nil, true, evolve.Thresholds{})
+	if _, err := l.CreateTool("", "d", "https://example.com/x", "GET", "reason", []string{}, false); err == nil {
+		t.Error("CreateTool with an empty name should error")
+	}
+}
+
+func TestToolsListerCreateToolEmptyDescriptionIsGoError(t *testing.T) {
+	l := NewToolsListerWithEvolve(t.TempDir(), true, nil, true, evolve.Thresholds{})
+	if _, err := l.CreateTool("greet", "", "https://example.com/x", "GET", "reason", []string{}, false); err == nil {
+		t.Error("CreateTool with an empty description should error")
+	}
+}
+
+func TestToolsListerCreateToolEmptyURLIsGoError(t *testing.T) {
+	l := NewToolsListerWithEvolve(t.TempDir(), true, nil, true, evolve.Thresholds{})
+	if _, err := l.CreateTool("greet", "d", "", "GET", "reason", []string{}, false); err == nil {
+		t.Error("CreateTool with an empty url should error")
+	}
+}
+
+func TestToolsListerCreateToolEmptyReasonIsGoError(t *testing.T) {
+	l := NewToolsListerWithEvolve(t.TempDir(), true, nil, true, evolve.Thresholds{})
+	if _, err := l.CreateTool("greet", "d", "https://example.com/x", "GET", "", []string{}, false); err == nil {
+		t.Error("CreateTool with an empty reason should error (§19.8 mandatory provenance)")
+	}
+}
+
+func TestToolsListerCreateToolSuccessWritesParseableManifest(t *testing.T) {
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+	status, err := l.CreateTool("greet", "says hello", "https://example.com/greet", "GET", "needed for testing", []string{"unit test"}, false)
+	if err != nil {
+		t.Fatalf("CreateTool: %v", err)
+	}
+	if !strings.Contains(status, "greet") || !strings.Contains(status, "unverified") {
+		t.Errorf("status = %q, want it to name the tool and report unverified", status)
+	}
+
+	discovered := tools.DiscoverDeclarative(dir)
+	if len(discovered.Tools) != 1 {
+		t.Fatalf("DiscoverDeclarative found %d tool(s), want 1", len(discovered.Tools))
+	}
+	m := discovered.Tools[0]
+	if m.Name != "greet" || m.Description != "says hello" {
+		t.Errorf("got %+v, want name=greet description=\"says hello\"", m)
+	}
+	if m.Origin.CreatedBy != "user" {
+		t.Errorf("Origin.CreatedBy = %q, want \"user\" for a human-initiated creation", m.Origin.CreatedBy)
+	}
+	if m.Origin.Reason != "needed for testing" {
+		t.Errorf("Origin.Reason = %q, want it unmodified for a non-forced creation", m.Origin.Reason)
+	}
+
+	toolDir := filepath.Join(dir, "greet")
+	state, err := tools.LoadState(toolDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.State != tools.StateUnverified {
+		t.Errorf("state.State = %q, want %q for a never-probed tool (§19.5 rule 1)", state.State, tools.StateUnverified)
+	}
+}
+
+func TestToolsListerCreateToolDuplicateDescriptionWithoutForceIsErrorString(t *testing.T) {
+	// No-duplicate is always checked, regardless of origin (evolve.
+	// Evaluate's own doc comment) -- an un-forced /tools create must
+	// still be refused when its description is near-identical to an
+	// already-existing tool's own, even though the human "declared"
+	// this one on purpose (declaration only satisfies Repetition, not
+	// Dedup).
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "existing_weather"), "existing_weather", "fetches the current weather for a given city")
+
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+	status, err := l.CreateTool("new_weather", "fetches the current weather for a given city", "https://example.com/weather", "GET", "wanted a second one", []string{}, false)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "gate 1 refused") || !strings.Contains(status, "duplicate") {
+		t.Errorf("status = %q, want a gate 1 duplicate refusal", status)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "new_weather", tools.ManifestFileName)); !os.IsNotExist(err) {
+		t.Error("expected no manifest to be written for a gate 1 refused creation")
+	}
+}
+
+func TestToolsListerCreateToolForceBypassesGate1Duplicate(t *testing.T) {
+	dir := t.TempDir()
+	writeToolManifest(t, filepath.Join(dir, "existing_weather"), "existing_weather", "fetches the current weather for a given city")
+
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+	status, err := l.CreateTool("new_weather", "fetches the current weather for a given city", "https://example.com/weather", "GET", "an operator typed --force", []string{}, true)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if strings.Contains(status, "gate 1 refused") {
+		t.Errorf("status = %q, want force to bypass the duplicate refusal entirely", status)
+	}
+	if !strings.Contains(status, "unverified") {
+		t.Errorf("status = %q, want it to report the new tool as unverified", status)
+	}
+}
+
+func TestToolsListerCreateToolForcePrependsReasonMarker(t *testing.T) {
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+	_, err := l.CreateTool("forced_tool", "d", "https://example.com/x", "GET", "an operator typed --force", []string{}, true)
+	if err != nil {
+		t.Fatalf("CreateTool: %v", err)
+	}
+
+	discovered := tools.DiscoverDeclarative(dir)
+	if len(discovered.Tools) != 1 {
+		t.Fatalf("DiscoverDeclarative found %d tool(s), want 1", len(discovered.Tools))
+	}
+	reason := discovered.Tools[0].Origin.Reason
+	if !strings.Contains(reason, "--force: gate 1 skipped") {
+		t.Errorf("Origin.Reason = %q, want it to carry the --force marker (\"and logs it\", §13)", reason)
+	}
+	if !strings.Contains(reason, "an operator typed --force") {
+		t.Errorf("Origin.Reason = %q, want the original reason preserved after the marker", reason)
+	}
+}
+
+func TestToolsListerCreateToolWithoutForceNoMarkerIsWritten(t *testing.T) {
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+	_, err := l.CreateTool("unforced_tool", "d", "https://example.com/x", "GET", "an ordinary reason", []string{}, false)
+	if err != nil {
+		t.Fatalf("CreateTool: %v", err)
+	}
+
+	discovered := tools.DiscoverDeclarative(dir)
+	if len(discovered.Tools) != 1 {
+		t.Fatalf("DiscoverDeclarative found %d tool(s), want 1", len(discovered.Tools))
+	}
+	if reason := discovered.Tools[0].Origin.Reason; reason != "an ordinary reason" {
+		t.Errorf("Origin.Reason = %q, want it unmodified without --force", reason)
+	}
+}
+
+func TestToolsListerCreateToolEgressAllowlistIsThreadedThrough(t *testing.T) {
+	// Mirrors TestToolsListerEditToolEgressAllowlistIsThreadedThrough
+	// above: confirms NewToolsListerWithEvolve's own allow/allowAll
+	// parameters actually reach the real tools.ToolCreate this method
+	// constructs, and that this hard block applies regardless of
+	// force -- §19.8's own mitigations are never skipped by SkipGate1
+	// (ToolCreate.SkipGate1's own doc comment).
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, []string{"allowed.example.com"}, false, evolve.Thresholds{})
+
+	status, err := l.CreateTool("blocked", "d", "http://not-allowed.example.com/x", "GET", "reason", []string{}, true)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "egress allowlist") {
+		t.Errorf("status = %q, want it to mention the egress allowlist even with force", status)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blocked", tools.ManifestFileName)); !os.IsNotExist(err) {
+		t.Error("expected no manifest to be written for an egress-refused creation")
+	}
+}
+
+func TestToolsListerCreateToolCredentialPathIsHardBlockedEvenWithForce(t *testing.T) {
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{})
+
+	status, err := l.CreateTool("reads_ssh_key", "d", "http://example.com/read?path=~/.ssh/id_rsa", "GET", "reason", []string{}, true)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "credential-shaped path") {
+		t.Errorf("status = %q, want it to mention the credential-shaped path hard block even with force", status)
+	}
+}
+
+func TestToolsListerCreateToolThresholdsAreThreadedThrough(t *testing.T) {
+	// Confirms NewToolsListerWithEvolve's own thresholds parameter
+	// actually reaches gate 1: an empty tools directory still counts
+	// nativeToolCatalog's own seven built-in tools against the budget
+	// (tool_create.go's own doc comment on nativeToolCatalog), so a
+	// MaxTools ceiling set at exactly that count refuses every
+	// un-forced creation outright.
+	dir := t.TempDir()
+	l := NewToolsListerWithEvolve(dir, true, nil, true, evolve.Thresholds{MaxTools: 7})
+
+	status, err := l.CreateTool("one_too_many", "d", "https://example.com/x", "GET", "reason", []string{}, false)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(status, "gate 1 refused") || !strings.Contains(status, "budget") {
+		t.Errorf("status = %q, want a gate 1 budget refusal at the configured MaxTools ceiling", status)
+	}
+
+	// The same ceiling, forced, must succeed -- confirming this is
+	// really gate 1 (bypassed by SkipGate1), not some other check.
+	status, err = l.CreateTool("one_too_many", "d", "https://example.com/x", "GET", "reason", []string{}, true)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if strings.Contains(status, "gate 1 refused") {
+		t.Errorf("status = %q, want force to bypass the same budget refusal", status)
 	}
 }

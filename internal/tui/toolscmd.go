@@ -4,7 +4,7 @@
 // than a direct internal/tools import, and for why nil is a supported
 // Root.toolsLister value.
 //
-// Six shapes, mirroring §13's own rows: bare "/tools" renders every
+// Seven shapes, mirroring §13's own rows: bare "/tools" renders every
 // layer-2 tool's status/danger/usage as a row each (the in-session
 // counterpart to tool_list's LLM-facing text blob); "/tools code <name>"
 // renders one tool's manifest in full; "/tools audit" renders every
@@ -14,18 +14,24 @@
 // status line; "/tools delete <name> [confirm]" calls ToolsLister.
 // DeleteTool and reports its status line; "/tools edit <name>" (a
 // multi-line shape, see parseToolsEditArg's own doc comment) calls
-// ToolsLister.EditTool and reports its status line. The first three are
-// read-only. revive needs no confirmation step (§19.5's Archive/Revive
-// pair is DangerLow and idempotent by construction); delete does — the
-// trailing literal word "confirm" is this command's own explicit, typed
-// gate, the slash-command counterpart to tool_delete's own required
-// boolean argument (§19.5: "removes it, with confirmation"). edit takes
-// no separate confirmation step either: like revive, tool_edit.go's own
-// hard blocks (checkManifestSafety, the re-parse check) already refuse
-// anything dangerous before a single byte reaches disk, and the
-// resulting demotion to unverified (not a silent success) is itself the
-// safety net a confirmation step would otherwise exist to provide.
-// create remains Step 21's one still-open row.
+// ToolsLister.EditTool and reports its status line; "/tools create
+// <name> [--force]" (a different multi-line, key:value shape, see
+// parseToolsCreateArg's own doc comment) calls ToolsLister.CreateTool
+// and reports its status line. The first three are read-only. revive
+// needs no confirmation step (§19.5's Archive/Revive pair is DangerLow
+// and idempotent by construction); delete does — the trailing literal
+// word "confirm" is this command's own explicit, typed gate, the
+// slash-command counterpart to tool_delete's own required boolean
+// argument (§19.5: "removes it, with confirmation"). edit and create
+// take no separate confirmation step either: like revive, tool_edit.go's
+// own hard blocks (checkManifestSafety, the re-parse check) and
+// tool_create.go's own hard blocks (evolve.Evaluate unless --force,
+// checkManifestSafety always) already refuse anything dangerous before a
+// single byte reaches disk, and the resulting status line (a demotion to
+// unverified for edit, a fresh "state: unverified" for create — never a
+// silent success) is itself the safety net a confirmation step would
+// otherwise exist to provide. Step 21's backlog is now fully closed for
+// rung 1.
 package tui
 
 import (
@@ -85,6 +91,14 @@ func (m Root) runToolsCommand(args string) (tea.Model, tea.Cmd) {
 			return m.slashNotice(g.warnMark + " " + err.Error())
 		}
 		return m.slashNotice(g.assistantMark + " tools edit " + g.dot + " " + status)
+	}
+
+	if fields, force, ok := parseToolsCreateArg(args); ok {
+		status, err := m.toolsLister.CreateTool(fields.name, fields.description, fields.url, fields.method, fields.reason, fields.sources, force)
+		if err != nil {
+			return m.slashNotice(g.warnMark + " " + err.Error())
+		}
+		return m.slashNotice(g.assistantMark + " tools create " + g.dot + " " + status)
 	}
 
 	res := m.toolsLister.ListTools()
@@ -346,6 +360,131 @@ func parseToolsEditArg(args string) (name, oldString, newString string, replaceA
 	newString = strings.Join(after, "\n")
 
 	return name, oldString, newString, replaceAll, true
+}
+
+// toolsCreateFields is parseToolsCreateArg's own return shape: the subset
+// of tools.ToolCreate's full argument set this slash command exposes
+// directly (see ToolsLister.CreateTool's own doc comment on why this is
+// deliberately reduced, and on what a richer tool still needs /tools
+// edit for afterward).
+type toolsCreateFields struct {
+	name        string
+	description string
+	url         string
+	method      string
+	reason      string
+	sources     []string
+}
+
+// parseToolsCreateArg recognizes /tools create's own multi-line shape:
+//
+//	create <name>
+//	description: <one-sentence description>
+//	url: <request url>
+//	method: <HTTP method>        (optional, defaults to GET)
+//	reason: <mandatory provenance -- why this tool is being created>
+//	sources: <comma-separated urls>   (optional, absent means none)
+//	--force                      (optional, its own trailing line)
+//
+// Order-independent key:value lines, not "---"-delimited text blobs like
+// /tools edit's own old_string/new_string: every field here is a single
+// short value (a name, a url, a one-sentence description), never
+// arbitrary multi-line TOML content, so a "---" separator convention
+// invented for a very different shape (two long, verbatim text blobs)
+// would only add ceremony this shape does not need. "key:" (colon,
+// optionally followed by whitespace) is this command's own delimiter,
+// chosen because a colon cannot appear in any of these fields' own
+// syntax (an http:// url's colon is still unambiguous, since only the
+// characters up to first colon are ever treated as the key candidate,
+// and "url" is not itself a value containing a colon before its own).
+// description/url/reason are mandatory (mirroring tool_create.go's own
+// Run validation: name/description/url/reason are all Go errors when
+// empty) -- their absence here is caught downstream by
+// ToolsLister.CreateTool's own preconditions, not by this parser, since
+// a name-only "create weather" with no body at all is not this
+// subcommand's shape in the first place (mirrors parseToolsEditArg's own
+// "no body at all -> not this shape" rule) and falls through to the bare
+// listing.
+//
+// --force is recognized as its own trailing literal line (not a
+// same-line suffix the way parseToolsDeleteArg's "confirm" is): every
+// other line here is itself a "key: value" pair whose value may
+// legitimately contain trailing whitespace or even end in the literal
+// word "force" as part of a real description, so a same-line suffix
+// convention would risk swallowing part of a genuine value the way
+// parseToolsEditArg's own doc comment already explains for new_string's
+// last line. A leading "--" makes this line visually distinct from
+// every key:value line and from tool_delete's own bare "confirm" word,
+// signalling explicitly that this is a flag, not a field.
+//
+// Anything not matching this shape (no name, no body at all) is not
+// recognized as this subcommand -- the caller falls back to the bare
+// listing, the same "fall through, don't error" rule every other
+// parseTools*Arg function here already follows for its own unmatched
+// shape.
+func parseToolsCreateArg(args string) (fields toolsCreateFields, force bool, ok bool) {
+	args = strings.TrimSpace(args)
+	rest, matched := cutPrefixWord(args, "create")
+	if !matched {
+		return toolsCreateFields{}, false, false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return toolsCreateFields{}, false, false
+	}
+
+	nameAndBody := strings.SplitN(rest, "\n", 2)
+	name := strings.TrimSpace(nameAndBody[0])
+	if name == "" || strings.ContainsAny(name, " \t") {
+		// A name with embedded whitespace ("create foo bar\n...") is not
+		// a single tool name -- reject rather than guess which word is
+		// the real name.
+		return toolsCreateFields{}, false, false
+	}
+	if len(nameAndBody) < 2 {
+		// "create <name>" alone, with no field lines at all, is not this
+		// subcommand's shape -- there is nothing to create from.
+		return toolsCreateFields{}, false, false
+	}
+
+	fields.name = name
+	for _, line := range strings.Split(nameAndBody[1], "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "--force" {
+			force = true
+			continue
+		}
+		key, value, hasColon := strings.Cut(trimmed, ":")
+		if !hasColon {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "description":
+			fields.description = value
+		case "url":
+			fields.url = value
+		case "method":
+			fields.method = value
+		case "reason":
+			fields.reason = value
+		case "sources":
+			if value == "" {
+				fields.sources = []string{}
+				continue
+			}
+			var sources []string
+			for _, s := range strings.Split(value, ",") {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					sources = append(sources, s)
+				}
+			}
+			fields.sources = sources
+		}
+	}
+
+	return fields, force, true
 }
 
 // cutSuffixWord is cutPrefixWord's mirror: reports whether s ends with
