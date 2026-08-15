@@ -154,7 +154,7 @@ func TestCorePassesEgressAllowlistToFetch(t *testing.T) {
 // --- DeclarativeTools / WithDeclarative -------------------------------------
 
 func TestDeclarativeToolsEmptyDirReturnsNilAndNoWarn(t *testing.T) {
-	got, warn := DeclarativeTools("", nil, false)
+	got, warn := DeclarativeTools("", nil, false, Caps{})
 	if got != nil {
 		t.Errorf("DeclarativeTools(\"\", ...): got %v, want nil", got)
 	}
@@ -164,7 +164,7 @@ func TestDeclarativeToolsEmptyDirReturnsNilAndNoWarn(t *testing.T) {
 }
 
 func TestDeclarativeToolsMissingDirReturnsNilAndNoWarn(t *testing.T) {
-	got, warn := DeclarativeTools(filepath.Join(t.TempDir(), "does-not-exist"), nil, false)
+	got, warn := DeclarativeTools(filepath.Join(t.TempDir(), "does-not-exist"), nil, false, Caps{})
 	if got != nil {
 		t.Errorf("DeclarativeTools(missing dir): got %v, want nil", got)
 	}
@@ -191,7 +191,7 @@ url = "https://example.com/greet"
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	got, warn := DeclarativeTools(dir, []string{"example.com"}, false)
+	got, warn := DeclarativeTools(dir, []string{"example.com"}, false, Caps{})
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -213,8 +213,98 @@ url = "https://example.com/greet"
 	}
 }
 
+// TestDeclarativeToolsExcludesManifestWithUnmetRequiresCaps is §20.11 item
+// 4's own closing criterion at this layer: a tool.toml naming a
+// requires_caps entry the activeCaps argument does not satisfy is left out
+// of DeclarativeTools' returned []Tool entirely (not included with a
+// warning attached to the tool itself) -- see DeclarativeTools' own doc
+// comment for why exclusion, not a CheckSwap-style report, is the right
+// shape here. The exclusion is also surfaced once via the returned warn
+// string, so an install still has a way to notice why a tool disappeared.
+func TestDeclarativeToolsExcludesManifestWithUnmetRequiresCaps(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "vision_tool")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte(`
+name = "vision_tool"
+description = "needs vision"
+requires_caps = ["vision"]
+
+[request]
+method = "GET"
+url = "https://example.com/x"
+`)
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	// Active model lacks vision: the tool must be excluded, with a warn.
+	got, warn := DeclarativeTools(dir, nil, false, Caps{Vision: false})
+	if len(got) != 0 {
+		t.Errorf("got %d tools, want 0 (vision_tool must be excluded)", len(got))
+	}
+	if warn == "" {
+		t.Error("expected a non-empty warn explaining the exclusion")
+	}
+
+	// Active model has vision: the tool must be present, no warn.
+	got, warn = DeclarativeTools(dir, nil, false, Caps{Vision: true})
+	if len(got) != 1 {
+		t.Fatalf("got %d tools, want 1 (vision_tool must be included once satisfied)", len(got))
+	}
+	if warn != "" {
+		t.Errorf("unexpected warn once requires_caps is satisfied: %q", warn)
+	}
+	if got[0].Name() != "vision_tool" {
+		t.Errorf("Name() = %q, want vision_tool", got[0].Name())
+	}
+}
+
+// TestWithDeclarativeExcludesManifestWithUnmetMinContext is the same
+// exclusion proved one layer up, through WithDeclarative, and for
+// min_context rather than requires_caps -- both fields feed the same
+// Manifest.Unsatisfied check, but a regression in either the caller's own
+// wiring or the field-specific comparison should be caught independently.
+func TestWithDeclarativeExcludesManifestWithUnmetMinContext(t *testing.T) {
+	dir := t.TempDir()
+	toolDir := filepath.Join(dir, "big_context_tool")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	manifest := []byte(`
+name = "big_context_tool"
+description = "needs a big window"
+min_context = 100000
+
+[request]
+method = "GET"
+url = "https://example.com/x"
+`)
+	if err := os.WriteFile(filepath.Join(toolDir, ManifestFileName), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	reg, warn := WithDeclarative(nil, false, dir, Caps{Context: 8000})
+	if warn == "" {
+		t.Error("expected a non-empty warn explaining the exclusion")
+	}
+	if _, ok := reg.Lookup("big_context_tool"); ok {
+		t.Error("big_context_tool must not be registered against an 8k-context active model")
+	}
+
+	reg, warn = WithDeclarative(nil, false, dir, Caps{Context: 200000})
+	if warn != "" {
+		t.Errorf("unexpected warn once min_context is satisfied: %q", warn)
+	}
+	if _, ok := reg.Lookup("big_context_tool"); !ok {
+		t.Error("big_context_tool must be registered against a 200k-context active model")
+	}
+}
+
 func TestWithDeclarativeNoDirBehavesLikeCore(t *testing.T) {
-	reg, warn := WithDeclarative(nil, false, "")
+	reg, warn := WithDeclarative(nil, false, "", Caps{})
 	if warn != "" {
 		t.Errorf("unexpected warn: %q", warn)
 	}
@@ -248,7 +338,7 @@ url = "https://example.com/greet"
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	reg, warn := WithDeclarative(nil, false, dir)
+	reg, warn := WithDeclarative(nil, false, dir, Caps{})
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -278,7 +368,7 @@ func TestWithDeclarativeSurfacesDiscoveryWarn(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	reg, warn := WithDeclarative(nil, false, dir)
+	reg, warn := WithDeclarative(nil, false, dir, Caps{})
 	if warn == "" {
 		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
 	}

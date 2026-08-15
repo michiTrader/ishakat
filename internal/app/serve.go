@@ -44,6 +44,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/wsproto"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
@@ -383,6 +384,7 @@ type serveSession struct {
 	ref       ModelRef
 	prov      provider.Provider
 	modelCost *catalog.Cost
+	modelCaps tools.Caps
 	system    string
 }
 
@@ -519,7 +521,7 @@ func (sess *serveSession) runTurn(msg clientMsg) {
 		if hist == nil {
 			hist = &convo.Conversation{}
 		}
-		out, turnErr = runAgentTurnHeadless(sess.ctx, sess.prov, sess.cfg.Tools, sess.guard, sess.modelCost,
+		out, turnErr = runAgentTurnHeadless(sess.ctx, sess.prov, sess.cfg.Tools, sess.guard, sess.modelCost, sess.modelCaps,
 			sess.cfg.App.MaxRetries, req, user, s, sess.store, sess.conv, hist, sess.allowToolCreate)
 	} else {
 		out, turnErr = runTurn(sess.ctx, sess.prov, req, s, sess.cfg.App.MaxRetries)
@@ -569,8 +571,10 @@ func (sess *serveSession) resolveModel(modelText string) error {
 	}
 
 	var cost *catalog.Cost
+	var caps tools.Caps
 	if model, found := catalogSnapshot.Catalog.Get(ref.Ref); found {
 		cost = model.Cost
+		caps = capsForTools(model)
 	}
 
 	pc, ok := FindProvider(sess.cfg, ref.Provider)
@@ -593,6 +597,7 @@ func (sess *serveSession) resolveModel(modelText string) error {
 	sess.ref = ref
 	sess.prov = prov
 	sess.modelCost = cost
+	sess.modelCaps = caps
 	sess.resolved = true
 	return nil
 }

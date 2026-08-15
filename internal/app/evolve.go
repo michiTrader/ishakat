@@ -7,9 +7,18 @@
 // stays trivially unit-testable without a real registry or config file in
 // play (see internal/evolve's own doc comment); this file is where the two
 // sides meet, exactly like agentturn.go is for the tools package.
+//
+// capsForTools (below) draws the identical boundary one layer over, for
+// §20.11 item 4: internal/tools.Caps out of a resolved catalog.Model,
+// field by field, the same translation CapsFor (caps.go) already performs
+// for provider.Caps.Tools -- internal/tools must never import
+// internal/catalog (Caps' own doc comment), so this file is where a real
+// model's capabilities become the minimal vector tools.Manifest.Unsatisfied
+// checks against.
 package app
 
 import (
+	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/evolve"
 	"github.com/MichiTrader/ishakat/internal/tools"
@@ -56,4 +65,38 @@ func existingToolsFrom(reg *tools.Registry) []evolve.ExistingTool {
 		out = append(out, evolve.ExistingTool{Name: t.Name(), Description: t.Description()})
 	}
 	return out
+}
+
+// capsForTools translates a resolved catalog.Model's real capabilities and
+// context window into the tools.Caps vector Manifest.Unsatisfied checks a
+// declarative tool.toml's requires_caps/min_context against (§20.11 item
+// 4). Field-by-field, exactly like config.Egress -> Fetch.Allow/AllowAll
+// already is (tools.Caps' own doc comment): both catalog.Caps and
+// tools.Caps declare the same six boolean names on purpose, so this
+// function is a straight copy, not a remapping.
+//
+// m.EffectiveContext() (never m.Context directly) feeds Context, matching
+// engine.CheckSwap's own missingCaps/window comparison, which already uses
+// EffectiveContext for the identical "what window does this model actually
+// offer" question (hotswap.go): a model with an unknown Context still gets
+// catalog.ContextFloor's conservative estimate rather than reading as
+// Unsatisfied's own "unknown, never fails min_context" case -- the same
+// choice CheckSwap already made, applied consistently here rather than
+// re-litigated per caller.
+//
+// A zero-value catalog.Model (e.g. a ref the local catalog has never heard
+// of, the same "unknown trusts the explicit opt-in" case CapsFor's own doc
+// comment describes) produces a zero-value tools.Caps, which satisfies
+// every manifest that declares no requires_caps/min_context of its own --
+// the common case, and every tool.toml written before this item existed.
+func capsForTools(m catalog.Model) tools.Caps {
+	return tools.Caps{
+		Tools:       m.Caps.Tools,
+		Vision:      m.Caps.Vision,
+		Reasoning:   m.Caps.Reasoning,
+		Streaming:   m.Caps.Streaming,
+		JSONSchema:  m.Caps.JSONSchema,
+		Attachments: m.Caps.Attachments,
+		Context:     m.EffectiveContext(),
+	}
 }
