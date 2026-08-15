@@ -236,3 +236,107 @@ func TestCustomThresholdsOverrideDefaults(t *testing.T) {
 		t.Fatal("expected a custom, stricter MinRepeats to be honored over the default")
 	}
 }
+
+// fakeToolsSource is a minimal, hand-rolled ExistingToolsSource whose
+// Count() and FindSimilar() deliberately disagree with each other -- the
+// exact scenario ExistingToolsSource's own doc comment names as the reason
+// it is two methods rather than one ("a registry that excludes
+// quarantined tools from FindSimilar's candidate pool but still counts
+// them toward the budget ceiling"). It exists only in this test file: it
+// is not a production shape, only proof that EvaluateAgainst really does
+// call through the interface rather than silently assuming a slice.
+type fakeToolsSource struct {
+	count   int
+	similar []ExistingTool
+}
+
+func (f fakeToolsSource) Count() int { return f.count }
+func (f fakeToolsSource) FindSimilar(name, description string) []ExistingTool {
+	return f.similar
+}
+
+func TestEvaluateAgainstUsesCountIndependentlyOfFindSimilar(t *testing.T) {
+	// Budget must read Count(), not len(FindSimilar(...)) -- a source
+	// whose two methods disagree must still be blocked on budget using
+	// its own reported count, even though FindSimilar's pool here is
+	// small enough that dedup alone would never trigger.
+	src := fakeToolsSource{count: 40, similar: nil}
+	v := EvaluateAgainst(DefaultThresholds(), Candidate{
+		Name: "one_more", Description: "brand new distinct capability",
+		Origin: OriginUserForced,
+	}, src)
+	if v.Allowed {
+		t.Fatal("expected EvaluateAgainst to block on budget using Count(), independent of FindSimilar's own pool")
+	}
+	if !containsReason(v, "budget") {
+		t.Errorf("expected a budget reason, got %v", v.Reasons)
+	}
+}
+
+func TestEvaluateAgainstUsesFindSimilarIndependentlyOfCount(t *testing.T) {
+	// Dedup must read FindSimilar(...)'s own pool, not derive it from
+	// Count() -- a source reporting a low count but still surfacing a
+	// near-identical tool through FindSimilar must still be blocked on
+	// duplicate.
+	src := fakeToolsSource{
+		count: 1,
+		similar: []ExistingTool{
+			{Name: "git_status_short", Description: "show abbreviated git status output"},
+		},
+	}
+	v := EvaluateAgainst(DefaultThresholds(), Candidate{
+		Name: "git_status_brief", Description: "show abbreviated git status output",
+		Origin: OriginUserForced,
+	}, src)
+	if v.Allowed {
+		t.Fatal("expected EvaluateAgainst to block on duplicate using FindSimilar's own pool, independent of Count()")
+	}
+	if !containsReason(v, "duplicate") {
+		t.Errorf("expected a duplicate reason, got %v", v.Reasons)
+	}
+}
+
+func TestEvaluateAgainstNilSourceBehavesLikeEmptyCatalogue(t *testing.T) {
+	// A nil ExistingToolsSource must be as harmless as an empty slice --
+	// no caller of EvaluateAgainst should need a nil guard of its own.
+	v := EvaluateAgainst(DefaultThresholds(), Candidate{
+		Name: "x", Description: "y", Origin: OriginAgent, Repetitions: 3,
+	}, nil)
+	if !v.Allowed {
+		t.Fatalf("expected a nil source to behave like an empty catalogue, got: %v", v.Reasons)
+	}
+}
+
+func TestEvaluateDelegatesToEvaluateAgainstViaExistingToolsSlice(t *testing.T) {
+	// Evaluate's own long-standing []ExistingTool signature must still
+	// produce byte-identical verdicts to calling EvaluateAgainst directly
+	// through ExistingToolsSlice -- this is the whole point of keeping
+	// Evaluate as a thin wrapper: every pre-interface call site keeps
+	// compiling and behaving exactly as before.
+	existing := []ExistingTool{
+		{Name: "git_status_short", Description: "show abbreviated git status output"},
+	}
+	candidate := Candidate{
+		Name: "git_status_brief", Description: "show abbreviated git status output",
+		Origin: OriginUserForced,
+	}
+	viaSlice := Evaluate(DefaultThresholds(), candidate, existing)
+	viaInterface := EvaluateAgainst(DefaultThresholds(), candidate, ExistingToolsSlice(existing))
+	if viaSlice.Allowed != viaInterface.Allowed || len(viaSlice.Reasons) != len(viaInterface.Reasons) {
+		t.Fatalf("Evaluate and EvaluateAgainst(ExistingToolsSlice(...)) diverged: %+v vs %+v", viaSlice, viaInterface)
+	}
+}
+
+func TestExistingToolsSliceCountAndFindSimilar(t *testing.T) {
+	s := ExistingToolsSlice{
+		{Name: "a", Description: "does a"},
+		{Name: "b", Description: "does b"},
+	}
+	if got := s.Count(); got != 2 {
+		t.Fatalf("Count() = %d, want 2", got)
+	}
+	got := s.FindSimilar("anything", "ignored")
+	if len(got) != 2 || got[0].Name != "a" || got[1].Name != "b" {
+		t.Fatalf("FindSimilar() = %+v, want the whole slice unchanged regardless of arguments", got)
+	}
+}
