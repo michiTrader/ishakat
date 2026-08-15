@@ -156,6 +156,42 @@ type ToolCreate struct {
 	// is used unchanged in that case, matching every existing caller's
 	// behavior before this field existed.
 	LedgerPath string
+
+	// SkipGate1 is §13/§19.6's own literal `/tools create --force`: "skips
+	// gate 1 and logs it". This is a genuinely stronger override than
+	// toolCreateArgs.Origin's own "user_forced" value already provides --
+	// OriginUserForced (evolve.Evaluate) still enforces the No-duplicate
+	// and Budget criteria on purpose (see evolve.OriginUserForced's own
+	// doc comment: "overriding past a near-duplicate or an already-full
+	// catalogue is a different, larger decision than this package makes
+	// on a human's behalf"), whereas SkipGate1 bypasses evolve.Evaluate
+	// entirely -- every one of its five criteria, not just Repetition and
+	// Stability.
+	//
+	// Deliberately NOT a toolCreateArgs JSON field: unlike Origin (which
+	// a model calling tool_create can already self-report, for better or
+	// worse, as a pre-existing property of this package this field does
+	// not change), SkipGate1 lives only on this Go struct, set only by
+	// the one caller PLAN.md's own row names -- a human typing
+	// "/tools create <name> --force" into the TUI (internal/app's
+	// toolsLister.CreateTool constructs a fresh ToolCreate per call and
+	// is the only place that ever sets this true). registry.go's own
+	// WithMetaTools construction of the model-facing tool_create never
+	// sets it, so a model can never talk its way past gate 1 by
+	// requesting a "force" of its own -- "the agent cannot even ask"
+	// stays true regardless of what a model puts in its own arguments
+	// JSON, since there is no field there that reaches this one.
+	//
+	// §19.8's own checks (mandatory provenance, the egress allowlist, the
+	// structural exfiltration check) are never skipped by this field --
+	// only gate 1's own accounting-fact admission judgment is. "Logs it":
+	// Run prepends a fixed marker to the written manifest's own
+	// [origin].reason (see Run's own comment) rather than a separate log
+	// file, so the override is exactly as auditable as every other
+	// tool's provenance already is via /tools audit -- no new file, no
+	// new sink, just the existing provenance record now also carrying
+	// this fact forward permanently.
+	SkipGate1 bool
 }
 
 var _ Tool = ToolCreate{}
@@ -288,6 +324,16 @@ var nativeToolCatalog = []evolve.ExistingTool{
 	{Name: Fetch{}.Name(), Description: Fetch{}.Description()},
 }
 
+// skipGate1ReasonMarker is the fixed, greppable prefix ToolCreate.Run
+// prepends to a --force creation's Origin.Reason -- see SkipGate1's own
+// doc comment on why this is "logs it" in its entirety, with no separate
+// log file. Fixed and greppable on purpose: a future /tools audit
+// enhancement (or a human reading tool.toml directly) can find every
+// forced override in the whole catalogue with one string search, without
+// this package needing to grow a second, structured place the same fact
+// is recorded twice.
+const skipGate1ReasonMarker = "[--force: gate 1 skipped] "
+
 // credentialLikePaths is §19.8 mitigation 5's fixed, illustrative list of
 // path shapes a declarative tool must never read — the same "small,
 // illustrative set, not exhaustive" caveat financeHosts already documents
@@ -396,12 +442,35 @@ func (t ToolCreate) Run(ctx context.Context, rawArgs json.RawMessage) (Result, e
 		PerUseSavingTokens: args.PerUseSavingTokens,
 		ExpectedUses:       args.ExpectedUses,
 	}
-	verdict := evolve.Evaluate(t.Thresholds, candidate, existing)
-	if !verdict.Allowed {
-		return ErrorResult(fmt.Sprintf("gate 1 refused %q:\n- %s", args.Name, strings.Join(verdict.Reasons, "\n- "))), nil
+	// SkipGate1 (see its own doc comment on ToolCreate) bypasses this
+	// whole block -- every one of evolve.Evaluate's five criteria, not
+	// merely the two (Repetition, Stability) OriginUserForced already
+	// skips. candidate/existing above are still built either way: their
+	// cost is trivial next to a filesystem write, and keeping this one
+	// conditional narrow (wrapping only the call and its refusal check)
+	// keeps the "what --force actually changes" surface easy to audit
+	// in a diff, rather than threading a second code path through the
+	// catalogue-building logic above too.
+	if !t.SkipGate1 {
+		verdict := evolve.Evaluate(t.Thresholds, candidate, existing)
+		if !verdict.Allowed {
+			return ErrorResult(fmt.Sprintf("gate 1 refused %q:\n- %s", args.Name, strings.Join(verdict.Reasons, "\n- "))), nil
+		}
 	}
 
-	m := buildManifest(args)
+	m := buildManifest(args, origin)
+
+	// "and logs it" (§13's own row): a --force creation gets a fixed,
+	// greppable marker prepended to the written manifest's own
+	// [origin].reason -- the same field /tools audit already surfaces
+	// for every tool, so this needs no new log file or sink, only this
+	// one extra fact riding along in a field that was already mandatory
+	// provenance. Prepended, not replacing, so args.Reason's own
+	// human-supplied justification is never lost -- both facts belong
+	// in the permanent record together.
+	if t.SkipGate1 {
+		m.Origin.Reason = skipGate1ReasonMarker + m.Origin.Reason
+	}
 
 	if res, blocked := checkManifestSafety(m, t.Allow, t.AllowAll, "create"); blocked {
 		return res, nil
@@ -440,6 +509,18 @@ func parseOrigin(s string) (evolve.Origin, error) {
 		return evolve.OriginUserForced, nil
 	default:
 		return 0, fmt.Errorf("unknown origin %q, want one of agent/user_declared/user_forced", s)
+	}
+}
+
+// createdByFor answers Manifest.Origin.CreatedBy for a given evolve.Origin
+// -- see buildManifest's own doc comment on why this is a small function
+// rather than an inline switch repeated wherever CreatedBy is set.
+func createdByFor(origin evolve.Origin) string {
+	switch origin {
+	case evolve.OriginUserDeclared, evolve.OriginUserForced:
+		return "user"
+	default:
+		return "agent"
 	}
 }
 
@@ -520,7 +601,16 @@ func checkManifestSafety(m Manifest, allow []string, allowAll bool, verb string)
 // Manifest.Dir's own doc comment ("never decoded from the TOML itself"),
 // and a freshly created tool is written to disk, not discovered from it,
 // in this same call.
-func buildManifest(args toolCreateArgs) Manifest {
+//
+// origin (already parsed from args.Origin by Run, via parseOrigin) drives
+// Origin.CreatedBy: OriginAgent writes "agent", OriginUserDeclared and
+// OriginUserForced both write "user" -- matching §19.6's own three-origin
+// table, which pairs both human-initiated origins with created_by =
+// "user". A parameter, not a re-derivation from args.Origin's raw string,
+// so this can never drift from whatever parseOrigin itself already
+// accepted -- one parse, reused, rather than two places that could
+// disagree about what counts as a valid origin string.
+func buildManifest(args toolCreateArgs, origin evolve.Origin) Manifest {
 	var params map[string]ParamSpec
 	if len(args.Params) > 0 {
 		params = make(map[string]ParamSpec, len(args.Params))
@@ -545,7 +635,7 @@ func buildManifest(args toolCreateArgs) Manifest {
 		Description: args.Description,
 		Version:     1,
 		Origin: OriginSpec{
-			CreatedBy:   "agent",
+			CreatedBy:   createdByFor(origin),
 			Reason:      args.Reason,
 			Repetitions: args.Repetitions,
 			SessionID:   args.SessionID,

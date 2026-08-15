@@ -22,6 +22,8 @@ type fakeToolsLister struct {
 	deleteErr   map[string]error
 	editOK      map[string]string
 	editErr     map[string]error
+	createOK    map[string]string
+	createErr   map[string]error
 }
 
 func (f *fakeToolsLister) ListTools() ToolsListResult { return f.res }
@@ -73,6 +75,23 @@ func (f *fakeToolsLister) EditTool(name, oldString, newString string, replaceAll
 		return status, nil
 	}
 	return "", errors.New("no existe ninguna herramienta llamada \"" + name + "\"")
+}
+
+// CreateTool ignores description/url/method/reason/sources/force's own
+// values -- every test in this file that exercises /tools create cares
+// about the dispatch/parsing/rendering path, not about what a real
+// tools.ToolCreate would do with those specific strings (that behavior
+// is already covered by tool_create_test.go and toolslister_test.go's
+// own real-round-trip tests) -- keyed on name alone, the same shape
+// editOK/editErr already use.
+func (f *fakeToolsLister) CreateTool(name, description, url, method, reason string, sources []string, force bool) (string, error) {
+	if err, ok := f.createErr[name]; ok {
+		return "", err
+	}
+	if status, ok := f.createOK[name]; ok {
+		return status, nil
+	}
+	return "", errors.New("no se pudo crear \"" + name + "\"")
 }
 
 // withToolsLister mirrors withSessionLister/withRecorder: it assigns the

@@ -300,18 +300,21 @@ func Run(version string, resume bool) int {
 		History:       history,
 		SessionLister: lister,
 
-		// ToolsLister is /tools' own read (and, since /tools edit, write)
-		// side (§13, Step 20/21) — see internal/app/toolslister.go's own
-		// doc comment for why this package is the one place allowed to
-		// import both internal/tools and internal/tui at once. nil
+		// ToolsLister is /tools' own read (and, since /tools edit/create,
+		// write) side (§13, Step 20/21) — see internal/app/toolslister.go's
+		// own doc comment for why this package is the one place allowed
+		// to import both internal/tools and internal/tui at once. nil
 		// (tools.enabled = false, or an empty tools.dir) is the supported
 		// "cannot list" value, matching what runToolsCommand already
-		// expects. NewToolsListerWithEgress (not the plain NewToolsLister)
-		// is used here because EditTool needs the same egress allowlist
-		// cfgTools.Egress.Allow/AllowAll already threaded into
-		// tools.WithMetaTools' own ToolEdit construction in
-		// buildAgentOptions — see toolsLister's own doc comment.
-		ToolsLister: NewToolsListerWithEgress(cfg.Tools.Dir, cfg.Tools.Enabled, cfg.Tools.Egress.Allow, cfg.Tools.Egress.AllowAll),
+		// expects. NewToolsListerWithEvolve (not NewToolsListerWithEgress
+		// or the plain NewToolsLister) is used here because EditTool
+		// needs the same egress allowlist cfgTools.Egress.Allow/AllowAll
+		// already threaded into tools.WithMetaTools' own ToolEdit
+		// construction in buildAgentOptions, and CreateTool additionally
+		// needs the same gate 1 Thresholds already threaded into
+		// tools.WithMetaTools' own ToolCreate construction there — see
+		// toolsLister's own doc comment.
+		ToolsLister: NewToolsListerWithEvolve(cfg.Tools.Dir, cfg.Tools.Enabled, cfg.Tools.Egress.Allow, cfg.Tools.Egress.AllowAll, evolveThresholds(cfg.Tools, cfg.Tools.Evolve)),
 
 		ToolsEnabled: cfg.Tools.Enabled,
 		AgentOptions: agentOpts,

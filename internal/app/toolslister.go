@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/MichiTrader/ishakat/internal/evolve"
 	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/tui"
 )
@@ -45,17 +46,25 @@ func describeToolState(name string, s tools.ToolState) string {
 // mid-session).
 //
 // allow/allowAll mirror config.Egress's own two fields ([tools.egress]'s
-// allow/allow_all) — EditTool needs them to construct a real
-// tools.ToolEdit value (see tui.ToolsLister's own doc comment for why
-// EditTool, unlike every other method here, delegates to that type's own
-// Run rather than being built from exported internal/tools functions
-// directly). Every other method on this type ignores both fields
-// entirely, matching the fact that ListTools/AuditTools/ToolManifest/
-// ReviveTool/DeleteTool never touch egress at all.
+// allow/allow_all) — EditTool and CreateTool both need them to construct
+// a real tools.ToolEdit/tools.ToolCreate value (see tui.ToolsLister's own
+// doc comment for why these two methods, unlike every other one here,
+// delegate to that type's own Run rather than being built from exported
+// internal/tools functions directly). thresholds mirrors gate 1's own
+// evolve.Thresholds (evolveThresholds's own translation of
+// config.Tools/config.Evolve) — only CreateTool reads it, so gate 1's
+// No-duplicate/Budget checks a non-forced "/tools create" still runs
+// through are held to this install's own configured numbers rather than
+// evolve.DefaultThresholds()'s hardcoded fallback (which a zero-value
+// Thresholds would otherwise silently fall back to via Evaluate's own
+// normalized() step). Every other method on this type ignores all three
+// fields entirely, matching the fact that ListTools/AuditTools/
+// ToolManifest/ReviveTool/DeleteTool never touch egress or gate 1 at all.
 type toolsLister struct {
-	dir      string
-	allow    []string
-	allowAll bool
+	dir        string
+	allow      []string
+	allowAll   bool
+	thresholds evolve.Thresholds
 }
 
 var _ tui.ToolsLister = toolsLister{}
@@ -84,12 +93,32 @@ func NewToolsLister(dir string, enabled bool) tui.ToolsLister {
 // function (allow=nil, allowAll=false) rather than replaced by it, so
 // every pre-existing call site — the one production call and the dozens
 // of test call sites that only ever exercise ListTools/AuditTools/
-// ToolManifest/ReviveTool/DeleteTool — keeps compiling unchanged.
+// ToolManifest/ReviveTool/DeleteTool — keeps compiling unchanged. This
+// itself is now a thin wrapper over NewToolsListerWithEvolve (a
+// zero-value evolve.Thresholds, filled from evolve.DefaultThresholds by
+// Evaluate's own normalization step the same way an install that has
+// never touched these knobs already gets §19.6's stated defaults) for
+// the identical additive reason CreateTool's own thresholds parameter
+// needed a new constructor rather than growing this one's signature.
 func NewToolsListerWithEgress(dir string, enabled bool, allow []string, allowAll bool) tui.ToolsLister {
+	return NewToolsListerWithEvolve(dir, enabled, allow, allowAll, evolve.Thresholds{})
+}
+
+// NewToolsListerWithEvolve is NewToolsListerWithEgress plus gate 1's own
+// Thresholds, which only CreateTool reads (see toolsLister's own doc
+// comment on thresholds for why a non-forced "/tools create" must be
+// held to this install's own configured numbers, not
+// evolve.DefaultThresholds()'s hardcoded fallback). NewToolsListerWithEgress
+// itself is kept as a thin wrapper over this function (thresholds =
+// evolve.Thresholds{}) rather than replaced by it, so every pre-existing
+// call site keeps compiling unchanged — the same additive-constructor
+// precedent this file's own NewToolsLister/NewToolsListerWithEgress pair
+// already established for allow/allowAll.
+func NewToolsListerWithEvolve(dir string, enabled bool, allow []string, allowAll bool, thresholds evolve.Thresholds) tui.ToolsLister {
 	if !enabled || dir == "" {
 		return nil
 	}
-	return toolsLister{dir: dir, allow: allow, allowAll: allowAll}
+	return toolsLister{dir: dir, allow: allow, allowAll: allowAll, thresholds: thresholds}
 }
 
 // ListTools mirrors tool_list.go's own two calls (DiscoverDeclarative then
@@ -336,6 +365,93 @@ func (l toolsLister) EditTool(name, oldString, newString string, replaceAll bool
 	res, err := te.Run(context.Background(), rawArgs)
 	if err != nil {
 		return "", fmt.Errorf("no se pudo editar %q: %w", name, err)
+	}
+	return res.Text, nil
+}
+
+// CreateTool implements /tools create <name> [--force] (§13, §19.6's own
+// gate 1) by constructing a real tools.ToolCreate and calling its Run
+// method directly through the generic tools.Tool interface -- the exact
+// same delegation reason EditTool's own doc comment gives, since
+// tools.ToolCreate.Run's own flow depends on the same unexported
+// checkManifestSafety plus evolve.Evaluate (gate 1 itself), neither of
+// which this package can call any other way without widening
+// internal/tools' exported surface just for this one caller.
+//
+// force selects both Origin and SkipGate1: false passes origin
+// "user_declared" (a human explicitly typing this command already *is*
+// the declared intent -- gate 1 still runs in full except that
+// Repetition/Stability are satisfied by the declaration itself, per
+// evolve.OriginUserDeclared's own doc comment); true passes
+// "user_forced" *and* sets tc.SkipGate1 = true, bypassing evolve.Evaluate
+// entirely -- see ToolCreate.SkipGate1's own doc comment for why this is
+// a stronger, separate mechanism from Origin alone, and for why "logs
+// it" needs no code here: Run itself prepends the fixed marker to the
+// written manifest's own Origin.Reason before this method ever sees the
+// result.
+//
+// reason and sources are passed through unchanged as this command's own
+// mandatory provenance (§19.8 mitigation 2) -- an empty sources slice
+// (not nil) is passed when the caller supplies none, matching
+// toolCreateArgs.Sources' own "pass an empty array if none apply"
+// contract (a nil sources would be rejected by Run as "did not even
+// address provenance", which a human explicitly running this command
+// always has, even when they cite no external source).
+//
+// Only "could not even attempt it" preconditions checked before Run is
+// ever called are a Go error here (empty name, empty description, empty
+// url, empty reason) -- matching this interface's own documented
+// convention and EditTool's own precedent. Every outcome
+// tools.ToolCreate.Run itself reports as an ErrorResult (a gate 1
+// refusal, an un-allowlisted host, a credential-shaped path, a name that
+// already exists) is surfaced here as res.Text, not a Go error -- the
+// caller sees exactly the same wording a model would see from
+// tool_create itself.
+func (l toolsLister) CreateTool(name, description, url, method, reason string, sources []string, force bool) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("el nombre de la herramienta no puede estar vacio")
+	}
+	if strings.TrimSpace(description) == "" {
+		return "", fmt.Errorf("la descripcion no puede estar vacia")
+	}
+	if strings.TrimSpace(url) == "" {
+		return "", fmt.Errorf("la url no puede estar vacia")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return "", fmt.Errorf("reason no puede estar vacio (§19.8 exige procedencia obligatoria)")
+	}
+	if sources == nil {
+		sources = []string{}
+	}
+
+	origin := "user_declared"
+	if force {
+		origin = "user_forced"
+	}
+
+	tc := tools.ToolCreate{
+		Dir:        l.dir,
+		Allow:      l.allow,
+		AllowAll:   l.allowAll,
+		Thresholds: l.thresholds,
+		SkipGate1:  force,
+	}
+	rawArgs, err := json.Marshal(map[string]any{
+		"name":        name,
+		"description": description,
+		"url":         url,
+		"method":      method,
+		"origin":      origin,
+		"reason":      reason,
+		"sources":     sources,
+	})
+	if err != nil {
+		return "", fmt.Errorf("no se pudieron preparar los argumentos de creacion: %w", err)
+	}
+
+	res, err := tc.Run(context.Background(), rawArgs)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo crear %q: %w", name, err)
 	}
 	return res.Text, nil
 }

@@ -4,8 +4,10 @@
 // view one's manifest in full, /tools audit to see each tool's provenance
 // (origin, sources, session_id) and current SHA-256 (§19.8 mitigations 2
 // and 6), /tools revive <name> to bring an archived tool back (§19.5),
-// and /tools delete <name> [confirm] to remove one permanently.
-// create/edit remain Step 21's still-open rows.
+// /tools delete <name> [confirm] to remove one permanently, /tools edit
+// <name> to fix one in place, and /tools create <name> [--force] to
+// write a brand new one by hand (§19.6) -- Step 21's backlog is now
+// fully closed for rung 1 (declarative tool.toml, no run.py sidecar).
 //
 // internal/tui may never import internal/tools directly: declarative.go's
 // HTTP client (and Fetch, registry.go's Core) pull net/http transitively
@@ -105,7 +107,9 @@ type ToolsAuditResult struct {
 // own text: "removes it, with confirmation" — the same
 // tools.ToolDelete.Run flow, called from a second, human-initiated
 // entry point); EditTool powers "/tools edit <name>" (§19.5's fourth
-// meta-tool, "fixes a tool; demotes it to unverified until re-probed").
+// meta-tool, "fixes a tool; demotes it to unverified until re-probed");
+// CreateTool powers "/tools create <name> [--force]" (§19.6's own gate
+// 1, "create one by hand; --force skips gate 1 and logs it").
 //
 // Unlike ReviveTool/DeleteTool (built entirely from exported
 // internal/tools functions the concrete adapter can call directly),
@@ -121,7 +125,30 @@ type ToolsAuditResult struct {
 // included, rather than duplicating any part of it. This is why EditTool
 // takes oldString/newString/replaceAll instead of a full replacement
 // manifest: it mirrors toolEditArgs field for field, for the exact three
-// reasons tool_edit.go's own doc comment gives for that shape.
+// reasons tool_edit.go's own doc comment gives for that shape. CreateTool
+// follows the identical delegation pattern for the identical reason:
+// tools.ToolCreate.Run's own flow depends on the same checkManifestSafety
+// plus evolve.Evaluate (gate 1 itself) -- constructing a real
+// tools.ToolCreate and calling its Run reuses that entire vetted path,
+// gate included, rather than reimplementing any part of it here.
+//
+// CreateTool's own name/description/url/method/reason/sources parameters
+// are deliberately a reduced slice of tools.ToolCreate's full argument
+// set (no params/query/headers/body/auth/extract/selftest_*) -- a first
+// slash-command shape covering exactly the fields §19.8 makes mandatory
+// (name, description, url, reason, sources) plus method (defaults to
+// GET when empty, matching buildManifest's own default). A tool needing
+// the richer fields is created here with this minimal shape and then
+// refined with /tools edit afterward, the same "narrow first slice,
+// extend later" precedent every other Step 21 row already followed.
+// force selects the origin CreateTool passes through: false means
+// "user_declared" (a human explicitly typing this command already *is*
+// the declared intent §19.6's own Origin doc comment describes -- gate 1
+// still runs, but Repetition/Stability are satisfied by the declaration
+// itself; No-duplicate and Budget still apply in full), true means
+// "user_forced" *and* sets the underlying tools.ToolCreate.SkipGate1 --
+// see that field's own doc comment for why this is a stronger, separate
+// mechanism from Origin alone.
 //
 // Every method's error return is reserved for "could not even attempt
 // it" (unknown tool name, an unreadable state.json, a failed os.RemoveAll)
@@ -136,12 +163,15 @@ type ToolsAuditResult struct {
 // DeleteTool's refusal-without-confirm path is deliberately *not* an
 // error: like tool_delete.go's own ErrorResult (not a Go error) for the
 // identical case, refusing without confirmation is an attempted,
-// informative outcome, not a failure to attempt. EditTool follows the
-// same rule: an unknown name or a bad old_string/new_string pair (empty,
-// identical) is a Go error (could not even attempt it); "old_string not
-// found", "ambiguous match", "no longer parses", or "fails the safety
-// check" are all reported as the returned string, matching
-// tool_edit.go's own ErrorResult (not a Go error) for each of those.
+// informative outcome, not a failure to attempt. EditTool and CreateTool
+// follow the same rule: an unknown name or a bad old_string/new_string
+// pair (EditTool) is a Go error (could not even attempt it); a gate 1
+// refusal, an un-allowlisted host, a structural exfiltration match, or
+// (CreateTool) a missing required field are all reported as the returned
+// string when tools.ToolCreate.Run itself would report them as an
+// ErrorResult, matching that convention exactly; only a genuinely
+// unattempted case (e.g. an empty name caught before Run is even called)
+// is a Go error here.
 type ToolsLister interface {
 	ListTools() ToolsListResult
 	ToolManifest(name string) (string, error)
@@ -149,4 +179,5 @@ type ToolsLister interface {
 	ReviveTool(name string) (string, error)
 	DeleteTool(name string, confirm bool) (string, error)
 	EditTool(name, oldString, newString string, replaceAll bool) (string, error)
+	CreateTool(name, description, url, method, reason string, sources []string, force bool) (string, error)
 }
