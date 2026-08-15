@@ -87,10 +87,16 @@ const noToolsReply = "You can create it yourself by running: echo 'hi' > file.tx
 // request. That fiction is precisely what let Step 16 ship green and inert.
 // Here, no tools on the wire means no tool call, and the chain visibly
 // breaks at the first link.
-func twoTurnToolServer(t *testing.T, name string, args json.RawMessage, finalText string) (*httptest.Server, *atomic.Bool) {
+//
+// turns is returned so a test can assert how many provider requests one turn
+// actually cost. That count is the subject of §21.9's closing criterion 1:
+// the rate-limit defect is invisible to every assertion about files,
+// reviewers and final text, and shows up only as a request count that grows
+// when it should not.
+func twoTurnToolServer(t *testing.T, name string, args json.RawMessage, finalText string) (*httptest.Server, *atomic.Bool, *atomic.Int32) {
 	t.Helper()
 	sawTools := &atomic.Bool{}
-	var turns atomic.Int32
+	turns := &atomic.Int32{}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -128,7 +134,7 @@ func twoTurnToolServer(t *testing.T, name string, args json.RawMessage, finalTex
 		write(fake.SSEDone())
 	}))
 	t.Cleanup(srv.Close)
-	return srv, sawTools
+	return srv, sawTools, turns
 }
 
 // runToolTurn drives one full agent turn through the real engine, the real
@@ -196,7 +202,7 @@ func TestToolChainApprovedWriteReachesDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	srv, sawTools := twoTurnToolServer(t, "write_file", args, "Created the file.")
+	srv, sawTools, _ := twoTurnToolServer(t, "write_file", args, "Created the file.")
 
 	cfg := toolsCfg(t, srv.URL, "ask")
 	reviewer := &recordingReviewer{decision: permissions.Decision{Allow: true}}
@@ -242,8 +248,18 @@ func TestToolChainApprovedWriteReachesDisk(t *testing.T) {
 }
 
 // TestToolChainDeniedWriteNeverTouchesDisk is the same chain with the human
-// saying no. The denial has to be data the model can read and react to — not
-// an engine error, and above all not a file that gets written anyway.
+// saying no. Two things must hold: the file is never written, and the turn
+// ENDS — it does not hand the refusal back for the model to work around.
+//
+// This test asserted the opposite until step 26, and the change is deliberate
+// (§21.9 fix 1, docs/BUG-rate-limit-amplifier.md). The old contract — "a
+// denial is data the model can react to" — reads as a virtue and is the
+// outage mechanism: the model receives the refusal, tries a variant, and each
+// variant is another provider request carrying the whole grown history. A
+// real user was rate-limited off their own account this way.
+//
+// It is also this test's job to hold closing criterion 1: a turn in which the
+// human denies one call issues EXACTLY ONE provider request, not N.
 func TestToolChainDeniedWriteNeverTouchesDisk(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "must-not-exist.txt")
@@ -252,7 +268,7 @@ func TestToolChainDeniedWriteNeverTouchesDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	srv, sawTools := twoTurnToolServer(t, "write_file", args, "I was not allowed to write it.")
+	srv, sawTools, turns := twoTurnToolServer(t, "write_file", args, "I was not allowed to write it.")
 
 	cfg := toolsCfg(t, srv.URL, "ask")
 	reviewer := &recordingReviewer{decision: permissions.Decision{Allow: false}}
@@ -268,13 +284,32 @@ func TestToolChainDeniedWriteNeverTouchesDisk(t *testing.T) {
 	if len(reviewer.requests()) != 1 {
 		t.Errorf("reviewer consulted %d times, want 1", len(reviewer.requests()))
 	}
-	// The turn still ends normally, with the model's own answer: a denial
-	// is tool-error data, not a failed turn (§3, "the error is data").
-	if !strings.Contains(result.Text, "not allowed") {
-		t.Errorf("final text = %q, want the model's answer after the denial", result.Text)
+	// The turn ended on the denial, and says so honestly.
+	if result.Stopped == "" {
+		t.Error("a denied turn must report why it stopped, or the user watches the agent go quiet for no stated reason")
 	}
+	if !strings.Contains(result.Stopped, "declined") {
+		t.Errorf("Stopped = %q, want it to name the human's decision", result.Stopped)
+	}
+
+	// Closing criterion 1, asserted by counting. Counting is the point: every
+	// other assertion in this test passed happily while the defect was live,
+	// because a second request looks like a helpful model rather than like an
+	// outage in the making.
+	if got := turns.Load(); got != 1 {
+		t.Errorf("provider requests = %d, want exactly 1: a denial must not buy the model another turn to route around it", got)
+	}
+	// The corollary: the model's second-turn answer is unreachable, because
+	// the second turn never happens.
+	if strings.Contains(result.Text, "not allowed") {
+		t.Error("the model answered after the denial, so another provider request was made: this is the amplifier the fix removes")
+	}
+
+	// Bug 2 still holds: the refused call has its own tool reply, so the
+	// assistant message carries no orphaned tool_call and a --resume of this
+	// session does not 400 at the provider forever.
 	if !historyHasToolError(hist) {
-		t.Error("history carries no tool-error block: the model was never told it was denied")
+		t.Error("history carries no tool-error block: the refused call was left orphaned, which poisons every later request")
 	}
 }
 
@@ -294,7 +329,7 @@ func TestToolChainReadIsAllowedWithoutAsking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	srv, sawTools := twoTurnToolServer(t, "read_file", args, "The file says: file content here")
+	srv, sawTools, _ := twoTurnToolServer(t, "read_file", args, "The file says: file content here")
 
 	cfg := toolsCfg(t, srv.URL, "ask")
 	reviewer := &recordingReviewer{decision: permissions.Decision{Allow: true}}
@@ -325,7 +360,7 @@ func TestToolChainWriteDenyIsNotEvenOffered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	srv, sawTools := twoTurnToolServer(t, "write_file", args, "That path is off limits.")
+	srv, sawTools, _ := twoTurnToolServer(t, "write_file", args, "That path is off limits.")
 
 	cfg := toolsCfg(t, srv.URL, "ask")
 	cfg.Tools.Permissions.WriteDeny = []string{"**/*.env"}
@@ -364,7 +399,7 @@ func TestToolChainWithoutCapsExplainsInsteadOfActing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	srv, sawTools := twoTurnToolServer(t, "write_file", args, "Created the file.")
+	srv, sawTools, _ := twoTurnToolServer(t, "write_file", args, "Created the file.")
 
 	cfg := toolsCfg(t, srv.URL, "ask")
 	reviewer := &recordingReviewer{decision: permissions.Decision{Allow: true}}
