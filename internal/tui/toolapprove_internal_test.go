@@ -59,10 +59,10 @@ func TestNewToolApproveDialogOffersSessionGrantOnlyForMediumRisk(t *testing.T) {
 func TestToolApproveDialogSelectionWrapsAndCancelDenies(t *testing.T) {
 	reply := make(chan permissions.Decision, 1)
 	dialog := newToolApproveDialog(approvalRequest(permissions.Medium), reply)
-	if got := dialog.moveSel(-1).sel; got != len(dialog.options)-1 {
+	if got := dialog.moveSel(-1).sel(); got != len(dialog.options)-1 {
 		t.Fatalf("selection after moving up from first row = %d, want last row", got)
 	}
-	if got := dialog.moveSel(1).moveSel(1).moveSel(1).sel; got != 0 {
+	if got := dialog.moveSel(1).moveSel(1).moveSel(1).sel(); got != 0 {
 		t.Fatalf("selection after wrapping through all rows = %d, want 0", got)
 	}
 
