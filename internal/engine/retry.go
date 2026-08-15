@@ -47,13 +47,28 @@ func retryAfter(err error, attempt, maxRetries int) (wait time.Duration, retry b
 		return 0, false
 	}
 
+	// Where the wait came from decides how it may be jittered, and step 26
+	// turns on that distinction (docs/BUG-rate-limit-amplifier.md, fix 2).
+	//
+	// A backoff we invented is a guess, so spreading it in both directions
+	// is free. A wait the *server* specified is not a guess: Retry-After: 22
+	// means the window is closed for 22 seconds, and coming back at 17.6s —
+	// which symmetric ±20% jitter did, measurably — earns a second 429. On
+	// an account that is already rate-limited, that re-arms the very
+	// amplifier this step exists to remove, and it does it at the worst
+	// possible moment. So a server-specified wait is jittered upward only:
+	// still spread, so a fleet of clients does not resynchronize, but never
+	// earlier than the server permitted.
 	if d <= 0 {
-		d = backoff(attempt)
+		if d = backoff(attempt); d > maxRetryWait {
+			d = maxRetryWait
+		}
+		return jitter(d), true
 	}
 	if d > maxRetryWait {
 		d = maxRetryWait
 	}
-	return jitter(d), true
+	return jitterUp(d), true
 }
 
 // backoff is the fallback when the hint didn't come with its own wait (no
@@ -68,9 +83,18 @@ func backoff(attempt int) time.Duration {
 }
 
 // jitter spreads a wait by ±jitterPercent so many clients retrying the same
-// outage don't all wake up on the same tick.
+// outage don't all wake up on the same tick. Only ever applied to a wait
+// engine invented itself (backoff) — see jitterUp for the other case.
 func jitter(d time.Duration) time.Duration {
 	spread := float64(d) * jitterPercent
 	delta := (rand.Float64()*2 - 1) * spread
 	return d + time.Duration(delta)
+}
+
+// jitterUp spreads a wait by +jitterPercent only, never returning less than
+// d. It is what a server-specified Retry-After gets: the spread still keeps
+// many clients from waking on the same tick, but the floor the server named
+// is treated as a floor rather than a midpoint.
+func jitterUp(d time.Duration) time.Duration {
+	return d + time.Duration(rand.Float64()*float64(d)*jitterPercent)
 }

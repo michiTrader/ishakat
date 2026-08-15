@@ -34,6 +34,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
 )
@@ -68,6 +69,17 @@ type AgentOptions struct {
 	// that names how much was dropped (§12bis). Zero means the default (32 KiB).
 	// A negative value disables truncation — intended only for tests.
 	MaxOutputBytes int
+
+	// OnWait, when set, is called before the loop sleeps on a retryable
+	// handshake failure — in practice a 429 carrying Retry-After (step 26,
+	// fix 2). The loop already honoured that wait; what it did not do was
+	// say so, and a 22-second silent pause is indistinguishable from a hang
+	// to the person holding the phone. The caller decides how to render it
+	// (§21.2's `auto·wait 22s`); engine only reports the duration.
+	//
+	// It is called from the loop's own goroutine, so an implementation must
+	// not block.
+	OnWait func(wait time.Duration, attempt int)
 
 	// BudgetUSD is the maximum estimated provider spend for this session. Zero
 	// disables the budget. Prices are USD per million tokens; unknown prices are
@@ -159,7 +171,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		iterReq.Messages = history.Active()
 		iterReq.Tools = opts.Tools
 
-		ch, err := e.open(ctx, iterReq)
+		ch, err := e.open(ctx, iterReq, opts.OnWait)
 		if err != nil {
 			if ctx.Err() != nil {
 				result.Aborted = true

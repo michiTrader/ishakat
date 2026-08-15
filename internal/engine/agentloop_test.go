@@ -1233,3 +1233,105 @@ func everyToolCallIsAnswered(h *convo.Conversation) bool {
 	}
 	return true
 }
+
+// rateLimited is a fake 429: it satisfies retryHint structurally, exactly as
+// provider.Error does, without this package importing internal/provider.
+type rateLimited struct{ wait time.Duration }
+
+func (e rateLimited) Error() string                { return "provider: HTTP 429" }
+func (e rateLimited) Retry() (time.Duration, bool) { return e.wait, true }
+
+// TestRunAgentTurnWaitsOutARateLimitAndResumes is closing criterion 2 of
+// docs/BUG-rate-limit-amplifier.md, scaled down in time: a 429 carrying a
+// Retry-After must make the loop wait out the window and then resume, rather
+// than retrying immediately (which re-trips the limit) or failing the turn
+// (which loses the user's work).
+//
+// The real criterion names 22 seconds. Asserting that literally would put a
+// 22-second sleep in the test suite, so the wait is scaled and what gets
+// pinned is the property, measured three ways: the turn survived, it did not
+// come back early, and the wait was reported rather than silent.
+func TestRunAgentTurnWaitsOutARateLimitAndResumes(t *testing.T) {
+	const window = 250 * time.Millisecond
+
+	var mu sync.Mutex
+	var attempts int
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			return nil, rateLimited{wait: window}
+		}
+		return chanOf(deltaEvent("resumed after the rate limit"), doneEvent()), nil
+	}
+
+	var waits []time.Duration
+	eng := New(stream, 3)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("do the thing"))
+
+	start := time.Now()
+	res, err := eng.RunAgentTurn(context.Background(), Request{Model: "fake/pro"}, AgentOptions{
+		OnWait: func(w time.Duration, attempt int) {
+			mu.Lock()
+			waits = append(waits, w)
+			mu.Unlock()
+		},
+	}, hist)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("a 429 with Retry-After must not fail the turn: %v", err)
+	}
+	if res.Text != "resumed after the rate limit" {
+		t.Errorf("Text = %q, want the answer from after the wait", res.Text)
+	}
+	if attempts != 2 {
+		t.Errorf("provider attempts = %d, want 2 (the 429 then the retry)", attempts)
+	}
+	// The point of fix 2: never earlier than the server permitted.
+	if elapsed < window {
+		t.Errorf("resumed after %v, inside the %v window the server closed", elapsed, window)
+	}
+	// And never silently: a wait long enough to matter must be reportable,
+	// or it is indistinguishable from a hang.
+	if len(waits) != 1 {
+		t.Fatalf("OnWait called %d times, want 1", len(waits))
+	}
+	if waits[0] < window {
+		t.Errorf("OnWait reported %v, less than the server's %v", waits[0], window)
+	}
+}
+
+// TestRunAgentTurnRateLimitNeedsNoWaitHook guards the hook's optionality.
+// OnWait is a courtesy to the user interface, never a condition for correct
+// pacing -- a caller that does not set it (RunToCompletion, the plain text
+// turn) must still wait exactly as long.
+func TestRunAgentTurnRateLimitNeedsNoWaitHook(t *testing.T) {
+	const window = 150 * time.Millisecond
+
+	var mu sync.Mutex
+	var attempts int
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			return nil, rateLimited{wait: window}
+		}
+		return chanOf(deltaEvent("fine"), doneEvent()), nil
+	}
+
+	eng := New(stream, 3)
+	hist := &convo.Conversation{}
+	start := time.Now()
+	if _, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{}, hist); err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < window {
+		t.Errorf("resumed after %v without a hook set, inside the %v window", elapsed, window)
+	}
+}

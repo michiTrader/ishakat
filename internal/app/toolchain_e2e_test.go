@@ -470,3 +470,51 @@ func historyHasToolError(hist *convo.Conversation) bool {
 	}
 	return false
 }
+
+// TestToolChainRateLimitWaitIsReportedNotSilent is the user-visible half of
+// step 26's fix 2. The engine already waited out a Retry-After window; what
+// it did not do was say so, and on a phone a silent 22-second pause is
+// indistinguishable from a hung agent -- which is exactly when a user kills
+// the process and starts again, adding load to an account that is already
+// rate-limited.
+//
+// The window is scaled down to keep the suite fast; the property being
+// pinned is that the notice reaches stderr through the real sink, and that
+// it is rendered at human granularity rather than as nine digits of
+// float-second noise.
+func TestToolChainRateLimitWaitIsReportedNotSilent(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"message":"rate limit exceeded"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, fake.SSEDelta("answered after the wait")+fake.SSEDone())
+	}))
+	defer srv.Close()
+
+	cfg := toolsCfg(t, srv.URL, "ask")
+	code, out, errs := run(t, HeadlessOptions{Config: cfg, Prompt: "x"})
+
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr: %s", code, errs)
+	}
+	if !strings.Contains(out, "answered after the wait") {
+		t.Errorf("stdout = %q, want the answer produced after the retry", out)
+	}
+	if n := attempts.Load(); n != 2 {
+		t.Errorf("provider attempts = %d, want 2 (the 429 then the retry)", n)
+	}
+	if !strings.Contains(errs, "rate limited") {
+		t.Errorf("the wait must be reported on stderr, stderr = %q", errs)
+	}
+	// Human granularity: "1s", never "1.0837462s".
+	if strings.Contains(errs, "ms") && strings.Contains(errs, ".") {
+		t.Errorf("the wait should be rounded for a 40-column screen, stderr = %q", errs)
+	}
+}
