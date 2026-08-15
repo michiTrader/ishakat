@@ -667,3 +667,170 @@ func TestRealRepetitionsGenuineLoadErrorFallsBackToZeroNotModelClaim(t *testing.
 		t.Errorf("realRepetitions() = %d, want 0 on a genuine ledger load error", got)
 	}
 }
+
+// TestToolCreateCreatedByReflectsOrigin confirms buildManifest's
+// Origin.CreatedBy tracks the real, parsed origin rather than always
+// writing "agent" -- §19.6's own three-origin table pairs both
+// user_declared and user_forced with created_by = "user"; only agent
+// writes "agent".
+func TestToolCreateCreatedByReflectsOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		origin string
+		name   string
+		want   string
+	}{
+		// agent and "" (parseOrigin's own default) both need SkipGate1
+		// here -- gate 1's own repetition criterion would otherwise
+		// refuse an unrepeated OriginAgent proposal before CreatedBy is
+		// ever reached, and that refusal is already covered by
+		// TestToolCreateGate1RejectsUnrepeatedAgentProposal; this test
+		// isolates buildManifest's CreatedBy mapping alone.
+		{"agent", "greet_agent", "agent"},
+		{"", "greet_default", "agent"},
+		{"user_declared", "greet_user_declared", "user"},
+		{"user_forced", "greet_user_forced", "user"},
+	} {
+		t.Run(tc.origin, func(t *testing.T) {
+			dir := t.TempDir()
+			toolCreate := ToolCreate{Dir: dir, AllowAll: true, SkipGate1: true}
+			args := baseArgs("example.com")
+			args.Name = tc.name
+			args.Origin = tc.origin
+			res, err := toolCreate.Run(context.Background(), mustArgs(t, args))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("expected creation to succeed, got: %s", res.Text)
+			}
+			body, err := os.ReadFile(filepath.Join(dir, args.Name, ManifestFileName))
+			if err != nil {
+				t.Fatalf("expected a readable manifest: %v", err)
+			}
+			m, err := parseManifest(body)
+			if err != nil {
+				t.Fatalf("written manifest failed to parse: %v", err)
+			}
+			if m.Origin.CreatedBy != tc.want {
+				t.Errorf("m.Origin.CreatedBy = %q, want %q for origin %q", m.Origin.CreatedBy, tc.want, tc.origin)
+			}
+		})
+	}
+}
+
+// TestToolCreateSkipGate1BypassesRepetitionAndStability confirms
+// SkipGate1 lets through an OriginAgent proposal that unmodified gate 1
+// would refuse (no LedgerPath, args.Repetitions == 0, well below
+// DefaultThresholds().MinRepeats) -- the exact refusal
+// TestToolCreateGate1RejectsUnrepeatedAgentProposal already exercises
+// without SkipGate1.
+func TestToolCreateSkipGate1BypassesRepetitionAndStability(t *testing.T) {
+	tc := ToolCreate{Dir: t.TempDir(), AllowAll: true, SkipGate1: true}
+	args := baseArgs("example.com")
+	args.Origin = "agent"
+	args.Repetitions = 0
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected SkipGate1 to bypass gate 1 entirely for an unrepeated agent proposal, got: %s", res.Text)
+	}
+}
+
+// TestToolCreateSkipGate1StillEnforcesEgressAndCredentialChecks confirms
+// SkipGate1 only bypasses gate 1 (evolve.Evaluate) -- §19.8's own
+// mitigations 4 (egress allowlist) and 5 (structural exfiltration
+// detection) are never skipped by this field, per SkipGate1's own doc
+// comment.
+func TestToolCreateSkipGate1StillEnforcesEgressAndCredentialChecks(t *testing.T) {
+	t.Run("egress", func(t *testing.T) {
+		tc := ToolCreate{Dir: t.TempDir(), SkipGate1: true, Allow: []string{"other.example.com"}}
+		args := baseArgs("not-allowlisted.example.com")
+		res, err := tc.Run(context.Background(), mustArgs(t, args))
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatal("expected SkipGate1 to still refuse an un-allowlisted host")
+		}
+		if !strings.Contains(res.Text, "egress allowlist") {
+			t.Errorf("Text = %q, want it to mention the egress allowlist", res.Text)
+		}
+	})
+
+	t.Run("credential path", func(t *testing.T) {
+		tc := ToolCreate{Dir: t.TempDir(), AllowAll: true, SkipGate1: true}
+		args := baseArgs("example.com")
+		args.URL = "http://example.com/read?path=~/.ssh/id_rsa"
+		res, err := tc.Run(context.Background(), mustArgs(t, args))
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatal("expected SkipGate1 to still hard-block a credential-shaped path")
+		}
+	})
+}
+
+// TestToolCreateSkipGate1PrependsReasonMarker confirms the "logs it" half
+// of §13's own row: a --force creation's manifest carries a fixed,
+// greppable marker prepended to Origin.Reason, with the human-supplied
+// reason preserved right after it.
+func TestToolCreateSkipGate1PrependsReasonMarker(t *testing.T) {
+	dir := t.TempDir()
+	tc := ToolCreate{Dir: dir, AllowAll: true, SkipGate1: true}
+	args := baseArgs("example.com")
+	args.Origin = "agent"
+	args.Reason = "an operator typed --force"
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected creation to succeed, got: %s", res.Text)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, args.Name, ManifestFileName))
+	if err != nil {
+		t.Fatalf("expected a readable manifest: %v", err)
+	}
+	m, err := parseManifest(body)
+	if err != nil {
+		t.Fatalf("written manifest failed to parse: %v", err)
+	}
+	if !strings.HasPrefix(m.Origin.Reason, skipGate1ReasonMarker) {
+		t.Errorf("m.Origin.Reason = %q, want it to start with %q", m.Origin.Reason, skipGate1ReasonMarker)
+	}
+	if !strings.Contains(m.Origin.Reason, "an operator typed --force") {
+		t.Errorf("m.Origin.Reason = %q, want the original reason preserved after the marker", m.Origin.Reason)
+	}
+}
+
+// TestToolCreateWithoutSkipGate1NoMarkerIsWritten confirms the marker is
+// exclusive to SkipGate1 -- an ordinary creation's Reason must round-trip
+// unmodified, matching TestToolCreateSuccessWritesParseableManifestUnverified's
+// own assertion for a different field set.
+func TestToolCreateWithoutSkipGate1NoMarkerIsWritten(t *testing.T) {
+	dir := t.TempDir()
+	tc := ToolCreate{Dir: dir, AllowAll: true}
+	args := baseArgs("example.com")
+	args.Reason = "an ordinary, non-forced reason"
+	res, err := tc.Run(context.Background(), mustArgs(t, args))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected creation to succeed, got: %s", res.Text)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, args.Name, ManifestFileName))
+	if err != nil {
+		t.Fatalf("expected a readable manifest: %v", err)
+	}
+	m, err := parseManifest(body)
+	if err != nil {
+		t.Fatalf("written manifest failed to parse: %v", err)
+	}
+	if m.Origin.Reason != "an ordinary, non-forced reason" {
+		t.Errorf("m.Origin.Reason = %q, want the reason unmodified without SkipGate1", m.Origin.Reason)
+	}
+}
