@@ -1069,3 +1069,167 @@ func TestRunAgentTurnMidStreamError(t *testing.T) {
 		t.Errorf("runner should not have been called, got %d", runner.callCount())
 	}
 }
+
+// --- §21.9 fix 1: a refusal ends the turn ------------------------------------
+
+// deniedErr is a runner error carrying the Denied() contract, standing in for
+// what internal/permissions produces. It is defined here rather than imported
+// so this test proves the *structural* match works — engine must recognize any
+// error satisfying the interface, not one particular concrete type.
+type deniedErr struct{ msg string }
+
+func (e deniedErr) Error() string { return e.msg }
+func (e deniedErr) Denied() bool  { return true }
+
+// TestRunAgentTurnRefusalEndsTheTurn is closing criterion 1 at the engine
+// level: a turn in which a call is refused makes exactly ONE provider request.
+//
+// The scripted streamer would happily serve a second iteration (the model
+// "reacting" to the refusal). That second request is the defect, not the
+// recovery: each variant the model tries carries the whole grown history, and
+// a real user was rate-limited off their account this way
+// (docs/BUG-rate-limit-amplifier.md).
+func TestRunAgentTurnRefusalEndsTheTurn(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"rm -rf build"}`), doneEvent()},
+		{deltaEvent("Let me try a different way."), doneEvent()},
+	}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("clean the build"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "d"}},
+		Runner: func(context.Context, string, json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, deniedErr{msg: "tool permission denied: user declined bash"}
+		},
+	}, hist)
+
+	// A refusal is a normal outcome of a turn, not an engine failure: the
+	// caller renders Stopped, it does not handle an error.
+	if err != nil {
+		t.Fatalf("a refusal must not surface as an engine error: %v", err)
+	}
+	if got := ss.callCount(); got != 1 {
+		t.Errorf("provider requests = %d, want exactly 1: the loop bought the model another turn to route around the refusal", got)
+	}
+	if res.Stopped == "" {
+		t.Fatal("a refused turn must report why it stopped")
+	}
+	if !strings.Contains(res.Stopped, "declined") {
+		t.Errorf("Stopped = %q, want the refusal's own reason", res.Stopped)
+	}
+	if strings.Contains(res.Text, "different way") {
+		t.Error("the model's second-turn text is present, so a second request was made")
+	}
+
+	// Bug 2: the refused call still needs a tool reply, or the assistant
+	// message keeps an orphaned tool_call and every later request 400s.
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("the refused tool call was left orphaned in history: the next request built from this session would 400 at the provider, permanently")
+	}
+}
+
+// TestRunAgentTurnRefusalClosesOutTheWholeBatch covers the parallel case. A
+// refusal mid-batch must still close out the calls after it, for the same
+// reason the cap and cancellation paths do (Bug 2): one orphaned tool_call
+// poisons the session, not merely the turn.
+func TestRunAgentTurnRefusalClosesOutTheWholeBatch(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{{
+		toolCallEvent("c1", "bash", `{"command":"rm -rf build"}`),
+		toolCallEvent("c2", "grep", `{"q":"foo"}`),
+		toolCallEvent("c3", "grep", `{"q":"bar"}`),
+		doneEvent(),
+	}}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("clean and search"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}, {Name: "grep"}},
+		Runner: func(_ context.Context, name string, _ json.RawMessage) (ToolResult, error) {
+			if name == "bash" {
+				return ToolResult{}, deniedErr{msg: "tool permission denied: user declined bash"}
+			}
+			return ToolResult{Text: "ok"}, nil
+		},
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Error("the turn must stop on the refusal even though later calls in the batch were harmless")
+	}
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("calls after the refused one were left orphaned: the next request would 400 permanently")
+	}
+}
+
+// TestRunAgentTurnOrdinaryToolErrorStillIterates is the guard against fix 1
+// overreaching. An ordinary runner failure must remain data the model reacts
+// to — that is §12bis's error-is-data contract and the reason §3 needs no
+// Planner. If this test ever fails, the loop stopped being reactive.
+func TestRunAgentTurnOrdinaryToolErrorStillIterates(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"make"}`), doneEvent()},
+		{deltaEvent("make is missing; I used go build instead."), doneEvent()},
+	}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("build it"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "d"}},
+		Runner: func(context.Context, string, json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, errors.New(`exec: "make": executable file not found in $PATH`)
+		},
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("Stopped = %q, want empty: an ordinary tool failure is data, not a reason to end the turn", res.Stopped)
+	}
+	if !strings.Contains(res.Text, "go build instead") {
+		t.Errorf("text = %q, want the model's recovery: the loop must still hand ordinary failures back", res.Text)
+	}
+}
+
+// everyToolCallIsAnswered checks the Bug 2 invariant: every BlockToolCall in
+// the history has a tool message carrying its id.
+func everyToolCallIsAnswered(h *convo.Conversation) bool {
+	answered := map[string]bool{}
+	for _, m := range h.Active() {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.ToolCallID != "" {
+				answered[b.ToolCallID] = true
+			}
+		}
+	}
+	for _, m := range h.Active() {
+		if m.Role != convo.RoleAssistant {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolCall && !answered[b.ToolCallID] {
+				return false
+			}
+		}
+	}
+	return true
+}
