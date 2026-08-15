@@ -18,6 +18,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/theme"
+	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/tui"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
@@ -162,8 +163,10 @@ func Run(version string, resume bool) int {
 	if cfg.Tools.Enabled {
 		reviewer = newToolReviewer()
 		var modelCost *catalog.Cost
+		var modelCaps tools.Caps
 		if m, found := snap.Catalog.Get(ref.Ref); found {
 			modelCost = m.Cost
+			modelCaps = capsForTools(m)
 		}
 		guard := permissions.New(cfg.Tools.Permissions, false, reviewer)
 		var toolsWarn string
@@ -180,8 +183,8 @@ func Run(version string, resume bool) int {
 		// answer with -- see newSubAgentRunner's own doc comment (dispatch.go)
 		// on why a sub-agent reuses the parent's already-resolved
 		// provider/model rather than re-resolving one of its own.
-		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, !noTTY)
-		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, !noTTY, dispatchRunner)
+		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY)
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}
 

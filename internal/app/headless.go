@@ -29,6 +29,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
+	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
 
@@ -178,8 +179,10 @@ func Headless(opts HeadlessOptions) int {
 	}
 	// Read pricing from the local catalog only; unknown prices remain unknown.
 	var modelCost *catalog.Cost
+	var modelCaps tools.Caps
 	if model, found := catalogSnapshot.Catalog.Get(ref.Ref); found {
 		modelCost = model.Cost
+		modelCaps = capsForTools(model)
 	}
 	// [tools].budget_usd only works when the catalog actually knows this
 	// model's price: buildAgentOptions leaves every *CostUSD field at zero
@@ -313,7 +316,7 @@ func Headless(opts HeadlessOptions) int {
 			hist = &convo.Conversation{}
 		}
 		guard := permissions.New(cfg.Tools.Permissions, opts.Yolo, nil)
-		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, cfg.App.MaxRetries, req, user, s, store, conv, hist, opts.AllowToolCreate)
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, modelCaps, cfg.App.MaxRetries, req, user, s, store, conv, hist, opts.AllowToolCreate)
 	} else {
 		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
 	}

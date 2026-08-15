@@ -76,7 +76,14 @@ import (
 // the one place dispatch's own capability slots in, rather than a third
 // copy of "call WithMetaTools" appearing wherever a caller wants dispatch
 // too.
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, hasTTY bool, dispatchRunner tools.SubAgentRunner) (engine.AgentOptions, string) {
+//
+// caps is §20.11 item 4's own addition: the active model's real
+// tools.Caps (built by capsForTools, evolve.go), passed straight through
+// to tools.MetaToolsOptions.ActiveCaps — see that field's own doc comment
+// for what it gates. The zero value (every call site and every test
+// before this parameter existed) satisfies every manifest that declares
+// no requires_caps/min_context of its own, so this is purely additive.
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, caps tools.Caps, hasTTY bool, dispatchRunner tools.SubAgentRunner) (engine.AgentOptions, string) {
 	reg, warn := tools.WithMetaTools(tools.MetaToolsOptions{
 		Dir:             cfgTools.Dir,
 		Allow:           cfgTools.Egress.Allow,
@@ -87,6 +94,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		Thresholds:      evolveThresholds(cfgTools, cfgTools.Evolve),
 		LedgerPath:      xdg.UsageFile(),
 		DispatchRunner:  dispatchRunner,
+		ActiveCaps:      caps,
 	})
 	if guard != nil {
 		// Every tool beyond the native seven (declarative tools chief
@@ -179,12 +187,17 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 // parameter existed), the catalogue omits tool_create entirely, matching
 // docs/PLAN.md §19.7's own instruction verbatim: "With no TTY, tool_create
 // is denied. Full stop."
+//
+// caps is §20.11 item 4's own addition, threaded through to both
+// buildAgentOptions and newSubAgentRunner below — see buildAgentOptions'
+// own doc comment for what it gates.
 func runAgentTurnHeadless(
 	ctx context.Context,
 	prov provider.Provider,
 	cfgTools config.Tools,
 	guard *permissions.Guard,
 	cost *catalog.Cost,
+	caps tools.Caps,
 	maxRetries int,
 	req provider.Request,
 	user convo.Message,
@@ -203,8 +216,8 @@ func runAgentTurnHeadless(
 	// value this call site already passes to buildAgentOptions for its own
 	// registry) is threaded through identically, so a sub-agent sees the
 	// exact same tool_create visibility rule the parent turn does.
-	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, allowToolCreate)
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, allowToolCreate, dispatchRunner)
+	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}

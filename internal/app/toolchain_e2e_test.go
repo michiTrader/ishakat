@@ -36,6 +36,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/provider"
 	"github.com/MichiTrader/ishakat/internal/provider/fake"
+	"github.com/MichiTrader/ishakat/internal/tools"
 )
 
 // recordingReviewer is a permissions.Reviewer that answers with a fixed
@@ -154,7 +155,7 @@ func runToolTurnWithCaps(t *testing.T, cfg *config.Config, guard *permissions.Gu
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("create the file"))
-	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, false, nil)
+	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, nil)
 	result, err := eng.RunAgentTurn(context.Background(),
 		engine.Request{Model: "auto/coding"},
 		opts,

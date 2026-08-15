@@ -83,25 +83,60 @@ func Core(egressAllow []string, egressAllowAll bool) *Registry {
 // case, so a caller does not need its own branch to skip this step when
 // layer 2's tool directory is not configured.
 //
+// activeCaps is §20.11 item 4's wiring: the currently active model's real
+// capabilities/context, as internal/app already resolves them (see
+// Manifest.Unsatisfied's own doc comment on why this is checked with a
+// "report, don't fail" outcome but "omit, don't include-with-a-warning" is
+// the shape chosen here specifically — see below). A manifest whose
+// requires_caps/min_context the active model does not satisfy is silently
+// excluded from the returned []Tool, exactly like tool_create is excluded
+// from WithMetaTools' own registry under EvolveMode == "off" or no TTY: "a
+// model that cannot see a tool in its own catalogue cannot be talked into
+// asking for it" (WithMetaTools' own doc comment) applies identically here
+// — offering a tool the active model structurally cannot use (a
+// min_context that exceeds the model's own window, a requires_caps entry
+// the model lacks) only invites a call that is a guaranteed failure, where
+// engine.CheckSwap's own "report, don't fail" choice exists for a
+// different case: a *user-initiated* action (a model switch) a human can
+// still choose to push through despite the warning. There is no
+// equivalent human choice for a model deciding which tools its own request
+// can name. The first excluded manifest's reason is folded into the
+// returned warn string (joined with res.Warn via joinDeclarativeWarn) —
+// mirroring DiscoverDeclarative's own "first problem, not every problem"
+// warn contract — so an install still has a way to notice "why did tool X
+// disappear" without every unsatisfied tool needing its own exception.
+// The zero value of Caps (every bool false, Context 0) satisfies every
+// manifest that declares no requires_caps/min_context of its own (the
+// common case, and every call site before this parameter existed), since
+// Unsatisfied's own "unknown context never fails min_context" rule treats
+// Context == 0 as "unknown", not "small".
+//
 // This is a plain []Tool, not a *Registry, on purpose: Core's own 7-tool
 // contract (TestCoreRegistersAllSevenToolsByName) must never depend on
 // whether a caller also wants declarative tools, so a caller merges the two
 // with NewRegistry(append(Core(...).Tools(), DeclarativeTools(...)...)...)
 // rather than this function returning a competing Registry constructor.
-func DeclarativeTools(dir string, egressAllow []string, egressAllowAll bool) ([]Tool, string) {
+func DeclarativeTools(dir string, egressAllow []string, egressAllowAll bool, activeCaps Caps) ([]Tool, string) {
 	res := DiscoverDeclarative(dir)
 	if len(res.Tools) == 0 {
 		return nil, res.Warn
 	}
+	warn := res.Warn
 	out := make([]Tool, 0, len(res.Tools))
 	for _, m := range res.Tools {
+		if missing := m.Unsatisfied(activeCaps); len(missing) > 0 {
+			if warn == "" {
+				warn = fmt.Sprintf("tool %q hidden: %s", m.Name, strings.Join(missing, "; "))
+			}
+			continue
+		}
 		out = append(out, DeclarativeTool{
 			Manifest: m,
 			Allow:    egressAllow,
 			AllowAll: egressAllowAll,
 		})
 	}
-	return out, res.Warn
+	return out, warn
 }
 
 // WithDeclarative builds a Registry over Core's own seven tools plus every
@@ -113,9 +148,12 @@ func DeclarativeTools(dir string, egressAllow []string, egressAllowAll bool) ([]
 // case Step 20 does not need to guard against further, since §19.5's own
 // area (danger inference) does not depend on name collisions being
 // impossible, only on danger never being under-counted.
-func WithDeclarative(egressAllow []string, egressAllowAll bool, declarativeDir string) (*Registry, string) {
+//
+// activeCaps is passed straight through to DeclarativeTools — see that
+// function's own doc comment for what it does and why.
+func WithDeclarative(egressAllow []string, egressAllowAll bool, declarativeDir string, activeCaps Caps) (*Registry, string) {
 	reg := Core(egressAllow, egressAllowAll)
-	extra, warn := DeclarativeTools(declarativeDir, egressAllow, egressAllowAll)
+	extra, warn := DeclarativeTools(declarativeDir, egressAllow, egressAllowAll, activeCaps)
 	if len(extra) == 0 {
 		return reg, warn
 	}
@@ -212,6 +250,21 @@ type MetaToolsOptions struct {
 	// sets this field, closing over its own *engine.Engine/provider and a
 	// fresh *convo.Conversation to build the closure.
 	DispatchRunner SubAgentRunner
+
+	// ActiveCaps is §20.11 item 4's forward-compat wiring: the currently
+	// resolved model's real capabilities/context, translated by the caller
+	// (internal/app, which already has a catalog.Model in hand -- see
+	// Caps' own doc comment on why this package never imports
+	// internal/catalog to do that translation itself). Passed straight
+	// through to WithDeclarative/DeclarativeTools, which excludes any
+	// declarative tool.toml whose requires_caps/min_context this value
+	// does not satisfy -- see DeclarativeTools' own doc comment for why
+	// that is an exclusion, not merely a warning. The zero value (every
+	// caller before this field existed) satisfies every manifest that
+	// declares no requirements of its own, which is every manifest Step
+	// 20's own fixtures and every hand-written tool.toml before this item
+	// landed already assumed.
+	ActiveCaps Caps
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
@@ -268,7 +321,7 @@ type MetaToolsOptions struct {
 // context, where a tool that exists but always errors is still a standing
 // invitation a sufficiently adversarial prompt could keep proposing.
 func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
-	reg, warn := WithDeclarative(opts.Allow, opts.AllowAll, opts.Dir)
+	reg, warn := WithDeclarative(opts.Allow, opts.AllowAll, opts.Dir, opts.ActiveCaps)
 
 	if opts.DispatchRunner != nil {
 		reg = NewRegistry(append(reg.Tools(), Dispatch{Runner: opts.DispatchRunner})...)

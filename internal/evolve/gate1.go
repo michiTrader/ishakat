@@ -120,6 +120,57 @@ type ExistingTool struct {
 	Description string
 }
 
+// ExistingToolsSource is what gate 1's dedup and budget checks actually
+// depend on — not a concrete []ExistingTool slice, per docs/PLAN.md
+// §20.11 item 3 ("Gate 1's dedup written against an interface... rather
+// than hardwired to the local registry"), named there as "the
+// highest-leverage of the five [forward-compatibility decisions] and the
+// least obvious: it is what lets 'is there already a tool for this?' grow
+// a second source later without touching governance, which is the code
+// path that must stay boring."
+//
+// Count is the budget check's whole input (§19.6: "N active tool(s)
+// already at the ceiling") — a plain size, independent of any particular
+// candidate. FindSimilar is the dedup check's whole input: every tool
+// worth scoring candidate's Name/Description against, for whatever
+// definition of "worth scoring" the source itself chooses (today's only
+// implementation, ExistingToolsSlice, ignores name/description entirely
+// and returns everything — a future source with a large catalogue, e.g.
+// §20's still-deferred community registry search, is free to pre-filter
+// instead, without evolve.Evaluate itself ever changing).
+//
+// Two methods, not one, on purpose: Count and FindSimilar are allowed to
+// disagree (a source could count differently than it offers for
+// comparison — say, a registry that excludes quarantined tools from
+// FindSimilar's candidate pool but still counts them toward the budget
+// ceiling), and collapsing them into a single "give me everything" method
+// would silently forbid that.
+type ExistingToolsSource interface {
+	// Count returns how many tools currently count toward §19.6's budget
+	// ceiling.
+	Count() int
+	// FindSimilar returns every tool worth comparing against name/
+	// description for §19.6's no-duplicate check.
+	FindSimilar(name, description string) []ExistingTool
+}
+
+// ExistingToolsSlice adapts a plain []ExistingTool to ExistingToolsSource,
+// reproducing Evaluate's original, pre-interface behavior exactly: Count
+// is the slice's length, and FindSimilar ignores name/description and
+// returns the whole slice — every caller today (internal/app's
+// existingToolsFrom, internal/tools/tool_create.go's nativeToolCatalog
+// plus discovered layer-2 tools) already builds precisely this "compare
+// the candidate against everything" pool, so this adapter is what lets
+// Evaluate keep accepting a plain []ExistingTool without every existing
+// call site needing to change.
+type ExistingToolsSlice []ExistingTool
+
+// Count implements ExistingToolsSource.
+func (s ExistingToolsSlice) Count() int { return len(s) }
+
+// FindSimilar implements ExistingToolsSource, ignoring name/description.
+func (s ExistingToolsSlice) FindSimilar(name, description string) []ExistingTool { return s }
+
 // Candidate is one proposed tool crystallization — gate 1's whole input
 // besides Thresholds and the existing catalogue.
 type Candidate struct {
@@ -169,7 +220,24 @@ func fail(v *Verdict, format string, args ...any) {
 // against candidate. It never returns early on the first failure — Reasons
 // collects all of them, because a caller deciding whether to even surface a
 // suggestion (§19.7) needs the complete picture.
+//
+// existing is a plain []ExistingTool for every call site today — see
+// ExistingToolsSlice's own doc comment. EvaluateAgainst is the same
+// function against the ExistingToolsSource interface directly, for a
+// future caller whose catalogue is not a slice it wants to build up
+// front (§20.11 item 3).
 func Evaluate(thresholds Thresholds, candidate Candidate, existing []ExistingTool) Verdict {
+	return EvaluateAgainst(thresholds, candidate, ExistingToolsSlice(existing))
+}
+
+// EvaluateAgainst is Evaluate's own logic, against ExistingToolsSource
+// instead of a concrete []ExistingTool — see that interface's doc comment
+// for why this indirection exists (docs/PLAN.md §20.11 item 3). A nil
+// source is treated exactly like an empty catalogue (Count() == 0,
+// FindSimilar returns nothing), matching Evaluate(existing: nil)'s own
+// long-standing behavior, so no caller of either function needs a nil
+// guard of its own.
+func EvaluateAgainst(thresholds Thresholds, candidate Candidate, existing ExistingToolsSource) Verdict {
 	t := thresholds.normalized()
 	v := Verdict{Allowed: true}
 
@@ -197,8 +265,8 @@ func Evaluate(thresholds Thresholds, candidate Candidate, existing []ExistingToo
 
 	// Budget: always checked -- the prompt cannot grow forever regardless
 	// of why a tool is being proposed.
-	if len(existing) >= t.MaxTools {
-		fail(&v, "budget: %d active tool(s) already at the %d-tool ceiling", len(existing), t.MaxTools)
+	if existingCount(existing) >= t.MaxTools {
+		fail(&v, "budget: %d active tool(s) already at the %d-tool ceiling", existingCount(existing), t.MaxTools)
 	}
 
 	// Profitability: checked whenever an estimate was actually supplied
@@ -216,12 +284,26 @@ func Evaluate(thresholds Thresholds, candidate Candidate, existing []ExistingToo
 	return v
 }
 
-// mostSimilar returns the existing tool most similar to candidate (by
-// combinedSimilarity) and its score, or ("", 0) when existing is empty.
-func mostSimilar(candidate Candidate, existing []ExistingTool) (string, float64) {
+// existingCount reads ExistingToolsSource.Count(), treating a nil source
+// as zero -- see EvaluateAgainst's own doc comment on why nil is not a
+// caller error here.
+func existingCount(existing ExistingToolsSource) int {
+	if existing == nil {
+		return 0
+	}
+	return existing.Count()
+}
+
+// mostSimilar returns the tool most similar to candidate (by
+// combinedSimilarity) among existing.FindSimilar's own candidate pool, and
+// its score, or ("", 0) when that pool is empty (including a nil source).
+func mostSimilar(candidate Candidate, existing ExistingToolsSource) (string, float64) {
+	if existing == nil {
+		return "", 0
+	}
 	var bestName string
 	var bestScore float64
-	for _, e := range existing {
+	for _, e := range existing.FindSimilar(candidate.Name, candidate.Description) {
 		s := combinedSimilarity(candidate.Name, candidate.Description, e.Name, e.Description)
 		if s > bestScore {
 			bestScore, bestName = s, e.Name

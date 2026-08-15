@@ -40,7 +40,7 @@ import (
 // second, independently-resolved one, since dispatch has no argument of its
 // own for either (see dispatchArgs' own doc comment: "task", nothing else).
 //
-// cfgTools/guard/cost/hasTTY are threaded straight into a second
+// cfgTools/guard/cost/caps/hasTTY are threaded straight into a second
 // buildAgentOptions call, exactly the way the caller already built its own
 // top-level AgentOptions — with one deliberate difference: that inner call
 // always passes a nil SubAgentRunner (dispatchRunner's own last argument),
@@ -52,6 +52,14 @@ import (
 // "dispatch" entry in its own tool list to call, matching §3's own framing
 // of dispatch as one level of delegation, not an open-ended tree of agents
 // spawning agents.
+//
+// caps is §20.11 item 4's own addition: the same tools.Caps the parent's
+// own buildAgentOptions call was built with, so a sub-agent's own
+// declarative-tool visibility (which of them Manifest.Unsatisfied hides)
+// matches the parent's exactly — a sub-agent answers with the same model
+// as the parent (see this function's own doc comment above on model/
+// system), so it must see the same set of tools that model can actually
+// use, not a second, independently-derived one.
 func newSubAgentRunner(
 	eng *engine.Engine,
 	model string,
@@ -59,6 +67,7 @@ func newSubAgentRunner(
 	cfgTools config.Tools,
 	guard *permissions.Guard,
 	cost *catalog.Cost,
+	caps tools.Caps,
 	hasTTY bool,
 ) tools.SubAgentRunner {
 	return func(ctx context.Context, task string) (string, error) {
@@ -69,7 +78,7 @@ func newSubAgentRunner(
 		// dispatchRunner is nil here on purpose -- see this function's own
 		// doc comment on why a sub-agent's own registry never contains
 		// dispatch itself.
-		opts, _ := buildAgentOptions(cfgTools, guard, cost, hasTTY, nil)
+		opts, _ := buildAgentOptions(cfgTools, guard, cost, caps, hasTTY, nil)
 
 		// The sub-agent's history starts with nothing but task -- not the
 		// parent's own hist, not even the parent's most recent message.
