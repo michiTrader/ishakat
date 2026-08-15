@@ -8,6 +8,17 @@
 // here (via ToolApproveRequestMsg) to render and to walk with the keyboard;
 // this file only ever produces a permissions.Decision, sent back down the
 // reply channel the bridge is blocked on.
+//
+// As of step 27 (docs/PLAN.md §21.7/§21.14), the dialog's own selection
+// state is an internal/ask.State walking a single-question internal/ask.Form
+// instead of a hand-rolled index — "toolapprove reimplemented on top [of
+// internal/ask] with no behaviour change" is that step's own closing
+// criterion. The rows offered, their order, the wrap-around on up/down,
+// and the exact permissions.Decision each row sends are all unchanged; only
+// where the cursor and the option list live has moved. A single-question
+// Form draws no tab bar (ask.State.Render's own rule — nothing to tab
+// between), which is what keeps this reimplementation's rendering
+// pixel-for-pixel identical to before.
 package tui
 
 import (
@@ -18,25 +29,44 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 )
 
 // toolApproveOption is one selectable row of the dialog. decision is what
 // resolveToolApprove sends down reply when this row is chosen; allow=false,
 // allowSession=false is "deny" (permissions.Guard.Authorize's own default
-// for decision.Allow == false).
+// for decision.Allow == false). It mirrors ask.Option.Label but keeps its
+// own permissions.Decision alongside it, since ask.Option.Value is a plain
+// string this package alone knows how to interpret (see
+// newToolApproveDialog's own value constants below) — internal/ask itself
+// stays ignorant of what "once"/"session"/"deny" mean, exactly as §6.1
+// requires of a presentation-free primitive.
 type toolApproveOption struct {
 	decision permissions.Decision
 	label    string
 }
 
+// The three option values newToolApproveDialog ever puts into its
+// single-question ask.Form. Opaque to internal/ask itself — see
+// toolApproveOption's own doc comment.
+const (
+	toolApproveOnce    = "once"
+	toolApproveSession = "session"
+	toolApproveDeny    = "deny"
+)
+
 // toolApproveDialog is ModeToolApprove's own state, live only while mode ==
-// ModeToolApprove.
+// ModeToolApprove. state is an internal/ask.State walking a single-question
+// Form built from options below; options keeps this dialog's own
+// permissions.Decision for each row, in the exact same order as
+// state.Form().Questions[0].Options, so selected() can look one up by the
+// other's current cursor.
 type toolApproveDialog struct {
 	req     permissions.Request
 	reply   chan<- permissions.Decision
+	state   ask.State
 	options []toolApproveOption
-	sel     int
 }
 
 // newToolApproveDialog builds the dialog's rows from req.Tier: a High-tier
@@ -48,37 +78,42 @@ type toolApproveDialog struct {
 // exactly the one case Guard.Authorize's own decision.AllowSession check
 // can act on.
 func newToolApproveDialog(req permissions.Request, reply chan<- permissions.Decision) toolApproveDialog {
-	options := []toolApproveOption{
-		{decision: permissions.Decision{Allow: true}, label: "permitir una vez"},
+	var askOptions []ask.Option
+	var options []toolApproveOption
+
+	add := func(value, label string, decision permissions.Decision) {
+		askOptions = append(askOptions, ask.Option{Label: label, Value: value})
+		options = append(options, toolApproveOption{decision: decision, label: label})
 	}
+	add(toolApproveOnce, "permitir una vez", permissions.Decision{Allow: true})
 	if req.Tier == permissions.Medium {
-		options = append(options, toolApproveOption{
-			decision: permissions.Decision{Allow: true, AllowSession: true},
-			label:    "permitir para esta sesión",
-		})
+		add(toolApproveSession, "permitir para esta sesión", permissions.Decision{Allow: true, AllowSession: true})
 	}
-	options = append(options, toolApproveOption{
-		decision: permissions.Decision{Allow: false},
-		label:    "denegar",
-	})
-	return toolApproveDialog{req: req, reply: reply, options: options}
+	add(toolApproveDeny, "denegar", permissions.Decision{Allow: false})
+
+	form := ask.Form{Questions: []ask.Question{{ID: "approve", Options: askOptions}}}
+	return toolApproveDialog{req: req, reply: reply, state: ask.NewState(form), options: options}
 }
 
-// moveSel moves the selection by delta rows, wrapping like Picker.moveSel
-// and confirmDialog.moveSel.
+// moveSel moves the selection by delta rows, delegating the actual
+// wrap-around to ask.State.MoveOption — the same wrap-around
+// Picker.moveSel and confirmDialog.moveSel apply by hand, now shared
+// through the primitive instead of reimplemented a third time.
 func (d toolApproveDialog) moveSel(delta int) toolApproveDialog {
-	if len(d.options) == 0 {
-		return d
-	}
-	n := len(d.options)
-	d.sel = ((d.sel+delta)%n + n) % n
+	d.state = d.state.MoveOption(delta)
 	return d
 }
+
+// sel is the option index currently highlighted, read from the underlying
+// ask.State's own cursor. Kept as a method (rather than reintroducing a
+// field the Root package's tests and renderToolApprove can read directly)
+// since ask.State.Cursor is the one source of truth for it now.
+func (d toolApproveDialog) sel() int { return d.state.Cursor() }
 
 // selected is the option under the cursor. newToolApproveDialog always
 // returns at least two rows (allow-once, deny), so there is no empty case
 // to guard here, the same reasoning confirmDialog.selected already applies.
-func (d toolApproveDialog) selected() toolApproveOption { return d.options[d.sel] }
+func (d toolApproveDialog) selected() toolApproveOption { return d.options[d.sel()] }
 
 // updateToolApprove handles every key while mode == ModeToolApprove. Like
 // updateConfirm it owns the keyboard outright — there is no textarea
@@ -158,11 +193,11 @@ func (m Root) renderToolApprove() string {
 
 	for i, opt := range d.options {
 		pointer := " "
-		if i == d.sel {
+		if i == d.sel() {
 			pointer = g.inputPrefix
 		}
 		line := pointer + " " + opt.label
-		if i == d.sel {
+		if i == d.sel() {
 			line = m.styles.Accent.Render(line)
 		}
 		b.WriteString(" " + line + "\n")
