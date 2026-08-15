@@ -147,3 +147,28 @@ func TestToolsNoImportaTUI(t *testing.T) {
 		}
 	}
 }
+
+// TestAskStaysPresentationFree protects §21.7's own reason for existing:
+// internal/ask is "the primitive", shared unchanged by the TUI, serve, and
+// (not asking at all) headless. If it imported any presentation package or
+// a concrete door's own transport, only one door could use it and the
+// whole point of collecting the duplicated round-trip logic in one place
+// (docs/PLAN.md §21.7: "which deletes the duplicated round-trip logic
+// currently in internal/app/toolreview.go and internal/app/serve.go")
+// would be lost — a form that hard-depends on Bubble Tea cannot also
+// answer a WebSocket permission_request.
+func TestAskStaysPresentationFree(t *testing.T) {
+	list, ok := depsOpt(t, "internal/ask", "ask")
+	if !ok {
+		return
+	}
+	for _, mal := range []string{
+		"net/http", "lipgloss", "bubbletea", "bubbles", "colorprofile",
+		"ishakat/internal/tui", "ishakat/internal/theme", "ishakat/internal/config",
+		"ishakat/internal/permissions",
+	} {
+		if strings.Contains(list, mal) {
+			t.Errorf("internal/ask imports %s: the primitive must stay usable from every door (TUI, serve, headless) unchanged", mal)
+		}
+	}
+}
