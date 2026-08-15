@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -1333,5 +1334,183 @@ func TestRunAgentTurnRateLimitNeedsNoWaitHook(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < window {
 		t.Errorf("resumed after %v without a hook set, inside the %v window", elapsed, window)
+	}
+}
+
+// failingRunner fails every call with the same text, which is the shape of
+// a configuration boundary (shell disabled, a path outside the workspace):
+// the tool never runs and the reason never changes no matter how the model
+// rewrites the arguments.
+type failingRunner struct {
+	mu    sync.Mutex
+	calls int
+	text  string
+}
+
+func (r *failingRunner) run(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	return ToolResult{Text: r.text, IsError: true}, nil
+}
+
+func (r *failingRunner) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestRunAgentTurnVariantHuntStops is closing criterion 3 of
+// docs/BUG-rate-limit-amplifier.md, verbatim: ls -> ls -la -> find . must be
+// recognized as one loop and stop the turn.
+//
+// Byte-exact loop detection cannot see this, because every attempt has
+// different arguments -- that is precisely what makes it a variant hunt
+// rather than a repeat. Measured before the fix, this scenario cost six
+// provider requests, each carrying the whole grown history.
+func TestRunAgentTurnVariantHuntStops(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"ls"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"ls -la"}`), doneEvent()},
+		{toolCallEvent("c3", "bash", `{"command":"find ."}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"du -sh"}`), doneEvent()},
+		{deltaEvent("I give up"), doneEvent()},
+	}}
+	runner := &failingRunner{text: "permission denied: shell is not allowed"}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("show me the files"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{Model: "fake/pro"}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "run a shell command"}}, Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("a stopped turn is not an engine failure: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("three identically-failing variants must stop the turn")
+	}
+	if runner.callCount() != 3 {
+		t.Errorf("runner called %d times, want 3 (ls, ls -la, find .)", runner.callCount())
+	}
+	// The cost that matters: the fourth variant was never paid for.
+	if n := ss.callCount(); n != 3 {
+		t.Errorf("provider requests = %d, want 3", n)
+	}
+	// Bug 2: the history must stay valid for the next request.
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("a tool_call was left without a reply; the next request would 400")
+	}
+}
+
+// TestRunAgentTurnDifferentFailuresKeepGoing is the guard against
+// overreach, and it is the reason futility is keyed on the error text rather
+// than on a count of failures. A model working through genuinely different
+// problems -- file not found, then a syntax error, then a missing dependency
+// -- is making progress, and error-is-data (§12bis) is exactly what lets the
+// reactive loop handle that without a Planner (§3). Stopping it would break
+// the mechanism step 26 is supposed to protect.
+func TestRunAgentTurnDifferentFailuresKeepGoing(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{toolCallEvent("c3", "bash", `{"command":"c"}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"d"}`), doneEvent()},
+		{deltaEvent("fixed it"), doneEvent()},
+	}}
+	var n int
+	runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+		n++
+		return ToolResult{Text: fmt.Sprintf("distinct failure number %d", n), IsError: true}, nil
+	}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}}, Runner: runner,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("different failures are progress, not futility; got Stopped=%q", res.Stopped)
+	}
+	if res.Text != "fixed it" {
+		t.Errorf("Text = %q, want the model's eventual answer", res.Text)
+	}
+}
+
+// TestRunAgentTurnSuccessResetsFutility pins the other half of the same
+// judgement: two identical failures followed by a success, then two more
+// identical failures, is not a futile run of four. Without the reset, a long
+// legitimate session that happened to hit the same recoverable error twice
+// in separate places would be cut off partway through.
+func TestRunAgentTurnSuccessResetsFutility(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{toolCallEvent("c3", "ok", `{}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"c"}`), doneEvent()},
+		{toolCallEvent("c5", "bash", `{"command":"d"}`), doneEvent()},
+		{deltaEvent("done"), doneEvent()},
+	}}
+	runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+		if name == "ok" {
+			return ToolResult{Text: "worked"}, nil
+		}
+		return ToolResult{Text: "the same error every time", IsError: true}, nil
+	}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools:  []ToolDef{{Name: "bash"}, {Name: "ok"}},
+		Runner: runner,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("a success in between must reset the run; got Stopped=%q", res.Stopped)
+	}
+	if res.Text != "done" {
+		t.Errorf("Text = %q, want the model's answer", res.Text)
+	}
+}
+
+// TestRunAgentTurnFutilityStopsMidBatchWithoutOrphans checks fix 3 against
+// Bug 2, the session-poisoning one: when the third identical failure lands
+// mid-batch, every call the loop skipped afterwards still needs a matching
+// tool reply, or the *next* request 400s permanently.
+func TestRunAgentTurnFutilityStopsMidBatchWithoutOrphans(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{
+			toolCallEvent("c3", "bash", `{"command":"c"}`), // third identical failure: stops here
+			toolCallEvent("c4", "bash", `{"command":"d"}`), // never runs
+			toolCallEvent("c5", "bash", `{"command":"e"}`), // never runs
+			doneEvent(),
+		},
+	}}
+	runner := &failingRunner{text: "always the same problem"}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}}, Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("the third identical failure must stop the turn")
+	}
+	if runner.callCount() != 3 {
+		t.Errorf("runner called %d times, want 3 (c4 and c5 must not run)", runner.callCount())
+	}
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("skipped calls were left unanswered; the next request would 400 permanently")
 	}
 }

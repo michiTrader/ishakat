@@ -45,6 +45,14 @@ import (
 const (
 	defaultMaxToolCalls   = 25
 	defaultMaxOutputBytes = 32 << 10 // 32 KiB
+
+	// maxFutileAttempts is how many consecutive tool calls may fail with the
+	// same error before the loop stops (step 26, fix 3). Three is chosen to
+	// match the shape the bug report actually observed — ls, ls -la, find .
+	// — and because two is a legitimate retry (a transient failure, a
+	// corrected argument) while three identical failures in a row is a model
+	// that has stopped learning from the result.
+	maxFutileAttempts = 3
 )
 
 // AgentOptions configures one agent turn. The zero value is valid: no tools,
@@ -156,6 +164,22 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 	var lastToolName string
 	var lastToolArgs []byte
 	callsThisTurn := 0
+
+	// Futility tracking (step 26, fix 3). Byte-exact loop detection above
+	// catches a model repeating itself verbatim; it cannot catch a model
+	// working its way through variants that all fail the same way — ls,
+	// ls -la, find . — because every attempt has different arguments. That
+	// variant hunt is what the bug report measured, and it costs one full
+	// provider request per attempt.
+	//
+	// The discriminator is deliberately not argument similarity. Normalizing
+	// arguments cannot separate "grep foo then grep bar", which is ordinary
+	// progress, from "ls then ls -la", which is not: both are the same tool
+	// with different arguments. What separates them is whether the attempts
+	// are getting anywhere. An unchanging error means the world is not
+	// responding to the variation, so the next variant will not either.
+	var lastFailure string
+	futileRun := 0
 
 	// The loop. One body = one model turn + its tool executions.
 	for iteration := 0; ; iteration++ {
@@ -449,6 +473,32 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				blk = convo.ToolResultBlock(tc.id, tc.name, outText)
 			}
 			history.Add(convo.NewMessage(convo.RoleTool, blk))
+
+			// Futility (step 26, fix 3), evaluated here because this is the
+			// one place every outcome converges — a tool that ran and
+			// failed, a runner failure, a hallucinated tool — so no path can
+			// slip past it. Any success resets the run: progress anywhere
+			// means the model is still learning from what it gets back.
+			if !isError {
+				futileRun = 0
+				lastFailure = ""
+				continue
+			}
+			if outText == lastFailure {
+				futileRun++
+			} else {
+				futileRun = 1
+				lastFailure = outText
+			}
+			if futileRun >= maxFutileAttempts {
+				result.Stopped = fmt.Sprintf(
+					"stopped after %d consecutive attempts failed identically (last: %s). "+
+						"Trying further variants would not change the result.",
+					futileRun, firstLine(outText))
+				result.Text = text.String()
+				notExecuted(history, toolCalls[i+1:], "the turn ended after repeated identical failures")
+				return result, nil
+			}
 		}
 
 		// Loop: the next iteration reopens with the grown history.
@@ -548,4 +598,19 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// firstLine keeps a Stopped reason to one readable line on a 40-column
+// screen (§2): tool failures are frequently multi-line, and the reason a
+// turn ended should not scroll the user's own question off the display.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i]) + " […]"
+	}
+	const max = 120
+	if len(s) > max {
+		s = s[:max] + " […]"
+	}
+	return s
 }
