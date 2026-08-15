@@ -1420,6 +1420,13 @@ before any model is allowed to write into it.
 | 23 | **`ishakat serve`** (NDJSON/WebSocket) + stable `--json` — **CLOSED**, see §17 2026-08-12 | ✅ The third door: realtime voice, n8n, cron, editor plugins. A `serveReviewer` round-trips `permission_request`/`permission_response` over the WebSocket instead of the TUI's confirm dialog or headless's fail-closed nil reviewer |
 | 24 | **`/login`** (OAuth device flow + API-key wizard) — **CLOSED**, see §17 2026-08-04..06 (API-key wizard, pulled forward), 2026-08-12 (OAuth device flow for the CLI), 2026-08-12 second entry (`/login` slash-command row), 2026-08-12 third entry (TUI-side interactive wizard, `ModeLogin`), 2026-08-12 fourth entry (`internal/app.NewLoginFactory`, the wizard's real HTTP-driving half) | ✅ `ishakat provider add\|list\|remove` (API key). ✅ `ishakat login <provider>` drives `internal/oauth`'s RFC 8628 client — provider-agnostic by design, since none of the five built-in presets has a ToS-clean device flow to enable (see `cmd/ishakat/login.go`'s own doc comment). ✅ `/login` has a row in `internal/slash/slash.go`'s `Commands` table pointing at `KindLogin`. ✅ The in-session wizard (`ModeLogin`, `internal/tui/login.go`) works end to end: `internal/app.NewLoginFactory` (the real `tui.LoginFactory`, wired into `tui.NewRoot`'s `LoginFor`) drives `RequestDeviceCode`→display→`PollForToken`→verify→save exactly like `ishakat login` does from the terminal, without `internal/tui` ever importing `net/http` (`TestTUINoImportaHTTP` still green) |
 | 25 | **Crystallization by observation** (`usage.jsonl` + the suggestion) — **CLOSED**, see §17 2026-08-13 | ✅ The agent improves because it watched you, not because you asked: §19.7's `ModeSuggest` overlay reads the already-live `usage.jsonl` ledger (Step 21) and offers to crystallize a repeated pattern into a real tool, gated by the four modes and five civility rules, never mid-task |
+| 26 | **Rate limit** (§21.9) — ⬜ **not started, ships first and alone** | ⬜ The turn stops being an amplifier: a human denial ends the turn instead of returning as `ToolResult{IsError:true}` for the model to route around, `Retry-After` is honoured *inside* the loop (the hint already exists on `provider.Error.Retry()`; the loop just never asks), and loop detection is normalized over the whole batch instead of byte-exact at `i == 0`. Independent of every other §21 step, and the only one fixing a defect that is already costing the user their provider quota |
+| 27 | **`internal/ask` primitive** (§21.7) — ⬜ **not started** | ⬜ The survey becomes the base component and tool approval a case of it, inverting today's shape; one 40-column render test covers every dialog in the product, and `toolapprove`/`serveReviewer` stop duplicating the same round-trip |
+| 28 | **Risk classes** (§21.5) — ⬜ **not started** | ⬜ `Tier{Low,Medium,High}` becomes safe/controlled/sensitive/critical with a read-only command set, killing §21.3's defect 1: `ls`/`git status`/`go build` stop prompting and `git push` starts always prompting, even under `auto` |
+| 29 | **Pattern rules and scopes** (§21.12) — ⬜ **not started** | ⬜ Kills §21.3's defects 2 and 3: a session grant is keyed on a pattern rather than exact argument bytes (so granting `ls` covers `ls -la`), and grants finally apply to `bash` instead of being silently discarded |
+| 30 | **Trust-once** (§21.4 layer 2) — ⬜ **not started** | ⬜ Pi's `/trust`, adapted: one question on the first run in a project, `Esc` defaulting to the safer answer, remembered per path. This is what makes a permanently-on `auto` defensible rather than reckless |
+| 31 | **Missions and the constraint compiler** (§21.6, §21.11) — ⬜ **not started** | ⬜ "no Playwright" stops being prompt text and becomes a deny rule the Guard enforces and sub-agents inherit but cannot widen; auto proposes the mission's tool scope and the human confirms it with one keystroke |
+| 32 | **`ask_user`, `/permissions`, phase display** (§21.1, §21.16) — ⬜ **not started, blocked on §21.16 decision 1** | ⬜ The model gains a structured way to ask (which needs §19.1's eight-tool rule to gain a documented exception, or `ask_user` to ship as a `dispatch` mode), the human gains one place to audit rules and invariants, and the status line gains `auto·exec`/`auto·wait 22s` |
 
 **2026-08-12 · Step 24, OAuth device-flow half · closed for the CLI:** `internal/oauth` (RFC 8628 client: `RequestDeviceCode`, `PollForToken`, sentinel `ErrAccessDenied`/`ErrExpired`, 12 offline tests against `httptest` servers) plus `cmd/ishakat/login.go` (`ishakat login <provider>`) wire the second half of this step's title into a real, tested command. Deliberately **not** wired to GitHub Copilot: research this session confirmed the only working "OAuth device flow in front of a chat completion" path documented anywhere is Copilot's undocumented `github.com/login/device/code` → `api.github.com/copilot_internal/v2/token` → `api.githubcopilot.com` chain, using a reverse-engineered client_id not registered to ishakat, which third-party guides themselves flag as a Terms-of-Service risk — not something to bake into a shipped binary to make a demo prettier. GitHub Models, the one *officially documented* device-flow-friendly inference API, was confirmed retired (July 30, 2026) via `docs.github.com`. So `ishakat login` is provider-agnostic instead: it drives `internal/oauth` against whatever `device_code_url`/`token_url` a preset declares (`config.ProviderPreset.SupportsDeviceFlow` — none of the five built-in presets sets these fields, on purpose, since none has a real device flow) or whatever a caller names directly with `--client-id`/`--device-code-url`/`--token-url`, for a self-hosted or future gateway with its own legitimate RFC 8628 endpoints. The obtained token is stored through the exact same `config.SaveCredential`/`SaveProviderConnection` path `provider add` already uses — the wire dialect sends `Authorization: Bearer <api_key>` either way, so nothing downstream needs to know which path a credential took. 5 new tests in `cmd/ishakat/login_test.go` cover the happy path (device code → pending → success → verify → write, asserted against a real `config.Load` afterward), `access_denied` writing nothing, the "no device flow configured" usage error, no-args usage, and an unknown provider name. **Then still open for Step 24** (closed by the three entries below): no `internal/slash` `/login` row or TUI-side wizard (§13's command index untouched). `--resume` (step 13) remains separately tracked. `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`, `go test -race ./...` all green, 22/22 packages, and all five `internal/arch_test.go` boundary tests pass unchanged (`internal/oauth` is not imported by `internal/tui`).
 
@@ -2374,6 +2381,9 @@ documented.
 | `/tools delete <name> [confirm]` | delete, with confirmation | ✅ step 21 closed 2026-08-14 (delete slice) · `ToolsLister.DeleteTool`, same seam, `DangerHigh`/irreversible so the trailing literal word `confirm` is this command's own explicit, typed gate (mirrors `tool_delete.go`'s own required `Confirm bool`) |
 | `/tools revive <name>` | return an archived tool to the prompt (§19.5) | ✅ step 21 closed 2026-08-14 (revive slice) · `ToolsLister.ReviveTool`, same seam, `DangerLow`/idempotent so no confirmation gate is needed |
 | `/skills` | list the loaded prose capabilities | ✅ |
+| `/permissions` | view and edit autonomy, rules, invariants and recently denied | ⬜ **§21 · step 32** — the only surface for layers 3–5; invariants shown but not editable |
+| `/plan` | force this turn to plan only: explore and ask, never execute | ⬜ **§21 · step 32** — a phase request, *not* an autonomy change (§21.1) |
+| `/trust` | review or change the project's trust decision | ⬜ **§21 · step 30** — layer 2; asked once automatically on the first run in a project |
 | `/tools install <ref>` | install a capability published by someone else | ⬜ **proposal, phase 6 · §20.9** — TTY only, never via `serve` |
 
 `/tools` is autoextension's counterpart, not a decoration: §19.8's guarantee is
@@ -2404,7 +2414,7 @@ listed separately:
 
 | Flag | What it grants | What it does **not** grant |
 |---|---|---|
-| `--yolo` | run `bash` and write files without asking | does **not** grant creating tools |
+| `--yolo` | run `bash` and write files without asking | does **not** grant creating tools; once §21 lands it also does **not** cover the `critical` class or the invariants of §21.4 |
 | `--allow-tool-create` | create tools without a TTY (`-p`, `serve`, cron, CI) | nothing else; does not imply `--yolo` |
 | `--no-anim` | — | (turns off animations; not a permission) |
 
@@ -2664,6 +2674,7 @@ Update when closing each step. One line per entry: date, step, result, measured 
 | 2026-08-14 | Step 21 (`/tools edit <name>`) — closed (edit slice), Step 21's backlog now down to one row | Continuing directly from the previous entry's own scoping: of the two remaining write/governance-gated rows (`create [--force]`, `edit`), `edit` is the one whose own hard blocks already fully exist at the Go level (`tools.ToolEdit`, `tool_edit.go`, closed since PR #105) — the design work this slice needed was not a confirmation gate (edit needs none; see below) but two separate architectural questions neither of the prior three slices (audit/revive/delete) ever had to answer. **Architectural departure #1, and why:** every prior slice's `internal/app/toolslister.go` method was built entirely from *exported* `internal/tools` functions (`DiscoverDeclarative`, `LoadState`/`SaveState`, `ToolState.Archive()`/`Revive()`) — the same "read-side seam, reimplement with exported functions only" pattern each entry above already establishes. `tool_edit.go`'s own `Run`, by contrast, depends on two *unexported* helpers, `parseManifest` and `checkManifestSafety`, that enforce §19.8's egress-allowlist and structural-exfiltration hard blocks on the edited result — the exact same checks `tool_create.go` uses. Rather than widen `internal/tools`' exported surface specifically around a security-sensitive check for one caller, `EditTool` is implemented by constructing a real `tools.ToolEdit{Dir, Allow, AllowAll}` value and calling its `Run` method directly through the generic `tools.Tool` interface (`Run(ctx, json.RawMessage) (Result, error)`, the same shape every meta-tool already exposes) — reusing the entire vetted code path, safety check included, rather than duplicating any part of it. This is also why `EditTool`'s own signature (`name, oldString, newString string, replaceAll bool`) mirrors `toolEditArgs` field for field instead of taking a full replacement manifest: it is the identical shape `tool_edit.go`'s own doc comment already argues for, for the identical three reasons. **Architectural departure #2:** this is the first slice whose method needs configuration `toolsLister` did not previously carry — the egress allowlist (`config.Tools.Egress.Allow`/`AllowAll`, the same values `buildAgentOptions` already threads into `tools.WithMetaTools`' own `ToolEdit` construction). Growing `NewToolsLister`'s existing signature (`dir string, enabled bool`) would have been a breaking change to its one production call site plus the ~26 existing test call sites in `toolslister_test.go`, unlike every prior slice's purely-additive interface-method extension. **Fix, chosen instead: an additive second constructor.** `NewToolsListerWithEgress(dir string, enabled bool, allow []string, allowAll bool)` is the real constructor now; `NewToolsLister` becomes a thin wrapper over it (`allow=nil, allowAll=false`), so every pre-existing call site keeps compiling unchanged. `app.go`'s one production call site was updated to call `NewToolsListerWithEgress(cfg.Tools.Dir, cfg.Tools.Enabled, cfg.Tools.Egress.Allow, cfg.Tools.Egress.AllowAll)` directly. **The slash-command input syntax, the other open design question:** unlike every prior write slice (a single name, or a name plus a trailing confirm word), `/tools edit` needs three pieces of human-typed information — a name, an arbitrary-length `old_string`, and an arbitrary-length `new_string` — none of which fit on one space-separated line the way `tool_edit`'s own exact-match TOML-patch contract works. Investigated and confirmed usable: `root.go`'s own `ctrl+j` binding already inserts a literal `\n` into the textarea without submitting, and `slash.Parse` only ever cuts on the first space, so a multi-line typed argument string survives intact into `runToolsCommand`'s own `args` parameter with no engine change needed. **Fix, a new line-delimited convention (`parseToolsEditArg`, `toolscmd.go`), since no existing multi-field slash-command delimiter precedent exists anywhere in this codebase to reuse:** `edit <name>` on its own first line, one or more `old_string` lines, a literal `---` separator line (chosen because it cannot occur as a bare TOML line — table headers always start with `[`, and `---` is not a valid unquoted TOML value), zero or more `new_string` lines, and an optional trailing `replace_all` literal line mirroring `parseToolsDeleteArg`'s own trailing-word convention for `confirm` (a separate line rather than a same-line trailing word, since `new_string`'s own last line must be free to end in anything, including trailing whitespace, without a same-line suffix silently eating part of it). Any shape not matching this exactly (no body, no `---` line found, an empty `old_string`, a name with embedded whitespace) falls through to the bare listing, the same "fall through, don't error" rule every other `parseTools*Arg` function already follows. **No confirmation gate, deliberately, unlike delete's:** `tool_edit.go`'s own hard blocks (the re-parse check, `checkManifestSafety`) already refuse anything dangerous before a single byte reaches disk, and a successful edit's own visible consequence — demotion to `unverified`, not a silent success — is itself the safety net a separate confirmation step would otherwise exist to provide, the same reasoning `revive`'s slice already gave for needing none. **Tests, 25 new across three files, all passing on first run:** `internal/tui/toolscmd_internal_test.go` gains `fakeToolsLister.EditTool` (keyed on name alone, mirroring `reviveOK`/`deleteOK`'s own shape), a new `typeToolsEditAndEnter` test helper (feeding `ctrl+j`, never a literal `\n` rune, between each body line — the first test in this suite to exercise the multi-line-typed-input path at all, since `typeAndEnter`'s own literal-`\n`-in-a-string approach would submit prematurely), a second narrow test double (`fakeToolsListerCapturingEdit`) to confirm `replace_all`'s own boolean is correctly threaded through end to end from typed text to the interface call, four `TestSlashToolsEdit*` dispatch tests (success rendering, unknown-name error rendering, the nil-lister notice, `replace_all` passthrough), and `TestParseToolsEditArg`'s own 12-case table (basic old/new, multi-line bodies on both sides, the trailing `replace_all` line, an explicitly-allowed empty `new_string` for a pure deletion, and seven rejected shapes). `internal/app/toolslister_test.go` gains three `TestNewToolsListerWithEgress*` cases mirroring `NewToolsLister`'s own three (disabled/empty-dir/enabled-with-dir) plus seven `TestToolsListerEditTool*` cases — all real `t.TempDir()` round trips against a genuine `tools.ToolEdit.Run` underneath, not mocks, the same discipline every prior slice's own tests already established: the three Go-error preconditions (empty name, empty `old_string`, identical `old_string`/`new_string`) checked before a `tools.ToolEdit` is even constructed; an unknown name and an old-string-not-found case both confirmed as the returned string, not a Go error, matching this interface's own documented convention; a successful edit confirmed via a real post-call `LoadState` showing `StateUnverified` with `UseCount` preserved (not just the returned string); `replace_all` confirmed to actually replace every occurrence on disk; and — the one test whose entire point is confirming departure #2's own wiring, not `tool_edit.go`'s own already-tested behavior — an egress-allowlist refusal confirmed to still fire when `NewToolsListerWithEgress`'s own `allow`/`allowAll` parameters are threaded through correctly, the on-disk manifest confirmed untouched afterward. **A sixth sandbox reset hit mid-increment, discovered only after this slice's main-code edits were already applied:** unlike every prior reset (caught at the very start of a turn, before any new code existed), this one occurred with `internal/tui/tools.go`/`internal/app/toolslister.go`/`internal/app/app.go` already edited but uncommitted — `git status` afterward showed the three modified files still present with `git diff` intact (nothing lost, since edits live on disk, not in the Go toolchain the reset wiped), but `HEAD` itself had reverted to `main` rather than staying on `genspark_ai_developer`, recovered via a plain `git checkout genspark_ai_developer` (recreating the local tracking branch at the already-correct `9783bfc`, uncommitted edits carried across the checkout intact) followed by the now-familiar full `curl`+`tar` reinstall of Go 1.26.5. This is the first reset this session where in-progress, uncommitted work coexisted with the reset, and it survived intact — confirming the working tree itself, unlike the Go toolchain and the checked-out branch pointer, is not part of what a sandbox reset clears. **Verification.** `gofmt -l .` clean; `go build ./...`, `go vet ./...` clean; `go test ./...` all green across all 25 packages; `go test -race ./internal/tui/... ./internal/app/...` green; `internal/arch_test.go`'s `TestTUINoImportaHTTP`/`TestProviderNoImportaPresentacion` explicitly re-run and passing (`EditTool`'s own new method adds no `net/http` to `internal/tui`'s dependency closure — it is still only an interface method there, the concrete `tools.ToolEdit` construction living entirely in `internal/app`, the one package already allowed to import both). Files touched: `internal/tui/tools.go`, `internal/tui/toolscmd.go`, `internal/tui/toolscmd_internal_test.go`, `internal/app/toolslister.go`, `internal/app/toolslister_test.go`, `internal/app/app.go`, `docs/PLAN.md`. **Deliberately still open, Step 21's one remaining row:** `/tools create [--force]` — needs either a structured multi-field input flow or a text-based manifest specification the human supplies via slash-command argument text (an even harder version of this same "how does a human type a multi-field payload" question this slice just answered for two fields), plus the explicit `--force`-skips-gate-1-and-logs-it behavior §19.6 names. |
 | 2026-08-15 | Step 21 (`/tools create <name> [--force]`) — closed (create slice), Step 21's backlog now fully closed for rung 1 | Continuing directly from the previous entry's own scoping: `/tools create [--force]` was the one remaining row, and the one this whole slice sequence had deferred the longest -- its own doc comment from the delete-slice entry names it as "an even harder version of this same 'how does a human type a multi-field payload' question," plus the explicit `--force`-skips-gate-1-and-logs-it behavior §19.6 names, which none of the four prior slices (audit/revive/delete/edit) needed to design at all. Landed in two commits. **Commit 1, the Go-level foundation (`internal/tools/tool_create.go`):** `tool_create.go`'s own existing `Origin` field already has a `"user_forced"` value (`evolve.OriginUserForced`), but `evolve.Evaluate`'s own doc comment is explicit that `OriginUserForced` deliberately still enforces the No-duplicate and Budget criteria -- "overriding past a near-duplicate or an already-full catalogue is a different, larger decision than this package makes on a human's behalf." §19.6's own text for `--force`, though, says "skips gate 1" without qualification -- all five criteria, not two. This meant `Origin` alone could not satisfy §13's row: a genuinely stronger, separate mechanism was needed. **Fix:** a new `ToolCreate.SkipGate1 bool` field, deliberately *not* a `toolCreateArgs` JSON field (unlike `Origin`, which a model calling `tool_create` can already self-report) -- it lives only on the Go struct, settable only by the one caller PLAN.md's own row names, a human typing `--force` into the TUI. `Run` wraps its existing `evolve.Evaluate` call in `if !t.SkipGate1 { ... }` (candidate/existing are still built either way -- the cost is trivial next to a filesystem write, and keeping the conditional narrow keeps "what `--force` actually changes" easy to audit in a diff). "Logs it": a fixed, greppable marker (`skipGate1ReasonMarker = "[--force: gate 1 skipped] "`) is prepended to the written manifest's own `Origin.Reason` when `SkipGate1` is true -- no new log file or sink, since `/tools audit` (closed 2026-08-14) already surfaces this exact field for every tool. §19.8's own mitigations (egress allowlist, credential-shaped-path hard block) are never skipped by this field -- only gate 1's own accounting-fact admission judgment is; `checkManifestSafety` still runs unconditionally after gate 1. **A pre-existing bug fixed in passing, found while reading `buildManifest` to decide where `SkipGate1` should live:** `Manifest.Origin.CreatedBy` was hardcoded to `"agent"` regardless of the real origin -- harmless while every existing caller (`tool_create`'s own model-facing path) only ever passed `OriginAgent`, but wrong the moment a human-initiated `"user_declared"`/`"user_forced"` origin reached it, which this slice's own `CreateTool` method (see below) does on every call. Fixed via a new `createdByFor(origin evolve.Origin) string` helper (`OriginUserDeclared`/`OriginUserForced` -> `"user"`, `OriginAgent` -> `"agent"`, matching §19.6's own three-origin table) and threading `origin` as an explicit parameter into `buildManifest` rather than re-deriving it from `args.Origin`'s raw string a second time. 5 new tests in `tool_create_test.go` (`TestToolCreateCreatedByReflectsOrigin`'s table covering all four origin strings including empty/default; `TestToolCreateSkipGate1BypassesRepetitionAndStability`; `TestToolCreateSkipGate1StillEnforcesEgressAndCredentialChecks`'s two subtests; the reason-marker present/absent pair), all passing on first run. **Commit 2, the human-facing seam, wiring `/tools create` into the TUI:** `internal/tui/tools.go`'s `ToolsLister` interface gains a seventh method, `CreateTool(name, description, url, method, reason string, sources []string, force bool) (string, error)`, deliberately exposing a *reduced* field set -- no `params`/`query`/`headers`/`body`/`auth`/`extract`/`selftest_*` -- matching §19.8's own mandatory-provenance fields (`name`/`description`/`url`/`reason`/`sources`) plus `method`; a tool needing anything richer still has `/tools edit` afterward, the same "narrow first slice, extend later" precedent every prior Step 21 row already followed. `internal/app/toolslister.go` implements it by constructing a real `tools.ToolCreate{Dir, Allow, AllowAll, Thresholds, SkipGate1}` and calling its `Run` method directly through the generic `tools.Tool` interface -- the identical delegation reason `EditTool`'s own doc comment already gives, since `Run`'s own flow depends on the same unexported `checkManifestSafety` plus `evolve.Evaluate` neither of which this package can call any other way without widening `internal/tools`' exported surface just for this one caller. `force` selects *both* `Origin` ("user_declared" when false, "user_forced" when true) *and* `SkipGate1` (`= force`) -- a forced human creation genuinely bypasses gate 1 entirely, not merely the two criteria `OriginUserForced` alone would skip. **A third architectural departure, after edit slice's own two:** this is the first slice whose method needs *evolve.Thresholds*, configuration `toolsLister` did not previously carry at all (unlike edit's egress allowlist, which was new but at least a familiar `config.Tools.Egress` shape). Growing `NewToolsListerWithEgress`'s existing signature would have broken its one production call site plus every existing test call site, the identical problem the edit slice's own entry already solved once for a different parameter. **Fix, the same additive-constructor pattern reused verbatim:** `NewToolsListerWithEvolve(dir, enabled, allow, allowAll, thresholds)` is now the real constructor; `NewToolsListerWithEgress` becomes a thin wrapper over it (`thresholds: evolve.Thresholds{}`), so every pre-existing call site keeps compiling unchanged. `app.go`'s one production call site now passes `evolveThresholds(cfg.Tools, cfg.Tools.Evolve)` -- the exact same function `agentturn.go`'s `buildAgentOptions` already calls for the model-facing `tool_create` path -- so both the human and the model see the identical configured gate-1 numbers, never two independently-drifting sources of truth for the same knobs. **The slash-command input syntax, the other open design question, resolved differently from edit's own `---`-delimited blobs:** `/tools edit`'s `old_string`/`new_string` are arbitrary-length verbatim TOML text, which is why it needed a block-delimiter convention at all; `/tools create`'s fields (a name, a url, a one-sentence description) are all short, single-line values, so a `key: value` line-based syntax was chosen instead -- inventing a `---`-blob convention for a shape that does not need it would only add ceremony. **Fix (`parseToolsCreateArg`, `toolscmd.go`):** `create <name>` on its own first line, then order-independent `description:`/`url:`/`method:`/`reason:`/`sources:` lines (colon-delimited, `sources:` split on commas with whitespace trimmed and empty entries dropped), and an optional trailing `--force` literal line -- its own line, not a same-line suffix like `parseToolsDeleteArg`'s `confirm`, since every other line here is itself a `key: value` pair whose value may legitimately contain trailing whitespace or even end in the literal word "force" as part of a real description, and a same-line-suffix convention would risk swallowing part of a genuine value. A name-only `create weather` with no body at all is not this subcommand's shape (mirrors `parseToolsEditArg`'s own "no body at all -> not this shape" rule) and falls through to the bare listing; `sources:` present-but-empty (`sources: `) yields a non-nil, empty `[]string`, distinct from the field being entirely absent (nil) -- matching `toolCreateArgs.Sources`' own nil-vs-empty mandatory-provenance contract one layer down. **Tests, 22 new across two files, all passing on first run:** `internal/app/toolslister_test.go` gains three `TestNewToolsListerWithEvolve*` cases mirroring `NewToolsListerWithEgress`'s own three, four `TestToolsListerCreateTool*` Go-error-precondition cases (empty name/description/url/reason), and eight further real `t.TempDir()` round-trip cases against a genuine `tools.ToolCreate.Run` underneath (not mocks) -- a successful creation's parseable manifest and `StateUnverified` starting state; gate 1's duplicate refusal without `--force` and force bypassing it; gate 1's budget refusal at a configured `MaxTools` ceiling (confirming `NewToolsListerWithEvolve`'s own `thresholds` parameter genuinely reaches gate 1, not silently dropped the way the edit slice's own egress-wiring test already guarded against for a different parameter) and force bypassing that too; the `--force` reason marker present/absent; and the egress allowlist plus credential-path hard blocks both still firing even with `force: true`, confirming §19.8's own mitigations are never skipped by `SkipGate1`. `internal/tui/toolscmd_internal_test.go` gains `fakeToolsLister.CreateTool` (the double now satisfies the seven-method interface), a new `typeToolsCreateAndEnter` helper (the `ctrl+j`-per-line mechanism `typeToolsEditAndEnter` already established, reused verbatim for `create`'s own multi-line body), a second narrow capturing double (`fakeToolsListerCapturingCreate`, mirroring `fakeToolsListerCapturingEdit`) to confirm `--force`'s own boolean threads through end to end from typed text to the interface call in both directions (present and absent), four `TestSlashToolsCreate*` dispatch tests (success rendering, a gate-1-refusal string rendering inline, the nil-lister notice, and the two force-passthrough cases), and `TestParseToolsCreateArg`'s own table (all fields present in order, out-of-order fields, some fields omitted, the trailing `--force` line, `sources:` with stray whitespace and an empty entry among real ones, and six rejected shapes including the name-with-embedded-whitespace and whole-word-match-only "createx" cases) plus a dedicated `TestParseToolsCreateArgSourcesNilVsEmptyDistinction` test isolating the nil-vs-empty-but-present `sources` contract the table test's own `equalStringSlices` helper deliberately does not distinguish. **Two more sandbox resets hit this slice, the session's ninth and tenth overall:** the ninth (recovered at the start of this slice's own work, per the prior turn's carried-forward summary) found the Go toolchain gone but `origin/genspark_ai_developer` already correctly synced at `15e8009` (commit 1 above, already pushed) -- nothing uncommitted lost, only the toolchain and the checked-out branch pointer, both restored via the by-now-familiar `curl`+`tar` reinstall plus `git checkout genspark_ai_developer`. The tenth struck mid-slice, immediately after the `CreateTool` interface addition to `tools.go` had been applied but before it was committed -- this time the uncommitted edit genuinely was lost (confirmed via `grep` finding no trace of it after recovery), the first reset all session to actually destroy in-progress work rather than merely misplacing the toolchain or branch pointer around already-committed work; redone faithfully from the same carried-forward design notes. PR #136 (opened after commit 1, updated after commit 2) was then squash-merged into `main` at `7f82af5` -- discovered via an eleventh reset at the *start* of this closing turn (Go toolchain gone again, local `HEAD` reverted to `main`), resynced by reinstalling Go, checking out `genspark_ai_developer`, and rebasing it onto `origin/main`: both of this slice's own commits (`15e8009`/`2382ae5`) dropped cleanly as "patch contents already upstream," confirming the squash-merge had captured everything and nothing needed re-applying. **Verification.** `gofmt -l .` clean; `go build ./...`, `go vet ./...` clean; `go test ./...` all green across all 25 packages; `go test -race ./internal/tui/... ./internal/app/...` green; `internal/arch_test.go`'s `TestTUINoImportaHTTP`/`TestToolsNoImportaTUI` explicitly re-run and passing (`CreateTool`'s own new method adds no `net/http` to `internal/tui`'s dependency closure -- it is still only an interface method there, the concrete `tools.ToolCreate` construction living entirely in `internal/app`). Files touched: `internal/tools/tool_create.go`, `internal/tools/tool_create_test.go`, `internal/tui/tools.go`, `internal/tui/toolscmd.go`, `internal/tui/toolscmd_internal_test.go`, `internal/app/toolslister.go`, `internal/app/toolslister_test.go`, `internal/app/app.go`, `docs/PLAN.md`. **Step 21's backlog is now fully closed for rung 1** (declarative `tool.toml`, no `run.py` sidecar) -- every row §13's command table names for it (`audit`/`revive`/`delete`/`edit`/`create [--force]`) is implemented, tested and merged; rung 2 (a script-tool executor) remains explicitly not started, blocked on §16's own open Starlark/Python decision, unchanged by this slice. |
 | 2026-08-15 | §20.11 forward-compatibility backlog — items 3 and 4 landed (PR #138), items 1/2/5 confirmed already satisfied, closing the table in full | With Step 21's rung-1 backlog closed by the previous entry, this session picked up §20.11's own five-item table -- the "land them, or write down why not" instruction §11's Phase 2.5 table and this section's own head both carry -- and worked through all five in order. **Item 3, gate 1's dedup written against an interface (`ExistingToolsSource`), landed first.** `internal/evolve/gate1.go` gains `ExistingToolsSource` (`Count() int`, `FindSimilar(name, description string) []ExistingTool`) as the real interface gate 1's No-duplicate and Budget criteria now depend on, plus `ExistingToolsSlice`, a zero-cost adapter reproducing `Evaluate`'s original `[]ExistingTool` behavior exactly (`Count` is `len()`, `FindSimilar` ignores its arguments and returns everything -- the local registry has no similarity search of its own yet, so returning the full slice for the caller to score is the honest current behavior, not a regression). `EvaluateAgainst(thresholds, candidate, source ExistingToolsSource)` carries the actual logic against the interface; `Evaluate(thresholds, candidate, existing []ExistingTool)` becomes a one-line wrapper (`EvaluateAgainst(thresholds, candidate, ExistingToolsSlice(existing))`), so every existing call site -- `tool_create.go`'s model-facing path, the `/tools create` human-facing path wired the previous session -- keeps compiling and passing unchanged; this is exactly the "highlest-leverage, least obvious" property §20.11's own text calls out for this item, since "is there already a tool for this?" can now grow a second source (a future community index) later without reopening `Evaluate`'s own signature a second time. **Item 4, `requires_caps`/`min_context` read and enforced for local tools too, landed second, same PR.** `Manifest.Unsatisfied(against Caps) []string` (`internal/tools/declarative.go`) had existed since Step 20/21 -- confirmed via `git show main:internal/tools/declarative.go`, already fully implemented and tested (`TestManifestUnsatisfiedNilWhenNoRequirements`/`ChecksCaps`/`CapsSatisfied`/`MinContext`, all four still green, untouched by this work) -- but had zero production callers before this pass; a declarative tool naming `requires_caps = ["vision"]` was offered to every model regardless of whether the active one could see images, guaranteed to fail the call it accepted. **Design decision, made explicit rather than assumed:** exclusion, not warn-and-include -- a manifest whose requirements the active model does not satisfy is now *absent* from that model's tool catalogue, mirroring `WithMetaTools`'s own pre-existing convention for `tool_create` under `EvolveMode == "off"`/no TTY ("a model that cannot see a tool in its own catalogue cannot be talked into asking for it"), deliberately not `engine.CheckSwap`'s `MissingCaps` "report a Conflict, let the human override" pattern -- that pattern exists for a *user-initiated* model swap a human can still push through, not a model's own tool visibility, which should never expose a call guaranteed to fail. `internal/tools/registry.go`'s `DeclarativeTools`/`WithDeclarative` gained an `activeCaps Caps` parameter and now call `m.Unsatisfied(activeCaps)` per discovered manifest, excluding any with unmet requirements and folding the first exclusion's reason into the existing warn-string return value; `MetaToolsOptions` gained `ActiveCaps Caps`. New `capsForTools(m catalog.Model) tools.Caps` (`internal/app/evolve.go`) is the boundary-translation function this needed -- mirroring `evolveThresholds`'s own existing config-to-evolve translation shape, using `m.Caps.*` plus `m.EffectiveContext()` (never `m.Context` directly, matching `engine.CheckSwap`'s own missing-caps/window-comparison precedent) -- and is now called from all three real model-resolution points (`headless.go`, `app.go`, `serve.go`'s `resolveModel`), threaded alongside each one's pre-existing `.Cost` extraction through `buildAgentOptions`/`runAgentTurnHeadless`/`newSubAgentRunner` down to `WithMetaTools`. Every one of these functions gained exactly one new `caps tools.Caps` parameter at a fixed position, so a zero-value `tools.Caps{}` at any pre-existing call site (every test, and every manifest written before this item existed, i.e. the common case) satisfies every manifest with no `requires_caps`/`min_context` declared -- fully backward compatible, confirmed by the entire pre-existing test suite passing unchanged with no logic edits, only the new zero-value argument added at each call site. Two new regression tests in `internal/tools/registry_test.go` (`TestDeclarativeToolsExcludesManifestWithUnmetRequiresCaps`, `TestWithDeclarativeExcludesManifestWithUnmetMinContext`) pin the exclusion at both the `DeclarativeTools` and `WithDeclarative` layers, for both kinds of requirement. **Items 3 and 4 shipped as one PR (#138)** -- opened for item 3, then item 4's commit landed on the same branch before item 3 merged, and GitHub folded both into the one already-open PR rather than needing a second; the PR description was updated in place to document both landed items together rather than leaving item 4 undocumented at the PR level. **Items 1, 2 and 5 confirmed already satisfied by existing code -- no new code needed, this entry is their "write down why not" closure.** Item 1 (`[package]` table reserved-and-ignored, no `"ignored key"` warning): `Manifest`'s own struct (`internal/tools/declarative.go`) has deliberately never had a `Package` field, and `parseManifest` deliberately never calls `toml.MetaData.Undecoded()` the way `internal/config/load.go` does for its own schema -- the doc comments on both the `Manifest` type and `parseManifest` itself already name this exact reasoning ("§20.11 item 1 asks that `[package]` be accepted-and-ignored... no 'ignored key' warning... so that a future community-layer field can be added to the format without every existing hand-written manifest suddenly producing warnings"), landed as part of PR #99/#100 (2026-08-10, Step 20's own closing entry above) without this item's own number attached at the time. Confirmed by reading the current file rather than trusting the comment alone: a `[package]` table in a `tool.toml` fixture parses with zero warnings today, verified via `TestParseManifestValid`-style inspection of `declarative_test.go`'s existing fixtures plus a manual trace of `parseManifest`'s own code path (`toml.Decode` into a struct with no `Package` field simply drops unknown keys silently -- there is no `Undecoded()` call anywhere in this function to turn that silence into a warning). Item 2 (`created_by = "community"` accepted as a third `[origin]` value): `OriginSpec.CreatedBy` (`internal/tools/declarative.go`) is a bare `string` field with **no enum validation anywhere in the codebase** -- confirmed via a repo-wide grep for any switch/comparison against `CreatedBy`'s value outside of display code (`internal/tui/toolscmd.go`'s audit listing and `internal/tui/toolapprove.go`'s `originLabel`, both of which already have an unlabeled `default:`/pass-through branch for any string they don't recognize, rather than rejecting it) -- so `created_by = "community"` in a hand-written or future-installed manifest already round-trips through `parseManifest`, `ToolAuditEntry.CreatedBy`, and every existing display path today, with no code change required to accept it; "community" simply becomes one more string that flows through unvalidated, exactly like today's only two real producers ("agent"/"user", written by `createdByFor` in `tool_create.go`) and the test fixture's own ad hoc "human". The item asked for the value to be *accepted*, not for the codebase to *validate* against a closed enum it never had in the first place -- there is nothing to loosen. Item 5 (the on-disk tool directory is already a valid package -- id-named dir, manifest at the root, no absolute paths, no machine-specific state in the manifest): confirmed by re-reading `DiscoverDeclarative`, `tool_create.go`'s `buildManifest`, and `Manifest.Dir`'s own doc comment together. `DiscoverDeclarative` walks `dir`'s immediate subdirectories and expects `tool.toml` at each one's root (`filepath.Join(toolDir, ManifestFileName)`) -- already id-named-dir-with-manifest-at-root, by construction, mirroring `internal/skills.Discover`'s identical contract per `declarative.go`'s own package doc comment. `buildManifest` writes no absolute path anywhere in the manifest body itself (`Request.URL` is whatever the human or model supplied, `Dir` is explicitly `toml:"-"` -- "never decoded from the TOML itself... what a future `tool_edit`/`tool_delete` needs to find the manifest again on disk", i.e. a runtime-only field that never round-trips through the file). No machine-specific state exists in the schema at all -- `OriginSpec`, `ParamSpec`, `RequestSpec`, `ResponseSpec`, `SelftestSpec` are all portable by construction, and `ToolState` (use_count/last_used/hash) deliberately lives in a *separate* `state.json` next to the manifest, not inside `tool.toml` itself, per Step 20's own registry design -- so copying a tool's directory to another machine today already produces something that discovers and runs correctly there, with no repackaging step. **§20.11's own table (§20, "20.11 What to decide now, and what to defer") and its two cross-reference tables (§11's Phase 2.5 table, this section's own head) are updated in place** to mark all five items closed with a pointer to this entry and PR #138, rather than left to imply open work. **Verification.** `gofmt -l .` clean; `go build ./...`, `go vet ./...` clean; `go test ./...` all green across all 25 packages (26 counting the new `internal/provider/anthropic`/`gemini` additions from the prior Phase 4 entries -- the actual current count is confirmed at each build, not hardcoded here). No code changed for items 1/2/5; only `docs/PLAN.md` touched for those three. Files touched (items 3/4, PR #138): `internal/evolve/gate1.go`, `internal/evolve/gate1_test.go`, `internal/tools/registry.go`, `internal/tools/registry_test.go`, `internal/app/evolve.go`, `internal/app/agentturn.go`, `internal/app/dispatch.go`, `internal/app/app.go`, `internal/app/headless.go`, `internal/app/serve.go`, `internal/app/agentturn_test.go`, `internal/app/dispatch_e2e_test.go`, `internal/app/toolchain_e2e_test.go`. Files touched (items 1/2/5, docs-only): `docs/PLAN.md`. **§20.11's backlog is now fully closed** -- all five items either landed in code (3, 4) or confirmed already satisfied and written down as such (1, 2, 5), per the instruction §11's Phase 2.5 table has carried since 2026-08-09. |
+| 2026-08-15 | §21 Contract 6 — design closed, no code yet | **Why this exists:** on a real Termux session ishakat raised a permission dialog for roughly 34 of 40 tool calls; approving them fast enough to make progress produced a burst of provider requests and the account was rate-limited. The dialog was not just friction, it was the outage mechanism. Design work only — no code was written and no behaviour changed. **The governing idea is that autonomy, phase and permission are three different axes** and every mistake in this area comes from merging two of them; the earlier draft of this design cycled `agile → plan → auto` on one key, which wrongly asserts that planning is a kind of autonomy. Autonomy is granted by the human and sticky (`auto`/`agile`/`readonly`); a phase is owned by the loop and transient (`plan`/`exec`/`check`/`ask`/`wait`, rendered as `auto·exec` in the status line), and naming a phase does **not** reintroduce the `Planner` §3 closed out — it labels the state the single reactive loop is already in. **Research corrected three things memory had wrong** (§21.2): Kiro splits compound commands on `;`/`&&`/`||`/`|` and evaluates each part independently, and its config *adds to* the defaults rather than replacing them; Claude Code checks protected paths *before* allow rules and exposes `AskUserQuestion` as a model-callable tool rather than a runtime gate; and Pi ships **zero permission popups**, affording that only because `/trust` makes one decision per project — its `questionnaire.ts` (tab bar, `☑` per answered tab, a final Submit tab, a free-text option on every question) is the survey shape §21.5/§21.7 adopt, and its `agents/*.md` frontmatter (`tools: read, grep, find, ls`) is the precedent for scope living with the objective. **Three defects located in code** (§21.3), which together explain the 34 dialogs: `tierFor` returns `High` for `bash` unconditionally so `ls`/`git status`/`go build` all prompt; `requestKey()` keys session grants on exact argument bytes so a grant for `ls` never covers `ls -la`; and the `AllowSession` branch requires `Tier == Medium`, so for `bash` — the noisiest tool — the session grant is **silently discarded**. **`Tier{Low,Medium,High}` is replaced by four risk classes** (§21.5): safe / controlled / sensitive / critical, where `controlled` exists precisely because `go test` is *not* read-only (it executes arbitrary test code and writes caches) yet must not prompt, and where **`critical` is asked even under `auto`** — that single row is what keeps `auto` from collapsing into `--yolo`. **Natural-language constraints compile into Guard rules** (§21.6): "fix the game but no Playwright" becomes `bash *playwright* deny` shown to the human for one-keystroke confirmation, because a constraint that lives only in the prompt is a wish a model under pressure will rationalize past. Auto's proposal and Kiro-style manual selection combine in one dialog that also shows what auto *rejected and why*, offers allow-all (meaning everything already installed, never a silent 180 MB download), and offers per-tool checkboxes. **`internal/ask` becomes the primitive and tool approval a case of it** (§21.7), inverting the earlier draft that would have built the survey on top of `toolapprove.go`; it has two independent producers (the model's `ask_user`, and the runtime's Guard — collapsing them would let a `git push` through whenever the model forgot to ask) and a defined answer on every door, including *no ask* for headless (policy decides, non-zero exit) and scheduled runs (park in an inbox; a scheduled task runs with the autonomy it declares itself and never inherits the interactive session's). **"Grant the whole tool" gets one decidable test** (§21.8): does the name determine the verb? Yes for `fs_write`/`fetch`/`dispatch` and best of all for declared `tool.toml`s; never for `bash`, whose argument decides what it does — and the bash dialog shows that option *disabled with its reason* rather than hiding it. This links §21 to §19.2: permission friction is the sensor that should drive crystallization, since a pattern approved seven times wants to become a fixed-verb declared tool that can then be granted whole safely. **The rate-limit amplifier is traced hop by hop** (§21.9) — `internal/app/tools.go` returning a denial as `engine.ToolResult{IsError:true}` (its own comment states the intent that *is* the bug), `agentloop` treating that as data and issuing another provider request, byte-exact loop detection at the `i == 0` check missing `ls`→`ls -la`→`find`, and `retryAfter` guarding only the handshake while `provider.Error.Retry()` already carries the `Retry-After` nobody reads. Five fixes, deliberately ordered so that inter-iteration pacing is **last and optional**, because a sleep that masks an amplification defect is worse than no fix. The headline rule: **a denial is a decision, not a hint — when the human says no, the turn ends.** Approval batching is by **risk class, not by batch** (§21.10), so round-trips collapse without a `git push` sharing a keystroke with three reads. Sub-agents (§21.11) deploy only at the `plan → exec` turn boundary — never mid-response, honouring the correction made during review — fan out to read and go single-file to write, state their goal in one sentence, and **cannot request a capability the parent lacks**, which closes the escalation hole where a child asks the human for what the parent was denied. Acceptance is stated as a narrative session (§21.13) with a measurable claim: ~40 actions and **3 dialogs** versus ~34 today. **Implementation is steps 26–32** (§21.14), with **step 26 (rate limit) shipping first and alone** since it is a live defect independent of the rest, and steps 27–29 ordered so `guard.go` is rewritten once behind an already-migrated dialog rather than twice. Four decisions left explicitly open (§21.16): `ask_user` as a ninth tool versus a `dispatch` mode (§19.1 says the eight do not grow), whether `--yolo` survives in narrowed form, whether a mission persists into the session JSONL so `--resume` does not silently drop "no Playwright", and whether `shift+tab` is usable on Termux at all. |
 
 ## 18. Roadmap post-1.0
 
@@ -3659,9 +3670,726 @@ The governing sentence, matching §19's:
 
 ---
 
+## 21. Contract 6: autonomy, phase and permission
+
+This is the contract that decides **when ishakat interrupts the human**. It is
+as binding as §4, §4bis, §5, §8 and §19.
+
+It exists because the opposite was shipped first and measurably failed. In a
+real session on a real phone, ishakat asked for permission roughly 34 times in
+40 tool calls; the human, to get any work done, approved them as fast as they
+appeared; each approval resumed the agentic loop, which issued another provider
+request; and the provider rate-limited the account. **The permission dialog was
+not merely annoying — it was the mechanism that took the agent down.** §21.7
+traces that chain to the line of code that closes it.
+
+### 21.1 The governing distinction
+
+> **Autonomy, phase and permission are three different things. Every design
+> mistake in this area comes from treating two of them as one.**
+
+| Axis | Question it answers | Who sets it | Lifetime | Surfaced as |
+|---|---|---|---|---|
+| **Autonomy** | *How much may ishakat decide alone?* | the human, once | project / session — sticky | `auto`, `agile`, `readonly` |
+| **Phase** | *What is ishakat doing right now?* | the loop, by itself | seconds — transient | `plan`, `exec`, `check`, `ask`, `wait` |
+| **Permission** | *May this specific action run?* | the policy, per call | per rule, per scope | allow / ask / deny |
+
+The previous draft of this design cycled `agile → plan → auto` on one key, which
+silently asserted that "planning" is a kind of autonomy. It is not. Planning is
+something the agent *does*; autonomy is something the human *grants*. Merging
+them forces the human to administer the agent — to keep asking "am I in the
+right mode?" — which is precisely the feeling this contract is written to
+eliminate.
+
+The status line therefore carries two words, not one, and never a menu:
+
+```
+ orbital-dash   auto·exec   $0.31
+ orbital-dash   auto·plan   $0.31
+ orbital-dash   auto·wait   22s
+ orbital-dash   plan·ask    $0.05
+```
+
+Left of the dot: autonomy, which the human owns and which changes rarely. Right
+of the dot: phase, which the loop owns and which changes constantly. **The human
+normally does nothing.** Reading the line is the whole interface.
+
+> **This does not reopen §3.** A phase is a label derived from the state the
+> reactive loop is already in — which block of the current turn is executing —
+> not a scheduler, not a state machine object, and above all not a `Planner`
+> module. §3 forbids a component that decides what to do next; a phase only
+> *names* what the single loop is doing. If an implementation ever needs a type
+> that owns transitions, that implementation has violated §3 and must be
+> rejected.
+
+### 21.2 What the three reference agents actually do
+
+Researched directly from their documentation and source, because the design was
+being argued from memory and memory was wrong in three places.
+
+**Kiro CLI — rules.** Capability-based (`fs_read`, `fs_write`, `shell`,
+`web_fetch`, `subagent`, …) with effects `deny > ask > allow`, most-restrictive
+wins, and no scope precedence. Its default policy already allows `fs_read ./**`,
+read-only git and system info; a `permissions.yaml` *adds* to the defaults
+rather than replacing them. Two details worth stealing outright: compound
+commands are split on `;`, `&&`, `||`, `|` and **each sub-command is evaluated
+independently**, and the approval dialog offers a **generalized pattern** the
+human can edit before accepting (`git add contents/docs/` → `git add *`) plus a
+scope picker.
+
+**Claude Code — modes.** Six of them, with `Shift+Tab` cycling the three common
+ones and a permanent badge showing which is active. A built-in read-only command
+set never prompts. **Protected paths** (`.git`, `.claude`, `.bashrc`, `.npmrc`,
+`.gitconfig`, …) are checked *before* allow rules, so no rule can auto-approve
+them. `AskUserQuestion` is **a tool the model calls**, not a gate the runtime
+imposes. Its auto mode runs a classifier with an explicit blocklist
+(`curl|bash`, force push, `git reset --hard`, mass deletion, exfiltrating
+secrets) and falls back after 3 consecutive or 20 total blocks. Plan approval is
+a 3-option survey, and boundaries stated in conversation are treated as block
+signals.
+
+**Pi — trust, once.** Pi's stated philosophy is *"No permission popups. Run in a
+container, or build your own confirmation flow with extensions."* It can afford
+that only because of `/trust`: a **single decision per project folder**, stored
+in `~/.pi/agent/trust.json`, that gates loading project-local settings,
+extensions and skills. The security boundary is the project, not the call.
+Two more things Pi gets right and this contract adopts:
+
+- `questionnaire.ts` is a **tab bar** across the top, `Tab`/`←→` to move, each
+  tab marked `☑` once answered, a final **Submit** tab showing a summary before
+  anything is sent, and **every question ends with a free-text "Type
+  something."** option. This is the survey shape §21.5 mandates.
+- Sub-agents declare their own tools in YAML frontmatter (`tools: read, grep,
+  find, ls`, `model: claude-haiku-4-5`). **Scope lives with the objective, not
+  in a global config.** That is the answer to per-goal tool restriction.
+
+The synthesis, and the reason ishakat is not a clone of any of them:
+
+> **Claude gives you modes, Kiro gives you rules, Pi gives you trust-once and
+> the survey primitive. Ishakat takes all four, in layers, so that it almost
+> never asks — and when it does, the question is worth answering.**
+
+### 21.3 Why ishakat over-asks today: three defects, located
+
+Not a matter of taste. Three concrete defects in `internal/permissions/guard.go`
+and its callers, each with an independent fix.
+
+**Defect 1 — `bash` is `High` and there is no read-only notion.**
+`tierFor` returns `High` for `bash` unconditionally, and `mode` maps that to
+`permissions.Shell`, which defaults to `"ask"`. So `ls`, `git status`, `git
+diff`, `go build` and `node -v` each raise a dialog. Roughly 80% of the
+prompting in a real session is this one line.
+
+**Defect 2 — session grants are keyed on exact argument bytes.**
+
+```go
+func requestKey(req Request) string { return req.Name + "\x00" + string(req.Arguments) }
+```
+
+"Allow for the session" therefore covers `ls` and not `ls -la`. The human
+grants, the agent varies one flag, the dialog returns. The grant feels broken
+because it *is* broken for every tool whose arguments are not a fixed string.
+
+**Defect 3 — the session grant can never apply to `bash`.**
+
+```go
+if decision.AllowSession && req.Tier == Medium && g.permissions.AllowSession { ... }
+```
+
+The branch requires `Tier == Medium`; `bash` is `High` (defect 1). So the one
+tool that generates most of the dialogs is the one tool for which "allow for
+session" is **silently ignored**. The human ticks the box and nothing happens —
+the worst possible failure mode, because it destroys trust in the control.
+
+These three compound: the noisiest tool prompts most, its grants do not
+generalize, and its grants are discarded anyway.
+
+### 21.4 The five layers, from immovable to disposable
+
+Ordered by how hard they are to change. A lower layer can never widen a higher
+one; **every layer only narrows.**
+
+| # | Layer | Who decides | When | Scope |
+|---|---|---|---|---|
+| 1 | **Invariants** | ishakat, in Go | always | absolute, not configurable |
+| 2 | **Trust** | the human, once | first run in a project | the project |
+| 3 | **Autonomy** | the human | at trust, or `/permissions` | the session |
+| 4 | **Mission** | auto proposes, the human may edit | when a goal is stated | the task, inherited by sub-agents |
+| 5 | **Rule** | the approval dialog | when something is asked | the pattern and scope chosen |
+
+**Layer 1 — invariants.** Deterministic Go, checked *before* any allow rule, in
+the spirit of Claude Code's protected paths. Not policy, not overridable, not
+reachable by `--yolo`, and not grantable by any dialog:
+
+- writes to `.git/`, `.env`, `~/.ssh/`, `~/.bashrc`, `~/.gitconfig`, the config
+  file itself, or **anything outside the project root**;
+- `rm -rf /` and equivalents, including when hidden inside `$(...)`;
+- `curl … | sh` and every download-and-execute shape;
+- history rewriting on a shared branch (`push --force`, `reset --hard` on `main`);
+- **a sub-agent requesting a capability its parent does not hold** (§21.6).
+
+Invariants prompt even under the most permissive autonomy, and in headless mode
+they do not prompt — they refuse.
+
+**Layer 2 — trust, once per project.** Pi's `/trust`, adapted. On the first
+interactive run in a directory that has no saved decision, exactly one question
+— and then not again for days:
+
+```
+────────────────────────────────────
+ New project
+ ~/dev/orbital-dash
+ git: yes · clean · branch main
+
+ How should I work here?
+
+ > 1. Auto            (recommended)
+      Explore, run safe commands and
+      edit files inside the project.
+   2. Ask before changes
+      Same, but confirm every write.
+   3. Read only
+      Never writes. For auditing.
+   4. Type something...
+
+ ↑↓ · Enter · Esc = 2
+────────────────────────────────────
+```
+
+`Esc` defaults to the *safer* option, never the recommended one. The answer is
+stored per project path (a parent-directory decision covers children, as in Pi)
+and sets the initial autonomy. **This question is what makes "auto is always on"
+defensible**: without it, permanent auto is either unsafe in a freshly cloned
+repository or noisy enough to recreate the original problem.
+
+**Layer 3 — autonomy.** Sticky, changed by `/permissions`, shown permanently in
+the status line. Three values only:
+
+| Autonomy | Reads & safe commands | Project writes | Controlled execution | Sensitive / critical |
+|---|---|---|---|---|
+| `readonly` | run | refuse | ask | refuse |
+| `agile` | run | ask | run | ask |
+| `auto` | run | run | run | ask |
+
+Note what `auto` does **not** do: it never silently performs a sensitive or
+critical action. `auto` is not `--yolo`. `--yolo` remains a separate flag,
+§13-documented, that additionally suppresses the sensitive tier — and still
+cannot touch layer 1.
+
+**Layers 4 and 5** are §21.5 and §21.8 respectively.
+
+### 21.5 Four risk classes, replacing the three Tiers
+
+`Tier{Low,Medium,High}` is too coarse, and its coarseness is defect 1. It is
+replaced by four classes. The naming matters: the second class exists precisely
+because `go test` is **not** read-only — it writes caches, creates build
+artifacts and executes arbitrary code from the test files — yet prompting for it
+is exactly the noise this contract removes.
+
+| Class | Meaning | Examples | `readonly` | `agile` | `auto` |
+|---|---|---|---|---|---|
+| **safe** | no effect the human would want to review | `read_file`, `glob`, `grep`, `ls`, `pwd`, `cat`, `git status`, `git diff`, `git log`, `node -v` | run | run | run |
+| **controlled** | executes code or writes derived artifacts, inside the project, reversible | `go test`, `go build`, `make`, `npm test`, declared tools, project scripts | ask | run | run |
+| **sensitive** | changes source, installs, or reaches the network | `write_file`, `edit_file`, `npm install`, `fetch` | refuse | ask | run |
+| **critical** | irreversible, or visible outside this machine | `git push`, mass deletion, credentials, publishing, external side effects | refuse | ask | **ask** |
+
+**`critical` is asked even in `auto`.** That single row is the difference
+between an autonomous agent and `--yolo`, and it is why `auto` can be the
+permanent default without the human feeling exposed.
+
+`controlled` running unattended in `auto` is a deliberate, bounded risk: the
+class is defined as *inside the project and reversible by git*, which is exactly
+the property that makes an unreviewed `go test` acceptable and an unreviewed
+`npm install -g` not.
+
+### 21.6 Missions: goals with teeth
+
+A mission is the objective plus the constraints that apply while pursuing it. It
+is layer 4, it lives for one task, and **sub-agents inherit it and cannot widen
+it**.
+
+The requirement that produced this: *"sometimes the user does not want the AI to
+use Playwright, but does want it to iterate on a game."* Stating that in prose
+is natural. Enforcing it is the hard part.
+
+> **A constraint stated in natural language must be compiled into a rule the
+> Guard enforces. A constraint that lives only in the prompt is a wish, not a
+> constraint — a model under pressure will rationalize its way past it.**
+
+So ishakat compiles it, and shows the human the compilation exactly once:
+
+```
+────────────────────────────────────
+ Goal        fix orbital-dash
+ Constraint detected: playwright
+
+ Compiling to a rule:
+   bash    *playwright*   deny
+   fetch   *playwright*   deny
+   sub-agents inherit this
+
+ > 1. That's right
+   2. Adjust the rule
+   3. Just a preference
+      (ask me if it comes up)
+────────────────────────────────────
+```
+
+One keystroke. From then on the constraint is enforced by Go, not by the model's
+good intentions. Option 3 exists because some constraints genuinely are soft
+preferences, and saying so honestly is better than pretending everything is
+absolute.
+
+The inverse compiles too: *"use Playwright if you think it helps"* becomes an
+`allow` rule and auto decides freely.
+
+**How manual and automatic combine.** Kiro makes tool scope manual; auto mode
+should be able to decide. Both, in one shape: **auto proposes, the human
+confirms or corrects, and confirming costs one keystroke.**
+
+```
+────────────────────────────────────
+ Tools for this mission
+
+ Proposed from your goal:
+ > 1. As proposed  ✓
+      read · edit · bash(node, npm,
+      git) · dispatch
+   2. Proposed + browser
+      ⚠ ~180 MB download; your phone
+        will struggle
+   3. Everything installed
+      (invariants still apply)
+   4. Pick one by one...
+────────────────────────────────────
+```
+
+Option 1 is auto's decision, preselected. Option 2 is what auto **considered and
+rejected, with the reason shown** — declining to hide the reasoning is what
+makes the human's mental model correct. Option 3 is "allow them all", meaning
+everything already installed; it never silently downloads a 180 MB dependency,
+and invariants still hold. Option 4 is Kiro's manual checkbox list.
+
+**This dialog is not shown for every task.** It appears when the goal contains a
+constraint, when the mission requests a capability outside current policy, or on
+explicit `/plan`. A plain request in `auto` shows none of this.
+
+### 21.7 Ask: one primitive, two producers
+
+The earlier draft proposed building the survey on top of
+`internal/tui/toolapprove.go`. That was backwards, and the inversion is now part
+of the contract:
+
+> **`internal/ask` is the primitive. Tool approval is one of its cases.**
+
+```
+                    ask.Question / ask.Form
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+        the model asks                  the runtime asks
+        ask_user (a tool)               Guard needs a decision
+              │                               │
+              └───────────────┬───────────────┘
+                              ▼
+                          ask.Asker
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+             TUI          serve (WS)       headless
+          a dialog      permission_request  policy decides
+```
+
+**Two producers, not one.** The model calls `ask_user` when it is genuinely
+blocked on a human decision (Claude's `AskUserQuestion`, Pi's `questionnaire`).
+The runtime produces a question when the Guard hits `ask` — and that path must
+**not** depend on the model having chosen to call a tool. Collapsing the two
+would mean a `git push` could slip through whenever the model forgot to ask.
+
+`permissions.Reviewer` becomes a special case of `ask.Asker`, which deletes the
+duplicated round-trip logic currently in `internal/app/toolreview.go` and
+`internal/app/serve.go`. The form is rendered in one place and its 40-column
+behaviour is tested once.
+
+**The form shape**, taken from Pi's `questionnaire.ts`: a tab bar on top,
+`Tab`/`←→` to move between questions, `☑` on answered tabs, a final **Submit**
+tab that summarizes before sending, and a free-text option on every question.
+
+**Ask has a defined answer on every door**, which is where "just ask the user"
+usually breaks in a multi-door agent:
+
+| Door | Ask available? | Behaviour when a decision is needed |
+|---|---|---|
+| TUI | yes | render the form |
+| `serve` | yes, over WS | `permission_request` (already exists) |
+| `-p` headless | **no** | policy decides; if it denies, exit non-zero with the reason |
+| scheduled | **no** | park in the inbox; resume when the human opens it |
+
+Hard rule: **a scheduled task runs with the autonomy it declares itself** — like
+the frontmatter of Pi's `agents/*.md` — and never inherits the interactive
+session's autonomy. Nobody is watching at 03:00.
+
+### 21.8 "Entire tool": when it is correct, and when it is a lie
+
+The approval dialog offers granting a whole tool. Whether that is safe depends
+on one property, and the test is a single question:
+
+> **Does the tool's name determine the verb?**
+
+If yes, granting the tool grants a known thing. If no, granting the tool grants
+an unknown thing wearing a tool's name.
+
+| Tool | Grantable whole? | Why |
+|---|---|---|
+| `read_file`, `glob`, `grep` | **yes, already by default** | fixed verb, no effect |
+| `write_file`, `edit_file` | **yes, within the project root** | fixed verb, git-reversible, destination fenced |
+| `fetch` | **yes, within the egress host list** | fixed verb, destination fenced |
+| `dispatch` | **yes; the child inherits a subset** | fixed verb, never widens (§21.6) |
+| **declared tool (`tool.toml`)** | **yes — the best case** | the command template *is* the verb; no argument can turn it into something else |
+| script tool (rung 2) | only after reading the script once | fixed verb, arbitrary body |
+| **`bash`** | **never** | it has no verb; its argument decides what it does |
+
+So the dialog for `bash` does not hide the option — it shows it disabled, with
+the reason. A control that is missing is a mystery; a control that is visibly
+switched off with an explanation teaches the model of the system:
+
+```
+────────────────────────────────────
+ bash  node tools/bench.js --frames 600
+
+ Family:  node tools/bench.js *
+
+ > 1. Yes, once
+   2. Yes, and the whole family
+      node tools/bench.js *
+      in this project        [edit]
+   3. Yes, and all  node *
+      ⚠ broad: any script on disk
+   4. No · and I'll tell you why
+
+   ─ not available ────────────────
+   ✗ "the whole bash tool"
+     bash has no fixed verb: its
+     argument decides what it does.
+     Granting it whole grants
+     everything. Use a pattern, or
+     crystallize a declared tool.
+────────────────────────────────────
+```
+
+The offered pattern is generalized from the call (Kiro's behaviour) and is
+**editable before accepting**, because a suggested generalization the human
+cannot narrow is worse than no suggestion. Compound commands are split on `;`,
+`&&`, `||`, `|` and each part is classified independently, so
+`go test ./... && git push` cannot ride in on the safety of its first half.
+
+**And this is where §21 meets §19.2.** Approving `node tools/bench.js *` for the
+seventh time is evidence that a capability wants to exist:
+
+> **Permission friction is the sensor that drives the crystallization ladder.
+> A pattern approved often enough should stop being a pattern and become a
+> declared tool — and a declared tool, having a fixed verb, can finally be
+> granted whole and forever.**
+
+That turns the tax into a design signal. Kiro and Claude let pattern rules
+accumulate indefinitely; ishakat converts the repeated pattern into a fixed-verb
+tool, which is a strictly better end state.
+
+### 21.9 The rate-limit amplifier, and the five fixes
+
+**Asking less does not fix this on its own.** The amplification chain is
+independent of how often the dialog appears, and it is live today.
+
+The chain, with the exact code:
+
+1. `internal/app/tools.go` — `ToolRunnerWithGuard` turns a denial into
+   **tool-result data**:
+
+   ```go
+   if err := guard.Authorize(ctx, name, args); err != nil {
+       return engine.ToolResult{Text: err.Error(), IsError: true}, nil
+   }
+   ```
+
+   The comment above it states the intent — *"the model receives the reason and
+   can choose a non-destructive alternative on its next turn"* — and that intent
+   is the bug.
+
+2. `agentloop` sees a normal tool result and iterates. **Each iteration is
+   another provider request**, carrying the whole grown history.
+
+3. The model tries a variation: `ls` → `ls -la` → `find .`. Loop detection does
+   not catch it, because it compares **exact bytes** and only the batch's first
+   call against the previous iteration's last:
+
+   ```go
+   if i == 0 && tc.name == lastToolName && bytesEqual(tc.args, lastToolArgs) { /* stop */ }
+   ```
+
+4. Each variation raises a new dialog; the human, wanting to make progress,
+   approves fast; every fast approval immediately resumes the loop.
+
+5. `retryAfter` in `internal/engine/retry.go` guards **the handshake only** —
+   never mid-stream and never between iterations — so nothing in the loop reads
+   the `Retry-After` the provider is sending. `provider.Error.Retry()` already
+   returns it. The hint exists; the loop never asks.
+
+**The fixes, in priority order.** The ordering is itself part of the contract:
+pacing is last because a sleep that masks a design defect is worse than no fix,
+since it makes the defect harder to observe.
+
+| # | Fix | Where |
+|---|---|---|
+| 1 | **A human denial ends the turn.** Not tool data. `AgentResult.Stopped`, no retry, no alternative hunted automatically. | `internal/app/tools.go`, `internal/engine/agentloop.go` |
+| 2 | **Honour `Retry-After` inside the loop**, with the wait visible as `auto·wait 22s`. | `agentloop.go` + existing `retry.go`/`provider.Error.Retry()` |
+| 3 | **Normalized loop detection**, over the whole batch, not byte-exact and not just `i == 0`. | `agentloop.go`, reusing `internal/evolve/ledger.go`'s pattern normalizer |
+| 4 | **One dialog per batch**, grouped by risk class (§21.10). | `agentloop.go` + `internal/ask` |
+| 5 | *(last, optional)* a small floor between iterations, ~250 ms. | `agentloop.go` |
+
+Fix 1 deserves its own statement, because it inverts the current comment:
+
+> **A denial is a decision, not a hint. When the human says no, the turn ends.
+> Ishakat does not spend API calls searching for a way around a "no". If the
+> human wants an alternative, saying "find another way" starts a new turn —
+> explicitly, and at human speed.**
+
+```
+ ✋ You said no to:
+    bash  rm -rf dist/
+
+ Stopped the turn here. I won't
+ retry or spend calls looking for
+ a way around it. Tell me how you
+ want to proceed.
+```
+
+Fix 2 also buys a real UX improvement for free: `auto·wait 22s` turns *"ishakat
+froze"* into *"ishakat is waiting for the provider, and it says 22 seconds"*.
+
+### 21.10 Batching approvals without flattening risk
+
+Fix 4 above says one dialog per batch, which is correct for the rate limit and
+dangerous if done naively. Grouping `read_file`, `write_file` and `git push`
+behind one **Yes** merges three different risks into one keystroke, and the
+keystroke will be pressed at the speed of the safest item in the group.
+
+So batching is **by risk class, not by batch**:
+
+```
+────────────────────────────────────
+ This step wants to do 6 things
+
+ ✓ 3 safe        run automatically
+ ✓ 2 controlled  run automatically
+
+ ⚠ 1 critical — needs you
+
+   git push origin main
+
+ > 1. Push
+   2. Skip this, do the rest
+   3. Stop here
+────────────────────────────────────
+```
+
+The safe and controlled work is reported, not asked. The critical item keeps its
+own decision, with its own words on screen. **Round-trips collapse; granularity
+survives exactly where it matters.**
+
+### 21.11 Sub-agents: transparent, goal-stated, never widening
+
+Sub-agents are not a mode the human turns on. Auto decides, and the human reads
+what was decided. But the deployment point is fixed, not incidental:
+
+> **Sub-agents are deployed at a turn boundary, before executing a step — never
+> while the model is mid-response. Fan-out needs a plan to fan out from.**
+
+The `plan → exec` transition of §21.1 is where that happens, and nowhere else,
+which makes the rule testable instead of aspirational.
+
+**The swarm rule:** fan out to read, single-file to write.
+
+- Read-only exploration runs in parallel, because nothing collides.
+- Anything that writes runs **serially**, one agent.
+- Verification runs after.
+
+**Every sub-agent states its goal in one sentence.** If the goal cannot be
+written in one sentence, the sub-agent should not exist.
+
+```
+ ⣾ auto·exec · step 2/6 · 3 agents
+────────────────────────────────────
+ ✓ scout-loop        haiku      12s
+   goal: where the O(n²) lives and
+         who calls checkAll()
+   → physics.js:88-131, 1 caller
+
+ ⣾ scout-tuning      haiku      31s
+   goal: every read of RAMP or
+         START_WAVE
+
+ ⣾ bench-base        haiku      18s
+   goal: 3 clean fps measurements
+
+   all three read-only
+   no browser · no network
+────────────────────────────────────
+```
+
+The `no browser · no network` line is the mission constraint of §21.6 being
+**visibly enforced on the children**. A sub-agent can never request a capability
+its parent does not hold; the attempt fails in Go rather than raising a dialog.
+That closes the classic escalation hole where a child asks the human for
+something the parent was denied, and the human — lacking context — grants it.
+
+`internal/app/dispatch.go` already caps recursion at one level by passing a nil
+inner `dispatchRunner`. That stays.
+
+### 21.12 Configuration
+
+Extends §5.2. Rules are `capability · pattern · effect`, and the file **adds to**
+the defaults rather than replacing them (Kiro's behaviour — replacing defaults is
+how a user accidentally re-enables prompting for `ls`).
+
+```toml
+[autonomy]
+default   = "ask"        # for a project with no trust decision
+remember  = true         # persist the trust answer per project
+
+[permissions]
+# effect: allow | ask | deny        scope: session | project | always
+[[permissions.rule]]
+capability = "shell"
+pattern    = "go test *"
+effect     = "allow"
+scope      = "project"
+
+[[permissions.rule]]
+capability = "shell"
+pattern    = "git push *"
+effect     = "ask"          # critical: asked even under auto
+
+[[permissions.rule]]
+capability = "fs_write"
+pattern    = "src/**"
+effect     = "allow"
+scope      = "project"
+
+[loop]
+retry_after_respect = true   # §21.9 fix 2
+min_interval_ms     = 250    # §21.9 fix 5, last resort
+deny_ends_turn      = true   # §21.9 fix 1 — do not set false
+```
+
+`deny_ends_turn = false` exists only so the old behaviour is reachable for
+debugging, and is documented as the shape that caused the outage.
+
+### 21.13 Acceptance: the narrative that must remain true
+
+This contract is satisfied when a real session reads like the following. It is
+written as a scenario rather than a spec because the failure it prevents —
+death by a thousand dialogs — does not show up in unit tests.
+
+Phone, Termux, 40 columns, project `orbital-dash`, a canvas game that stutters.
+
+1. **First run.** One question (§21.4 layer 2): *how should I work here?* The
+   human picks Auto. Not asked again.
+
+2. **"why does the game stutter?"** Seven actions — reads, greps, `git log`,
+   `node -v` — and **zero dialogs**, because all seven are `safe`. Four provider
+   requests for seven actions, because tool calls batch. Diagnosis returned.
+
+3. **"fix the difficulty".** `edit_file` is `sensitive`; under Auto it runs. The
+   status line reads `auto·exec`. No dialog.
+
+4. **A benchmark command.** `node tools/bench.js --frames 600` is `controlled`
+   and runs; the repeated pattern is remembered for §21.8's crystallization
+   offer later.
+
+5. **"fix performance properly, no Playwright."** The constraint compiles to a
+   deny rule (§21.6); the human confirms with one keystroke. Auto plans:
+   `auto·plan`. Three read-only scouts fan out with stated goals, then one agent
+   writes serially (§21.11). The `no browser` constraint is printed on the
+   children.
+
+6. **The provider returns 429.** `auto·wait 22s` appears; ishakat waits exactly
+   what was asked, then resumes (§21.9 fix 2). No retry storm.
+
+7. **"don't touch audio" mid-run.** Applied at the next checkpoint, not
+   mid-write. Sub-agents re-read the policy at their next checkpoint.
+
+8. **`git push`.** `critical`, so it is asked **even under Auto** (§21.5). One
+   dialog, three options.
+
+9. **The seventh benchmark approval.** Ishakat offers to crystallize it into a
+   `tool.toml`; once declared, it can be granted whole (§21.8, §19.2).
+
+10. **`/permissions`.** Shows what is allowed, what is session-only, the
+    invariants as non-editable, and a recently-denied list.
+
+**The measurable claim:** approximately 40 actions, **3 dialogs** — trust, one
+mission constraint, one `git push`. The same session on today's build produces
+roughly 34 dialogs, and those 34 are what rate-limited the provider.
+
+> **The test of this contract is not that ishakat asks less. It is that every
+> question it does ask is one the human is glad to have been asked.**
+
+### 21.14 Implementation order
+
+Steps 26–32 of Phase 2.5. **Step 26 ships first and alone**, because it is a
+live defect with a user-visible consequence and it depends on none of the rest.
+
+| Step | What | Closing criterion |
+|---|---|---|
+| **26** | **Rate limit** (§21.9 fixes 1–3, 5) | a denial ends the turn; a 429 waits the advertised time; `ls`→`ls -la`→`find` is detected as one loop; a test asserts the request count for a denied turn is 1, not N |
+| 27 | `internal/ask` primitive + tab-bar form | one 40-column render test; `toolapprove` reimplemented on top with no behaviour change |
+| 28 | Risk classes replacing `Tier` (§21.5) + read-only command set | `ls`/`git status`/`go build` never prompt; `git push` always does |
+| 29 | Pattern rules + scopes (§21.12), fixing defects 2 and 3 | a session grant for `ls` covers `ls -la`; a grant for `bash` is honoured |
+| 30 | Trust-once (§21.4 layer 2) + autonomy in the status line | second run in a known project asks nothing |
+| 31 | Missions + constraint compiler (§21.6) + inheritance (§21.11) | "no Playwright" produces a deny rule a sub-agent cannot widen |
+| 32 | `ask_user` tool + `/permissions` + phase display | the model can ask a structured question; `/permissions` lists rules and invariants |
+
+Steps 27–29 are the ones that touch `internal/permissions/guard.go`; taking them
+in that order means the Guard is rewritten once, behind an already-migrated
+dialog, rather than twice.
+
+### 21.15 Risks
+
+| Risk | Why it matters here | Mitigation / kill criterion |
+|---|---|---|
+| **Auto normalizes not reading** | if the human stops reading the reports, transparency is theatre | `critical` always stops; the status line is permanent, not a log line |
+| **Risk classes drift** | a tool misfiled as `controlled` silently gains autonomy | the class is declared in the tool manifest and shown by `/tools`; misfiling is visible, not hidden |
+| **The constraint compiler mis-parses** | "no Playwright" compiling to nothing is worse than refusing, because the human believes they are protected | show the compiled rule and require confirmation (§21.6); never compile silently |
+| **Batching trains reflex approval** | one **Yes** covering six things becomes muscle memory | batch by risk class only (§21.10); never group a `critical` with anything |
+| **Pacing hides the real defect** | a 250 ms sleep can mask an amplification bug until it returns at scale | fix 5 is explicitly last and optional (§21.9); it is never the first thing tried |
+| **Trust-once is too coarse** | trusting a project trusts every file that lands in it later, including from a `git pull` | invariants are path-based and survive trust; §20's gates still apply to imported capabilities |
+
+### 21.16 Decisions still open
+
+Recorded here rather than settled, because each changes code and none blocks
+step 26.
+
+1. **`ask_user` as a ninth tool.** §19.1 says the list of eight does not grow.
+   The survey needs a model-callable entry point (Claude and Pi both make it a
+   tool). Either §19.1 gains a documented exception, or `ask_user` ships as a
+   mode of `dispatch`. **Recommendation: the exception**, because hiding a
+   human-interaction primitive inside a delegation tool is worse for the model's
+   understanding than a ninth name.
+
+2. **Whether `--yolo` survives.** With autonomy levels, `--yolo` is nearly
+   redundant; it now means "also skip `sensitive`", still never `critical` or
+   invariants. **Recommendation: keep it, narrowed**, since it is already
+   documented in §13 and scripts may depend on it.
+
+3. **Mission persistence.** Should a mission be written into the session JSONL
+   so `--resume` restores its constraints? **Recommendation: yes** — resuming a
+   session and silently losing "no Playwright" is a safety regression.
+
+4. **The shortcut for autonomy.** `shift+tab` is Claude's and Pi's, but it is
+   unverified on Termux. `/permissions` covers the need without a shortcut.
+   **Recommendation: ship the command first**, add the shortcut once measured on
+   a real device.
+
+---
+
 *Fin del documento.*
-.*
-
- documento.*
-.*
-
