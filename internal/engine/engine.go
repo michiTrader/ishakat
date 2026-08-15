@@ -37,7 +37,7 @@ func (e *Engine) Start(ctx context.Context, req Request, buf *StreamBuf) {
 // and block on its return instead of polling Drain() from a second
 // goroutine.
 func (e *Engine) run(ctx context.Context, req Request, buf *StreamBuf) {
-	ch, err := e.open(ctx, req)
+	ch, err := e.open(ctx, req, nil)
 	if err != nil {
 		if ctx.Err() != nil {
 			buf.finish(nil, true)
@@ -98,7 +98,13 @@ func (e *Engine) run(ctx context.Context, req Request, buf *StreamBuf) {
 // Pulled out of run's body (Step 12) so RunToCompletion — a call to
 // compact_model that has no StreamBuf to write into — gets the exact same
 // backoff/jitter policy instead of a second copy of it.
-func (e *Engine) open(ctx context.Context, req Request) (<-chan Event, error) {
+// notify, when non-nil, is called with the wait and the 0-based attempt
+// immediately before each sleep. It exists because a rate-limited retry can
+// legitimately pause for tens of seconds, and an agent that goes silent for
+// 22 seconds is indistinguishable from one that has hung (step 26, fix 2).
+// It is a parameter rather than an Engine field so that open stays free of
+// per-call mutable state shared across concurrent turns.
+func (e *Engine) open(ctx context.Context, req Request, notify func(wait time.Duration, attempt int)) (<-chan Event, error) {
 	for attempt := 0; ; attempt++ {
 		ch, err := e.stream(ctx, req)
 		if err == nil {
@@ -111,6 +117,9 @@ func (e *Engine) open(ctx context.Context, req Request) (<-chan Event, error) {
 		wait, retry := retryAfter(err, attempt, e.maxRetries)
 		if !retry {
 			return nil, err
+		}
+		if notify != nil {
+			notify(wait, attempt)
 		}
 		select {
 		case <-time.After(wait):
@@ -136,7 +145,7 @@ type Answer struct {
 // autoname's session-title call. Reasoning deltas are dropped: nothing
 // that calls this wants the model's scratch space, only its final text.
 func (e *Engine) RunToCompletion(ctx context.Context, req Request) (Answer, error) {
-	ch, err := e.open(ctx, req)
+	ch, err := e.open(ctx, req, nil)
 	if err != nil {
 		return Answer{}, err
 	}

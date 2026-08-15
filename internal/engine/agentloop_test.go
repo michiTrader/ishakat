@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -1068,4 +1069,592 @@ func TestRunAgentTurnMidStreamError(t *testing.T) {
 	if runner.callCount() != 0 {
 		t.Errorf("runner should not have been called, got %d", runner.callCount())
 	}
+}
+
+// --- §21.9 fix 1: a refusal ends the turn ------------------------------------
+
+// deniedErr is a runner error carrying the Denied() contract, standing in for
+// what internal/permissions produces. It is defined here rather than imported
+// so this test proves the *structural* match works — engine must recognize any
+// error satisfying the interface, not one particular concrete type.
+type deniedErr struct{ msg string }
+
+func (e deniedErr) Error() string { return e.msg }
+func (e deniedErr) Denied() bool  { return true }
+
+// TestRunAgentTurnRefusalEndsTheTurn is closing criterion 1 at the engine
+// level: a turn in which a call is refused makes exactly ONE provider request.
+//
+// The scripted streamer would happily serve a second iteration (the model
+// "reacting" to the refusal). That second request is the defect, not the
+// recovery: each variant the model tries carries the whole grown history, and
+// a real user was rate-limited off their account this way
+// (docs/BUG-rate-limit-amplifier.md).
+func TestRunAgentTurnRefusalEndsTheTurn(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"rm -rf build"}`), doneEvent()},
+		{deltaEvent("Let me try a different way."), doneEvent()},
+	}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("clean the build"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "d"}},
+		Runner: func(context.Context, string, json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, deniedErr{msg: "tool permission denied: user declined bash"}
+		},
+	}, hist)
+
+	// A refusal is a normal outcome of a turn, not an engine failure: the
+	// caller renders Stopped, it does not handle an error.
+	if err != nil {
+		t.Fatalf("a refusal must not surface as an engine error: %v", err)
+	}
+	if got := ss.callCount(); got != 1 {
+		t.Errorf("provider requests = %d, want exactly 1: the loop bought the model another turn to route around the refusal", got)
+	}
+	if res.Stopped == "" {
+		t.Fatal("a refused turn must report why it stopped")
+	}
+	if !strings.Contains(res.Stopped, "declined") {
+		t.Errorf("Stopped = %q, want the refusal's own reason", res.Stopped)
+	}
+	if strings.Contains(res.Text, "different way") {
+		t.Error("the model's second-turn text is present, so a second request was made")
+	}
+
+	// Bug 2: the refused call still needs a tool reply, or the assistant
+	// message keeps an orphaned tool_call and every later request 400s.
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("the refused tool call was left orphaned in history: the next request built from this session would 400 at the provider, permanently")
+	}
+}
+
+// TestRunAgentTurnRefusalClosesOutTheWholeBatch covers the parallel case. A
+// refusal mid-batch must still close out the calls after it, for the same
+// reason the cap and cancellation paths do (Bug 2): one orphaned tool_call
+// poisons the session, not merely the turn.
+func TestRunAgentTurnRefusalClosesOutTheWholeBatch(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{{
+		toolCallEvent("c1", "bash", `{"command":"rm -rf build"}`),
+		toolCallEvent("c2", "grep", `{"q":"foo"}`),
+		toolCallEvent("c3", "grep", `{"q":"bar"}`),
+		doneEvent(),
+	}}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("clean and search"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}, {Name: "grep"}},
+		Runner: func(_ context.Context, name string, _ json.RawMessage) (ToolResult, error) {
+			if name == "bash" {
+				return ToolResult{}, deniedErr{msg: "tool permission denied: user declined bash"}
+			}
+			return ToolResult{Text: "ok"}, nil
+		},
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Error("the turn must stop on the refusal even though later calls in the batch were harmless")
+	}
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("calls after the refused one were left orphaned: the next request would 400 permanently")
+	}
+}
+
+// TestRunAgentTurnOrdinaryToolErrorStillIterates is the guard against fix 1
+// overreaching. An ordinary runner failure must remain data the model reacts
+// to — that is §12bis's error-is-data contract and the reason §3 needs no
+// Planner. If this test ever fails, the loop stopped being reactive.
+func TestRunAgentTurnOrdinaryToolErrorStillIterates(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"make"}`), doneEvent()},
+		{deltaEvent("make is missing; I used go build instead."), doneEvent()},
+	}}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("build it"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "d"}},
+		Runner: func(context.Context, string, json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, errors.New(`exec: "make": executable file not found in $PATH`)
+		},
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("Stopped = %q, want empty: an ordinary tool failure is data, not a reason to end the turn", res.Stopped)
+	}
+	if !strings.Contains(res.Text, "go build instead") {
+		t.Errorf("text = %q, want the model's recovery: the loop must still hand ordinary failures back", res.Text)
+	}
+}
+
+// everyToolCallIsAnswered checks the Bug 2 invariant: every BlockToolCall in
+// the history has a tool message carrying its id.
+func everyToolCallIsAnswered(h *convo.Conversation) bool {
+	answered := map[string]bool{}
+	for _, m := range h.Active() {
+		if m.Role != convo.RoleTool {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.ToolCallID != "" {
+				answered[b.ToolCallID] = true
+			}
+		}
+	}
+	for _, m := range h.Active() {
+		if m.Role != convo.RoleAssistant {
+			continue
+		}
+		for _, b := range m.Blocks {
+			if b.Kind == convo.BlockToolCall && !answered[b.ToolCallID] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// rateLimited is a fake 429: it satisfies retryHint structurally, exactly as
+// provider.Error does, without this package importing internal/provider.
+type rateLimited struct{ wait time.Duration }
+
+func (e rateLimited) Error() string                { return "provider: HTTP 429" }
+func (e rateLimited) Retry() (time.Duration, bool) { return e.wait, true }
+
+// TestRunAgentTurnWaitsOutARateLimitAndResumes is closing criterion 2 of
+// docs/BUG-rate-limit-amplifier.md, scaled down in time: a 429 carrying a
+// Retry-After must make the loop wait out the window and then resume, rather
+// than retrying immediately (which re-trips the limit) or failing the turn
+// (which loses the user's work).
+//
+// The real criterion names 22 seconds. Asserting that literally would put a
+// 22-second sleep in the test suite, so the wait is scaled and what gets
+// pinned is the property, measured three ways: the turn survived, it did not
+// come back early, and the wait was reported rather than silent.
+func TestRunAgentTurnWaitsOutARateLimitAndResumes(t *testing.T) {
+	const window = 250 * time.Millisecond
+
+	var mu sync.Mutex
+	var attempts int
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			return nil, rateLimited{wait: window}
+		}
+		return chanOf(deltaEvent("resumed after the rate limit"), doneEvent()), nil
+	}
+
+	var waits []time.Duration
+	eng := New(stream, 3)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("do the thing"))
+
+	start := time.Now()
+	res, err := eng.RunAgentTurn(context.Background(), Request{Model: "fake/pro"}, AgentOptions{
+		OnWait: func(w time.Duration, attempt int) {
+			mu.Lock()
+			waits = append(waits, w)
+			mu.Unlock()
+		},
+	}, hist)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("a 429 with Retry-After must not fail the turn: %v", err)
+	}
+	if res.Text != "resumed after the rate limit" {
+		t.Errorf("Text = %q, want the answer from after the wait", res.Text)
+	}
+	if attempts != 2 {
+		t.Errorf("provider attempts = %d, want 2 (the 429 then the retry)", attempts)
+	}
+	// The point of fix 2: never earlier than the server permitted.
+	if elapsed < window {
+		t.Errorf("resumed after %v, inside the %v window the server closed", elapsed, window)
+	}
+	// And never silently: a wait long enough to matter must be reportable,
+	// or it is indistinguishable from a hang.
+	if len(waits) != 1 {
+		t.Fatalf("OnWait called %d times, want 1", len(waits))
+	}
+	if waits[0] < window {
+		t.Errorf("OnWait reported %v, less than the server's %v", waits[0], window)
+	}
+}
+
+// TestRunAgentTurnRateLimitNeedsNoWaitHook guards the hook's optionality.
+// OnWait is a courtesy to the user interface, never a condition for correct
+// pacing -- a caller that does not set it (RunToCompletion, the plain text
+// turn) must still wait exactly as long.
+func TestRunAgentTurnRateLimitNeedsNoWaitHook(t *testing.T) {
+	const window = 150 * time.Millisecond
+
+	var mu sync.Mutex
+	var attempts int
+	stream := func(ctx context.Context, req Request) (<-chan Event, error) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			return nil, rateLimited{wait: window}
+		}
+		return chanOf(deltaEvent("fine"), doneEvent()), nil
+	}
+
+	eng := New(stream, 3)
+	hist := &convo.Conversation{}
+	start := time.Now()
+	if _, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{}, hist); err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < window {
+		t.Errorf("resumed after %v without a hook set, inside the %v window", elapsed, window)
+	}
+}
+
+// failingRunner fails every call with the same text, which is the shape of
+// a configuration boundary (shell disabled, a path outside the workspace):
+// the tool never runs and the reason never changes no matter how the model
+// rewrites the arguments.
+type failingRunner struct {
+	mu    sync.Mutex
+	calls int
+	text  string
+}
+
+func (r *failingRunner) run(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	return ToolResult{Text: r.text, IsError: true}, nil
+}
+
+func (r *failingRunner) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestRunAgentTurnVariantHuntStops is closing criterion 3 of
+// docs/BUG-rate-limit-amplifier.md, verbatim: ls -> ls -la -> find . must be
+// recognized as one loop and stop the turn.
+//
+// Byte-exact loop detection cannot see this, because every attempt has
+// different arguments -- that is precisely what makes it a variant hunt
+// rather than a repeat. Measured before the fix, this scenario cost six
+// provider requests, each carrying the whole grown history.
+func TestRunAgentTurnVariantHuntStops(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"ls"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"ls -la"}`), doneEvent()},
+		{toolCallEvent("c3", "bash", `{"command":"find ."}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"du -sh"}`), doneEvent()},
+		{deltaEvent("I give up"), doneEvent()},
+	}}
+	runner := &failingRunner{text: "permission denied: shell is not allowed"}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("show me the files"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{Model: "fake/pro"}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash", Description: "run a shell command"}}, Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("a stopped turn is not an engine failure: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("three identically-failing variants must stop the turn")
+	}
+	if runner.callCount() != 3 {
+		t.Errorf("runner called %d times, want 3 (ls, ls -la, find .)", runner.callCount())
+	}
+	// The cost that matters: the fourth variant was never paid for.
+	if n := ss.callCount(); n != 3 {
+		t.Errorf("provider requests = %d, want 3", n)
+	}
+	// Bug 2: the history must stay valid for the next request.
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("a tool_call was left without a reply; the next request would 400")
+	}
+}
+
+// TestRunAgentTurnDifferentFailuresKeepGoing is the guard against
+// overreach, and it is the reason futility is keyed on the error text rather
+// than on a count of failures. A model working through genuinely different
+// problems -- file not found, then a syntax error, then a missing dependency
+// -- is making progress, and error-is-data (§12bis) is exactly what lets the
+// reactive loop handle that without a Planner (§3). Stopping it would break
+// the mechanism step 26 is supposed to protect.
+func TestRunAgentTurnDifferentFailuresKeepGoing(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{toolCallEvent("c3", "bash", `{"command":"c"}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"d"}`), doneEvent()},
+		{deltaEvent("fixed it"), doneEvent()},
+	}}
+	var n int
+	runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+		n++
+		return ToolResult{Text: fmt.Sprintf("distinct failure number %d", n), IsError: true}, nil
+	}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}}, Runner: runner,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("different failures are progress, not futility; got Stopped=%q", res.Stopped)
+	}
+	if res.Text != "fixed it" {
+		t.Errorf("Text = %q, want the model's eventual answer", res.Text)
+	}
+}
+
+// TestRunAgentTurnSuccessResetsFutility pins the other half of the same
+// judgement: two identical failures followed by a success, then two more
+// identical failures, is not a futile run of four. Without the reset, a long
+// legitimate session that happened to hit the same recoverable error twice
+// in separate places would be cut off partway through.
+func TestRunAgentTurnSuccessResetsFutility(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{toolCallEvent("c3", "ok", `{}`), doneEvent()},
+		{toolCallEvent("c4", "bash", `{"command":"c"}`), doneEvent()},
+		{toolCallEvent("c5", "bash", `{"command":"d"}`), doneEvent()},
+		{deltaEvent("done"), doneEvent()},
+	}}
+	runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+		if name == "ok" {
+			return ToolResult{Text: "worked"}, nil
+		}
+		return ToolResult{Text: "the same error every time", IsError: true}, nil
+	}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools:  []ToolDef{{Name: "bash"}, {Name: "ok"}},
+		Runner: runner,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped != "" {
+		t.Errorf("a success in between must reset the run; got Stopped=%q", res.Stopped)
+	}
+	if res.Text != "done" {
+		t.Errorf("Text = %q, want the model's answer", res.Text)
+	}
+}
+
+// TestRunAgentTurnFutilityStopsMidBatchWithoutOrphans checks fix 3 against
+// Bug 2, the session-poisoning one: when the third identical failure lands
+// mid-batch, every call the loop skipped afterwards still needs a matching
+// tool reply, or the *next* request 400s permanently.
+func TestRunAgentTurnFutilityStopsMidBatchWithoutOrphans(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "bash", `{"command":"a"}`), doneEvent()},
+		{toolCallEvent("c2", "bash", `{"command":"b"}`), doneEvent()},
+		{
+			toolCallEvent("c3", "bash", `{"command":"c"}`), // third identical failure: stops here
+			toolCallEvent("c4", "bash", `{"command":"d"}`), // never runs
+			toolCallEvent("c5", "bash", `{"command":"e"}`), // never runs
+			doneEvent(),
+		},
+	}}
+	runner := &failingRunner{text: "always the same problem"}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools: []ToolDef{{Name: "bash"}}, Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Stopped == "" {
+		t.Fatal("the third identical failure must stop the turn")
+	}
+	if runner.callCount() != 3 {
+		t.Errorf("runner called %d times, want 3 (c4 and c5 must not run)", runner.callCount())
+	}
+	if !everyToolCallIsAnswered(hist) {
+		t.Error("skipped calls were left unanswered; the next request would 400 permanently")
+	}
+}
+
+// TestRunAgentTurnMinIntervalPacesIterations covers fix 5: with a floor set,
+// consecutive provider requests in one turn are spaced by at least that
+// much. The first request is never delayed -- the floor is between requests,
+// not in front of the user's own question.
+func TestRunAgentTurnMinIntervalPacesIterations(t *testing.T) {
+	const floor = 120 * time.Millisecond
+
+	// Distinct arguments: identical ones would trip loop detection and end
+	// the turn early, which would make this test measure the wrong thing.
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "ok", `{"n":1}`), doneEvent()},
+		{toolCallEvent("c2", "ok", `{"n":2}`), doneEvent()},
+		{deltaEvent("finished"), doneEvent()},
+	}}
+	runner := newFakeRunner()
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	start := time.Now()
+	res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+		Tools:       []ToolDef{{Name: "ok"}},
+		Runner:      runner.run,
+		MinInterval: floor,
+	}, hist)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunAgentTurn: %v", err)
+	}
+	if res.Text != "finished" {
+		t.Errorf("Text = %q, want the model's answer", res.Text)
+	}
+	// Three requests means two gaps.
+	if want := 2 * floor; elapsed < want {
+		t.Errorf("three paced requests took %v, want at least %v", elapsed, want)
+	}
+}
+
+// TestRunAgentTurnMinIntervalIsInterruptible keeps the floor from becoming a
+// new way to make the agent feel stuck: esc during the pause must return
+// immediately (§7.4), not after the sleep finishes.
+func TestRunAgentTurnMinIntervalIsInterruptible(t *testing.T) {
+	ss := &scriptedStreamer{scripts: [][]Event{
+		{toolCallEvent("c1", "ok", `{}`), doneEvent()},
+		{deltaEvent("never reached"), doneEvent()},
+	}}
+	runner := newFakeRunner()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+
+	// Cancel while the loop is sitting in the (very long) interval.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	res, err := eng.RunAgentTurn(ctx, Request{}, AgentOptions{
+		Tools:       []ToolDef{{Name: "ok"}},
+		Runner:      runner.run,
+		MinInterval: 10 * time.Second,
+	}, hist)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if !res.Aborted {
+		t.Error("Aborted = false, want true")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("cancellation took %v: the pace floor is not interruptible", elapsed)
+	}
+}
+
+// TestClosingCriterion4 is criterion 4 of docs/BUG-rate-limit-amplifier.md
+// and the reason fix 5 was sequenced last: "regression coverage that fix 5's
+// sleep is *not* what makes criteria 1-3 pass: they must hold with
+// min_interval_ms = 0."
+//
+// The report's warning is that a pacing sleep can mask an amplification
+// defect, making it harder to observe and guaranteeing it returns at scale.
+// This runs the two criteria that count provider requests with the floor
+// explicitly at zero, so the suite can never come to depend on the sleep.
+// MinInterval is zero by default, which is what makes every other test in
+// this file part of the same guarantee; stating it here makes the guarantee
+// deliberate rather than incidental.
+func TestClosingCriterion4(t *testing.T) {
+	t.Run("criterion 1: a refusal costs one request", func(t *testing.T) {
+		ss := &scriptedStreamer{scripts: [][]Event{
+			{toolCallEvent("c1", "write_file", `{"path":"/etc/hosts"}`), doneEvent()},
+			{deltaEvent("this second turn must never be requested"), doneEvent()},
+		}}
+		runner := func(ctx context.Context, name string, args json.RawMessage) (ToolResult, error) {
+			return ToolResult{}, deniedErr{}
+		}
+		eng := New(ss.stream, 0)
+		hist := &convo.Conversation{}
+		res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+			Tools:       []ToolDef{{Name: "write_file"}},
+			Runner:      runner,
+			MinInterval: 0, // explicit: no pacing is involved
+		}, hist)
+		if err != nil {
+			t.Fatalf("RunAgentTurn: %v", err)
+		}
+		if res.Stopped == "" {
+			t.Error("a refusal must end the turn")
+		}
+		if n := ss.callCount(); n != 1 {
+			t.Errorf("provider requests = %d, want 1 with no pacing", n)
+		}
+	})
+
+	t.Run("criterion 3: a variant hunt stops", func(t *testing.T) {
+		ss := &scriptedStreamer{scripts: [][]Event{
+			{toolCallEvent("c1", "bash", `{"command":"ls"}`), doneEvent()},
+			{toolCallEvent("c2", "bash", `{"command":"ls -la"}`), doneEvent()},
+			{toolCallEvent("c3", "bash", `{"command":"find ."}`), doneEvent()},
+			{toolCallEvent("c4", "bash", `{"command":"du -sh"}`), doneEvent()},
+			{deltaEvent("gave up"), doneEvent()},
+		}}
+		runner := &failingRunner{text: "permission denied: shell is not allowed"}
+		eng := New(ss.stream, 0)
+		hist := &convo.Conversation{}
+		res, err := eng.RunAgentTurn(context.Background(), Request{}, AgentOptions{
+			Tools:       []ToolDef{{Name: "bash"}},
+			Runner:      runner.run,
+			MinInterval: 0, // explicit: no pacing is involved
+		}, hist)
+		if err != nil {
+			t.Fatalf("RunAgentTurn: %v", err)
+		}
+		if res.Stopped == "" {
+			t.Error("a variant hunt must stop the turn")
+		}
+		if n := ss.callCount(); n != 3 {
+			t.Errorf("provider requests = %d, want 3 with no pacing", n)
+		}
+	})
 }

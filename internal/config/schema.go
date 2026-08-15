@@ -187,6 +187,19 @@ type Tools struct {
 	// TimeoutS bounds a single tool invocation.
 	TimeoutS int `toml:"timeout_s"`
 
+	// MinIntervalMS is a floor, in milliseconds, on the gap between one
+	// agent-loop iteration's provider request and the next (§21.9 fix 5).
+	// 0 -- the default -- disables it.
+	//
+	// It is off by default on purpose. §21.9's fixes 1-3 remove the
+	// amplification (a denial ends the turn, a server's Retry-After is
+	// honoured as a floor, a hunt of identically-failing variants stops),
+	// and the test suite proves each of those with this at zero. A sleep
+	// that merely hides an amplification defect makes it harder to observe
+	// and returns at scale. Set this only for a provider that rate-limits
+	// on requests per minute, where even a correct agent wants pacing.
+	MinIntervalMS int `toml:"min_interval_ms"`
+
 	Permissions Permissions `toml:"permissions"`
 	Evolve      Evolve      `toml:"evolve"`
 	Egress      Egress      `toml:"egress"`

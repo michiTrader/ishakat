@@ -11,17 +11,30 @@
 // (Step 15). That keeps internal/tools out of engine's import graph, which is
 // what makes Step 21's auto-extension injectable without a refactor.
 //
-// The five semantics below are part of the contract, not implementation
-// details (§12bis): the hard cap, loop detection, cancellation, error-is-data
-// and output truncation. Each is small on its own; together they are what
-// stops a stuck loop from burning real money on an expensive model.
+// The six semantics below are part of the contract, not implementation
+// details (§12bis, §21.9): the hard cap, loop detection, cancellation,
+// error-is-data, output truncation, and — added by step 26 — refusal ends the
+// turn. Each is small on its own; together they are what stops a stuck loop
+// from burning real money on an expensive model.
+//
+// The sixth is the exception that keeps the fourth honest. Error-is-data is
+// what lets the reactive loop handle the unforeseen without a Planner (§3), so
+// it is deliberately broad: a tool that ran and failed, a tool that does not
+// exist, a malformed argument, all of it goes back to the model to react to.
+// A human's refusal is the one case where that is wrong, because the thing
+// blocking progress is a decision rather than a fact about the world, and no
+// further request in this turn can change it. Treating it as data is what
+// turned an over-asking agent into a rate-limited one for a real user
+// (docs/BUG-rate-limit-amplifier.md).
 package engine
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
 )
@@ -32,6 +45,14 @@ import (
 const (
 	defaultMaxToolCalls   = 25
 	defaultMaxOutputBytes = 32 << 10 // 32 KiB
+
+	// maxFutileAttempts is how many consecutive tool calls may fail with the
+	// same error before the loop stops (step 26, fix 3). Three is chosen to
+	// match the shape the bug report actually observed — ls, ls -la, find .
+	// — and because two is a legitimate retry (a transient failure, a
+	// corrected argument) while three identical failures in a row is a model
+	// that has stopped learning from the result.
+	maxFutileAttempts = 3
 )
 
 // AgentOptions configures one agent turn. The zero value is valid: no tools,
@@ -56,6 +77,31 @@ type AgentOptions struct {
 	// that names how much was dropped (§12bis). Zero means the default (32 KiB).
 	// A negative value disables truncation — intended only for tests.
 	MaxOutputBytes int
+
+	// OnWait, when set, is called before the loop sleeps on a retryable
+	// handshake failure — in practice a 429 carrying Retry-After (step 26,
+	// fix 2). The loop already honoured that wait; what it did not do was
+	// say so, and a 22-second silent pause is indistinguishable from a hang
+	// to the person holding the phone. The caller decides how to render it
+	// (§21.2's `auto·wait 22s`); engine only reports the duration.
+	//
+	// It is called from the loop's own goroutine, so an implementation must
+	// not block.
+	OnWait func(wait time.Duration, attempt int)
+
+	// MinInterval is a floor on the time between one iteration's provider
+	// request and the next (step 26, fix 5). Zero -- the default -- disables
+	// it, and that default is deliberate.
+	//
+	// The bug report sequences this last and warns why: "a sleep that hides
+	// an amplification defect is worse than no fix: it makes the defect
+	// harder to observe and it will come back at scale". Fixes 1-3 remove
+	// the amplification itself, and the suite proves they do so with this
+	// at zero (closing criterion 4). What remains for this knob is the
+	// honest case it was always meant for -- a provider whose limit is
+	// requests-per-minute rather than tokens, where even a correct agent
+	// wants a floor -- not the defects above.
+	MinInterval time.Duration
 
 	// BudgetUSD is the maximum estimated provider spend for this session. Zero
 	// disables the budget. Prices are USD per million tokens; unknown prices are
@@ -133,12 +179,47 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 	var lastToolArgs []byte
 	callsThisTurn := 0
 
+	// Futility tracking (step 26, fix 3). Byte-exact loop detection above
+	// catches a model repeating itself verbatim; it cannot catch a model
+	// working its way through variants that all fail the same way — ls,
+	// ls -la, find . — because every attempt has different arguments. That
+	// variant hunt is what the bug report measured, and it costs one full
+	// provider request per attempt.
+	//
+	// The discriminator is deliberately not argument similarity. Normalizing
+	// arguments cannot separate "grep foo then grep bar", which is ordinary
+	// progress, from "ls then ls -la", which is not: both are the same tool
+	// with different arguments. What separates them is whether the attempts
+	// are getting anywhere. An unchanging error means the world is not
+	// responding to the variation, so the next variant will not either.
+	var lastFailure string
+	futileRun := 0
+
+	// lastRequest paces the loop when MinInterval is set (fix 5). It is the
+	// zero Time on the first iteration, so the first request is never
+	// delayed: the floor is between requests, not before the user's own.
+	var lastRequest time.Time
+
 	// The loop. One body = one model turn + its tool executions.
 	for iteration := 0; ; iteration++ {
 		if err := ctx.Err(); err != nil {
 			result.Aborted = true
 			return result, err
 		}
+
+		if opts.MinInterval > 0 && !lastRequest.IsZero() {
+			if since := time.Since(lastRequest); since < opts.MinInterval {
+				// Interruptible: a user hitting esc during the floor must not
+				// have to wait it out (§7.4).
+				select {
+				case <-time.After(opts.MinInterval - since):
+				case <-ctx.Done():
+					result.Aborted = true
+					return result, ctx.Err()
+				}
+			}
+		}
+		lastRequest = time.Now()
 
 		// Rebuild the request each iteration with the grown history. The model
 		// has to see the tool calls and results from the previous iteration;
@@ -147,7 +228,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		iterReq.Messages = history.Active()
 		iterReq.Tools = opts.Tools
 
-		ch, err := e.open(ctx, iterReq)
+		ch, err := e.open(ctx, iterReq, opts.OnWait)
 		if err != nil {
 			if ctx.Err() != nil {
 				result.Aborted = true
@@ -376,6 +457,38 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 					return result, ctx.Err()
 				}
+
+				// A human's refusal is the one runner failure that is NOT data
+				// (§21.9 fix 1, docs/BUG-rate-limit-amplifier.md). Handing it
+				// back to the model invites a variant of the same request, and
+				// every variant is another provider request carrying the whole
+				// grown history — the amplifier that took a real user's account
+				// offline. The turn ends here instead.
+				//
+				//	A denial is a decision, not a hint. When the human says no,
+				//	the turn ends.
+				//
+				// This is not the loop refusing to handle the unforeseen: the
+				// user has already considered the alternatives and declined. If
+				// they want one, "find another way" starts a new turn —
+				// explicitly, and at human speed.
+				//
+				// Returning a nil error (like the cap and loop detection do) is
+				// deliberate: a denial is a normal, expected outcome of a turn,
+				// not a failure of the engine. The caller surfaces Stopped.
+				var denied deniedHint
+				if errors.As(rerr, &denied) && denied.Denied() {
+					result.Stopped = fmt.Sprintf("stopped: %s", rerr.Error())
+					result.Text = text.String()
+					// The refused call still needs its own tool reply before
+					// the rest are closed out, or the assistant message keeps
+					// an orphaned tool_call and the next request 400s (Bug 2).
+					history.Add(convo.NewMessage(convo.RoleTool,
+						convo.ToolErrorBlock(tc.id, tc.name, rerr.Error())))
+					notExecuted(history, toolCalls[i+1:], "the turn ended when permission was refused")
+					return result, nil
+				}
+
 				outText = rerr.Error()
 				isError = true
 			} else {
@@ -393,6 +506,32 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				blk = convo.ToolResultBlock(tc.id, tc.name, outText)
 			}
 			history.Add(convo.NewMessage(convo.RoleTool, blk))
+
+			// Futility (step 26, fix 3), evaluated here because this is the
+			// one place every outcome converges — a tool that ran and
+			// failed, a runner failure, a hallucinated tool — so no path can
+			// slip past it. Any success resets the run: progress anywhere
+			// means the model is still learning from what it gets back.
+			if !isError {
+				futileRun = 0
+				lastFailure = ""
+				continue
+			}
+			if outText == lastFailure {
+				futileRun++
+			} else {
+				futileRun = 1
+				lastFailure = outText
+			}
+			if futileRun >= maxFutileAttempts {
+				result.Stopped = fmt.Sprintf(
+					"stopped after %d consecutive attempts failed identically (last: %s). "+
+						"Trying further variants would not change the result.",
+					futileRun, firstLine(outText))
+				result.Text = text.String()
+				notExecuted(history, toolCalls[i+1:], "the turn ended after repeated identical failures")
+				return result, nil
+			}
 		}
 
 		// Loop: the next iteration reopens with the grown history.
@@ -492,4 +631,19 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// firstLine keeps a Stopped reason to one readable line on a 40-column
+// screen (§2): tool failures are frequently multi-line, and the reason a
+// turn ended should not scroll the user's own question off the display.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i]) + " […]"
+	}
+	const max = 120
+	if len(s) > max {
+		s = s[:max] + " […]"
+	}
+	return s
 }

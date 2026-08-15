@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
@@ -135,6 +136,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		MaxToolCalls:   cfgTools.MaxCallsPerTurn,
 		MaxOutputBytes: cfgTools.MaxOutputBytes,
 		BudgetUSD:      cfgTools.BudgetUSD,
+		MinInterval:    time.Duration(cfgTools.MinIntervalMS) * time.Millisecond,
 	}
 	if cost != nil {
 		opts.InputCostUSD = cost.In
@@ -227,6 +229,14 @@ func runAgentTurnHeadless(
 	if prior := hist.Usage(); prior != nil {
 		opts.SpentUSD = prior.CostUSD
 	}
+	// A rate-limited retry can legitimately pause for tens of seconds. The
+	// loop already waits out the provider's Retry-After window (step 26,
+	// fix 2); saying so is what keeps that from looking like a hang to
+	// someone watching a phone screen. Set here rather than in
+	// buildAgentOptions because this is the layer that owns a sink.
+	opts.OnWait = func(wait time.Duration, attempt int) {
+		s.warn(fmt.Sprintf("rate limited, waiting %s before retrying", roundWait(wait)))
+	}
 
 	engReq := engine.Request{
 		Model:  req.Model,
@@ -297,4 +307,15 @@ func runAgentTurnHeadless(
 	}
 
 	return msg, turnErr
+}
+
+// roundWait renders a retry wait at a granularity a person can read. A raw
+// time.Duration prints as "22.317849213s", which is nine digits of noise on
+// a 40-column phone screen (§2). Sub-second waits keep millisecond
+// resolution because "0s" would be a lie about why the agent paused.
+func roundWait(d time.Duration) time.Duration {
+	if d < time.Second {
+		return d.Round(time.Millisecond)
+	}
+	return d.Round(time.Second)
 }

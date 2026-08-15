@@ -117,3 +117,25 @@ type Streamer func(ctx context.Context, req Request) (<-chan Event, error)
 type retryHint interface {
 	Retry() (wait time.Duration, retryable bool)
 }
+
+// deniedHint is the structural contract an error returned by a ToolRunner can
+// satisfy to say "a human refused this", matched via errors.As exactly like
+// retryHint above — so internal/permissions can express a denial without this
+// package importing it, preserving the same boundary retryHint preserves
+// against internal/provider.
+//
+// This distinction is load-bearing (§21.9, docs/BUG-rate-limit-amplifier.md).
+// Every other failure a runner reports is data: the tool ran and failed, the
+// model sees the error and reacts, and that is the mechanism by which the
+// reactive loop handles the unforeseen (§3). A denial is not that. Nothing
+// ran, and the reason nothing ran is that a person said no. Feeding it back
+// as data invites the model to try a variant, each variant costs another
+// provider request, and that is the amplifier that took a real user's account
+// offline.
+//
+//	A denial is a decision, not a hint. When the human says no, the turn ends.
+type deniedHint interface {
+	// Denied reports that a human (or a policy standing in for one) refused
+	// this call. The error's own message is the reason to show.
+	Denied() bool
+}

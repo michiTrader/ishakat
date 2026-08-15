@@ -344,6 +344,16 @@ func TestServePermissionRoundTrip(t *testing.T) {
 // TestServePermissionRoundTripDenied is the same shape with the opposite
 // human answer, proving a "no" actually reaches the tool loop as a denial
 // -- not merely that a "yes" happens to work.
+//
+// It also pins §21.9 over the socket: a refusal ends the turn. The server
+// scripts a second turn that would say "Understood, not running it." and
+// this test asserts the client never sees it, because the loop never asks
+// for it. What the client gets instead is the tool_result marking the
+// failure, a "warning" event carrying AgentResult.Stopped, and a done with
+// no post-denial answer -- one provider request for the whole exchange.
+//
+// Reaching the model to be told what the human just said is precisely the
+// amplifier this step removes: the denial was the answer.
 func TestServePermissionRoundTripDenied(t *testing.T) {
 	var turn atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -382,9 +392,22 @@ func TestServePermissionRoundTripDenied(t *testing.T) {
 		t.Error("tool_result.Error = false, want true (the human denied it)")
 	}
 
+	// The reason the turn ended has to reach the client, or a denial would
+	// look indistinguishable from the model simply falling silent.
+	warn := readEventUntil(t, conn, "warning")
+	if !strings.Contains(warn.Text, "declined") {
+		t.Errorf("warning.Text = %q, want it to say the user declined", warn.Text)
+	}
+
 	done := readEventUntil(t, conn, "done")
-	if !strings.Contains(done.Text, "Understood, not running it.") {
-		t.Errorf("done.Text = %q, want the model's post-denial answer", done.Text)
+	if strings.Contains(done.Text, "Understood, not running it.") {
+		t.Errorf("done.Text = %q: the loop went back to the model after a refusal", done.Text)
+	}
+
+	// The closing criterion, measured rather than inferred: one prompt plus
+	// one denial must cost exactly one provider request.
+	if n := turn.Load(); n != 1 {
+		t.Errorf("provider requests = %d, want 1; a denied turn must not ask the model again", n)
 	}
 }
 
