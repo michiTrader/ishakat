@@ -334,14 +334,21 @@ type clientMsg struct {
 	AllowSession bool   `json:"allow_session,omitempty"`
 }
 
+// tierName keeps emitting the wire protocol's existing "low"/"medium"/
+// "high" strings rather than renaming them to "safe"/"sensitive"/
+// "critical" -- this is a server-side risk-class rename, not a wire
+// protocol version bump. Safe->"low", Sensitive->"medium", Critical->
+// "high"; Controlled (and any future value) falls into the default
+// "medium", matching Controlled's own review-skipping behavior being
+// closer to Safe in practice but not worth a fifth wire value yet.
 func tierName(t permissions.Tier) string {
 	switch t {
-	case permissions.Low:
+	case permissions.Safe:
 		return "low"
-	case permissions.Medium:
-		return "medium"
-	default:
+	case permissions.Critical:
 		return "high"
+	default:
+		return "medium"
 	}
 }
 

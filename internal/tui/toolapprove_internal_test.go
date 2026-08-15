@@ -19,15 +19,15 @@ func approvalRequest(tier permissions.Tier) permissions.Request {
 	}
 }
 
-func TestNewToolApproveDialogOffersSessionGrantOnlyForMediumRisk(t *testing.T) {
+func TestNewToolApproveDialogOffersSessionGrantOnlyForSensitiveRisk(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		tier        permissions.Tier
 		wantRows    int
 		wantSession bool // whether any row offers AllowSession = true
 	}{
-		{name: "medium", tier: permissions.Medium, wantRows: 3, wantSession: true},
-		{name: "high", tier: permissions.High, wantRows: 2, wantSession: false},
+		{name: "sensitive", tier: permissions.Sensitive, wantRows: 3, wantSession: true},
+		{name: "critical", tier: permissions.Critical, wantRows: 2, wantSession: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dialog := newToolApproveDialog(approvalRequest(tc.tier), make(chan permissions.Decision, 1))
@@ -58,7 +58,7 @@ func TestNewToolApproveDialogOffersSessionGrantOnlyForMediumRisk(t *testing.T) {
 
 func TestToolApproveDialogSelectionWrapsAndCancelDenies(t *testing.T) {
 	reply := make(chan permissions.Decision, 1)
-	dialog := newToolApproveDialog(approvalRequest(permissions.Medium), reply)
+	dialog := newToolApproveDialog(approvalRequest(permissions.Sensitive), reply)
 	if got := dialog.moveSel(-1).sel(); got != len(dialog.options)-1 {
 		t.Fatalf("selection after moving up from first row = %d, want last row", got)
 	}
@@ -87,7 +87,7 @@ func TestToolApproveDialogSelectionWrapsAndCancelDenies(t *testing.T) {
 
 func TestToolApproveDialogSubmitSendsSelectedDecision(t *testing.T) {
 	reply := make(chan permissions.Decision, 1)
-	dialog := newToolApproveDialog(approvalRequest(permissions.Medium), reply).moveSel(1)
+	dialog := newToolApproveDialog(approvalRequest(permissions.Sensitive), reply).moveSel(1)
 	root := Root{mode: ModeToolApprove, keys: Map{Cancel: "esc", Submit: "enter"}, toolApprove: dialog}
 
 	model, _ := root.updateToolApprove(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -112,7 +112,7 @@ func TestToolApproveDialogSubmitSendsSelectedDecision(t *testing.T) {
 // untouched -- this is what keeps read_file/bash/etc. showing exactly the
 // generic JSON dump they showed before this file grew a special case.
 func TestRenderManifestProvenanceGenericToolFallsThrough(t *testing.T) {
-	_, ok := renderManifestProvenance("write_file", approvalRequest(permissions.Medium).Arguments, 60)
+	_, ok := renderManifestProvenance("write_file", approvalRequest(permissions.Sensitive).Arguments, 60)
 	if ok {
 		t.Fatal("write_file must not get the structured manifest view")
 	}
@@ -231,7 +231,7 @@ func TestRenderToolApproveUsesStructuredViewForToolCreate(t *testing.T) {
 			"reason": "declared_recurring_workflow",
 			"sources": []
 		}`),
-		Tier: permissions.High,
+		Tier: permissions.Critical,
 	}
 	root := Root{
 		mode:        ModeToolApprove,

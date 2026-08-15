@@ -318,8 +318,12 @@ func TestServePermissionRoundTrip(t *testing.T) {
 	if req.Name != "bash" {
 		t.Errorf("permission_request.Name = %q, want bash", req.Name)
 	}
-	if req.Tier != "high" {
-		t.Errorf("permission_request.Tier = %q, want high", req.Tier)
+	// "echo hi" is not one of guard.go's recognized safe/controlled/critical
+	// bash prefixes, so bashTier correctly falls back to Sensitive ("medium"
+	// on the wire) rather than the old unconditional High ("high") every
+	// bash command used to get regardless of its argument.
+	if req.Tier != "medium" {
+		t.Errorf("permission_request.Tier = %q, want medium", req.Tier)
 	}
 	if req.ID == "" {
 		t.Fatal("permission_request.ID is empty; the client has nothing to correlate its response with")

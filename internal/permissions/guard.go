@@ -15,13 +15,41 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 )
 
-// Tier describes the possible impact of running a tool.
+// Tier describes the possible impact of running a tool, using the four risk
+// classes §21.5 defines rather than the three-level Low/Medium/High this
+// package started with:
+//
+//   - Safe: no effect worth reviewing (read_file, glob, grep, fetch, and a
+//     bash command §21.3 recognizes as read-only, e.g. "ls", "git status").
+//     Bypasses review entirely.
+//   - Controlled: executes code or writes derived artifacts, but stays
+//     inside the project and is reversible via git (a bash command such as
+//     "go build"/"go test"/"make"). As of this step Controlled also bypasses
+//     review, the same as Safe -- NOT because it is risk-free, but because
+//     §21.5's table only asks it under "readonly" autonomy, and autonomy
+//     (readonly/agile/auto) does not exist in code yet (§21.14 assigns it to
+//     Step 30). Introducing the class now, distinct from Safe, means Step 30
+//     only has to add a readonly branch here -- nothing needs reclassifying.
+//   - Sensitive: changes source, installs something, or reaches the network
+//     (write_file, edit_file, and any bash command not otherwise
+//     classified). This is the one class with session grants, and the class
+//     --yolo turns ask into allow for.
+//   - Critical: irreversible or externally visible (dispatch, and a bash
+//     command shaped like "git push"). Never session-grantable and never
+//     bypassed by --yolo either (§21.16 decision 2) -- Authorize enforces
+//     this with an explicit req.Tier != Critical check in the yolo branch,
+//     not by omission.
+//
+// Safe is the zero value only so the four constants read in increasing risk
+// order; nothing in this package treats the zero value as a default --
+// tierFor's own default (an unrecognized tool) is Critical, not Safe.
 type Tier uint8
 
 const (
-	Low Tier = iota
-	Medium
-	High
+	Safe Tier = iota
+	Controlled
+	Sensitive
+	Critical
 )
 
 // Request is the immutable description shown to an approval UI.
@@ -141,10 +169,14 @@ func New(permissions config.Permissions, yolo bool, reviewer Reviewer) *Guard {
 	}
 }
 
-// Authorize permits a request or returns ErrDenied. A high-tier request cannot
-// receive a session grant, even if the reviewer asks for one.
+// Authorize permits a request or returns ErrDenied. A Critical request can
+// never receive a session grant, and --yolo never bypasses one either
+// (§21.16 decision 2) -- both checks below test req.Tier != Critical
+// explicitly, rather than relying on Critical simply never matching the
+// other branches' conditions.
 func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMessage) error {
-	req := Request{Name: name, Arguments: clone(arguments), Tier: g.tierFor(name)}
+	args := clone(arguments)
+	req := Request{Name: name, Arguments: args, Tier: g.tierFor(name, args)}
 	if reason := g.hardDeny(req); reason != "" {
 		return fmt.Errorf("%w: %s", ErrDenied, reason)
 	}
@@ -153,15 +185,15 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if mode == "deny" {
 		return fmt.Errorf("%w: %s is disabled by configuration", ErrDenied, req.Name)
 	}
-	if g.yolo && (req.Name == "write_file" || req.Name == "edit_file" || req.Name == "bash") {
+	if g.yolo && req.Tier != Critical && (req.Name == "write_file" || req.Name == "edit_file" || req.Name == "bash") {
 		return nil
 	}
-	if mode == "allow" || req.Tier == Low {
+	if mode == "allow" || req.Tier == Safe || req.Tier == Controlled {
 		return nil
 	}
 
 	key := requestKey(req)
-	if req.Tier == Medium && g.hasSessionGrant(key) {
+	if req.Tier == Sensitive && g.hasSessionGrant(key) {
 		return nil
 	}
 	// The three refusals below all end the turn (§21.9 fix 1). They share one
@@ -181,7 +213,7 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if !decision.Allow {
 		return refusal("user declined %s", req.Name)
 	}
-	if decision.AllowSession && req.Tier == Medium && g.permissions.AllowSession {
+	if decision.AllowSession && req.Tier == Sensitive && g.permissions.AllowSession {
 		g.mu.Lock()
 		g.session[key] = struct{}{}
 		g.mu.Unlock()
@@ -193,11 +225,13 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 // eight recognized names (layer 1, §19.1) -- the boundary (*Guard).tierFor
 // and (*Guard).mode use to decide whether a name may ever be supplemented
 // by g.tiers: a manifest naming itself "bash" must never reduce bash's own
-// hardcoded High tier by appearing in g.tiers, so both methods consult
-// g.tiers only for names this reports false for. dispatch (Step 22) is
-// listed here for the identical reason bash is: a manifest or declarative
-// tool naming itself "dispatch" must never be able to reduce the tier a
-// sub-agent's own second tool-calling loop is treated with.
+// tier by appearing in g.tiers, so both methods consult g.tiers only for
+// names this reports false for. dispatch (Step 22) is listed here for the
+// identical reason bash is: a manifest or declarative tool naming itself
+// "dispatch" must never be able to reduce the tier a sub-agent's own second
+// tool-calling loop is treated with. Note that (*Guard).tierFor no longer
+// even needs this function's help for bash specifically -- see that
+// method's own doc comment -- but the guarantee it states remains true.
 func isNativeToolName(name string) bool {
 	switch name {
 	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash", "dispatch":
@@ -209,17 +243,21 @@ func isNativeToolName(name string) bool {
 
 // tierFor is the fixed switch over layer 1's eight native tools -- kept as
 // a free function, not a method, so guard_test.go's existing
-// TestGuardFetchTierIsLow (calling tierFor("fetch") directly) keeps
+// TestGuardFetchTierIsSafe (calling tierFor("fetch") directly) keeps
 // compiling unchanged, and so its own contract (these eight names, no
-// more) can never quietly depend on a Guard's tiers map.
+// more) can never quietly depend on a Guard's tiers map. bash's case here
+// is only a fallback -- (*Guard).tierFor never actually reaches it, since
+// bash is special-cased there before this function is called at all -- but
+// it is kept here (rather than removed) so this switch still reads as the
+// complete eight-tool table §19.1 documents.
 func tierFor(name string) Tier {
 	switch name {
 	case "read_file", "glob", "grep", "fetch":
-		return Low
+		return Safe
 	case "write_file", "edit_file":
-		return Medium
+		return Sensitive
 	case "bash":
-		return High
+		return Sensitive
 	case "dispatch":
 		// dispatch (Step 22) is explicit here for the same reason bash is,
 		// not because the fallthrough default would give a different
@@ -229,22 +267,38 @@ func tierFor(name string) Tier {
 		// write_file or another dispatch), so spelling the case out here
 		// keeps this switch legible as the eight-tool table §19.1 actually
 		// documents, rather than relying on readers to know the default
-		// happens to agree.
-		return High
+		// happens to agree. dispatch has no per-argument "obviously safe"
+		// shape the way bash does (a sub-agent's own Guard and §21.11's
+		// "cannot request a capability the parent lacks" already bound its
+		// behavior), so it stays Critical unconditionally.
+		return Critical
 	default:
 		// Unknown and future tools must be reviewed rather than accidentally
 		// inheriting a low-risk default.
-		return High
+		return Critical
 	}
 }
 
 // tierFor is tierFor(name) supplemented by g.tiers for any name outside
-// the fixed native eight -- Step 20's declarative tools chief among them.
+// the fixed native eight -- Step 20's declarative tools chief among them --
+// with one exception: bash. bash is special-cased here, before even
+// isNativeToolName is consulted, because bash fails §21.8's "entire tool is
+// grantable" test -- its argument, not its name, determines the actual
+// verb ("ls" and "git push" are both invocations of the same tool name).
+// Routing bash straight to bashTier(args) means a manifest can never lower
+// bash's tier via SetToolTiers by construction (g.tiers is never even
+// consulted for it), the same guarantee isNativeToolName used to provide by
+// gating, now provided structurally instead.
+//
 // g.tiers == nil (no caller ever set it, matching every pre-Step-20 Guard
 // and every Guard a caller builds without SetToolTiers) falls through to
-// tierFor's own High default unchanged, so this method is a pure addition:
-// nothing that worked before behaves differently now.
-func (g *Guard) tierFor(name string) Tier {
+// tierFor's own Critical default unchanged, so this method is a pure
+// addition for every other tool: nothing that worked before behaves
+// differently now.
+func (g *Guard) tierFor(name string, args json.RawMessage) Tier {
+	if name == "bash" {
+		return bashTier(args)
+	}
 	if isNativeToolName(name) {
 		return tierFor(name)
 	}
@@ -256,6 +310,131 @@ func (g *Guard) tierFor(name string) Tier {
 	return tierFor(name)
 }
 
+// bashCommand mirrors the shape of tools.bash's own bashArgs{Command,
+// TimeoutSeconds} just enough to read the command string back out of the
+// raw JSON arguments a Reviewer/Guard sees. It is duplicated here rather
+// than imported so internal/permissions does not have to depend on
+// internal/tools to reason about bash's risk -- the same boundary
+// SetToolTiers's own doc comment already describes for declarative tools.
+type bashCommand struct {
+	Command string `json:"command"`
+}
+
+// safeBashPrefixes are read-only commands §21.3's defect 1 asked for: bash
+// was unconditionally High/Sensitive with no notion that some invocations
+// have no effect worth reviewing at all. This list is deliberately short
+// and literal, not an attempt at a general read-only classifier.
+var safeBashPrefixes = []string{
+	"ls", "pwd", "cat",
+	"git status", "git diff", "git log",
+	"node -v", "node --version",
+}
+
+// controlledBashPrefixes execute code or produce derived artifacts (a
+// build's binary, a test binary's coverage output) but stay inside the
+// project and are reversible via git -- §21.5's Controlled class.
+var controlledBashPrefixes = []string{
+	"go test", "go build", "go vet", "make", "npm test",
+}
+
+// criticalBashPrefixes are irreversible or externally visible -- §21.5's
+// Critical class, never bypassed by --yolo and never session-grantable.
+// git push --force* is additionally covered by defaults.toml's shell_deny
+// hard-deny list (checked earlier in Authorize, before tierFor's result is
+// ever consulted), so what this list actually governs is every other,
+// legal form of git push.
+var criticalBashPrefixes = []string{
+	"git push",
+}
+
+// compoundShellMeta are the shell metacharacters that make a command's
+// effect not fully described by its own leading word -- "ls && rm -rf
+// /tmp/x" must not classify as Safe merely because it starts with "ls".
+var compoundShellMeta = []string{";", "&&", "||", "|", "`", "$(", ">", "<"}
+
+// isCompoundShellCommand reports whether cmd contains a shell metacharacter
+// that lets more than one command run, or lets output escape into the
+// filesystem or another process. This is a safety net, not a shell parser:
+// it disqualifies Safe/Controlled classification for anything it cannot be
+// sure about, falling back to Sensitive rather than trying to actually
+// parse the compound shape.
+func isCompoundShellCommand(cmd string) bool {
+	for _, meta := range compoundShellMeta {
+		if strings.Contains(cmd, meta) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWordPrefix reports whether cmd is exactly p, or begins with p followed
+// by a space -- "git status" matches "git status --short" but not
+// "git statusish". Modeled after matches()'s own glob-style simplicity
+// elsewhere in this file, not a shell grammar.
+func hasWordPrefix(cmd string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if cmd == p || strings.HasPrefix(cmd, p+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// containsAfterMeta splits cmd on the sequencing metacharacters ;, |, and &
+// and checks each resulting segment against prefixes -- so "go build ./...
+// && git push origin main" is still caught as containing a Critical shape,
+// even though the whole string does not itself start with "git push". This
+// is checked before isCompoundShellCommand's disqualification so an
+// embedded push is never under-classified as merely Sensitive.
+func containsAfterMeta(cmd string, prefixes []string) bool {
+	segments := strings.FieldsFunc(cmd, func(r rune) bool {
+		return r == ';' || r == '|' || r == '&'
+	})
+	for _, seg := range segments {
+		if hasWordPrefix(strings.TrimSpace(seg), prefixes) {
+			return true
+		}
+	}
+	return false
+}
+
+// bashTier classifies a bash invocation by its command argument, fixing
+// §21.3 defect 1 (bash was unconditionally High/Sensitive with no read-only
+// notion). An unparseable or empty command falls back to Sensitive, bash's
+// prior default behavior, rather than guessing.
+func bashTier(args json.RawMessage) Tier {
+	var parsed bashCommand
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return Sensitive
+	}
+	cmd := strings.TrimSpace(parsed.Command)
+	if cmd == "" {
+		return Sensitive
+	}
+	// Critical is checked first, and checked even inside a compound command,
+	// so an embedded "git push" is never under-classified by the compound
+	// guard below.
+	if hasWordPrefix(cmd, criticalBashPrefixes) || containsAfterMeta(cmd, criticalBashPrefixes) {
+		return Critical
+	}
+	if isCompoundShellCommand(cmd) {
+		return Sensitive
+	}
+	if hasWordPrefix(cmd, safeBashPrefixes) {
+		return Safe
+	}
+	if hasWordPrefix(cmd, controlledBashPrefixes) {
+		return Controlled
+	}
+	return Sensitive
+}
+
+// mode resolves req to one of config.Permissions's three ask/allow/deny
+// knobs. Note this is a separate boundary from Authorize's Safe/Controlled
+// review-skip: if Shell is configured "deny", a Safe or Controlled bash
+// command is still refused here (the config boundary check for "shell
+// disabled entirely" runs before Authorize ever looks at req.Tier), even
+// though the same command would otherwise never have prompted a human.
 func (g *Guard) mode(req Request) string {
 	switch req.Name {
 	// fetch shares Read's policy knob rather than getting its own config
@@ -275,21 +454,20 @@ func (g *Guard) mode(req Request) string {
 		// A name outside the native eight (Step 20's declarative tools
 		// chief among them) reuses the policy knob matching req.Tier --
 		// itself already resolved through g.tierFor, which honors
-		// g.tiers/Tool.Danger() rather than assuming High. Low mirrors
+		// g.tiers/Tool.Danger() rather than assuming Critical. Safe mirrors
 		// read_file's own reasoning (reversible, no destructive local
-		// effect); Medium mirrors write_file's (scoped, undoable); a tool
-		// nothing marked otherwise stays High and reuses Shell's
-		// generally-stricter default. A caller that never calls
-		// SetToolTiers sees req.Tier == High here exactly as before (since
-		// tierFor's own default is High), and defaults.toml ships
-		// shell = "ask", the same value the old bare "ask" default
-		// hardcoded -- so an install that has not touched
-		// [tools.permissions] and has no declarative tools of its own sees
-		// no change at all.
+		// effect); Sensitive mirrors write_file's (scoped, undoable);
+		// Controlled and Critical both fall back to Shell's generally
+		// stricter default. A caller that never calls SetToolTiers sees
+		// req.Tier == Critical here exactly as before (since tierFor's own
+		// default is Critical), and defaults.toml ships shell = "ask", the
+		// same value the old bare "ask" default hardcoded -- so an install
+		// that has not touched [tools.permissions] and has no declarative
+		// tools of its own sees no change at all.
 		switch req.Tier {
-		case Low:
+		case Safe:
 			return g.permissions.Read
-		case Medium:
+		case Sensitive:
 			return g.permissions.Write
 		default:
 			return g.permissions.Shell

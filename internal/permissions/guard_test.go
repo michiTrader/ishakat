@@ -40,7 +40,7 @@ func TestGuardAllowsReadWithoutReview(t *testing.T) {
 	}
 }
 
-func TestGuardAsksThenRemembersExactMediumRequest(t *testing.T) {
+func TestGuardAsksThenRemembersExactSensitiveRequest(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)
 	args := json.RawMessage(`{"path":"notes.txt","content":"hello"}`)
@@ -52,18 +52,22 @@ func TestGuardAsksThenRemembersExactMediumRequest(t *testing.T) {
 	if reviewer.calls != 1 {
 		t.Fatalf("reviewer calls = %d, want 1", reviewer.calls)
 	}
-	if reviewer.request.Tier != Medium {
-		t.Fatalf("tier = %v, want Medium", reviewer.request.Tier)
+	if reviewer.request.Tier != Sensitive {
+		t.Fatalf("tier = %v, want Sensitive", reviewer.request.Tier)
 	}
 }
 
 func TestGuardDoesNotShareApprovalWithDifferentArguments(t *testing.T) {
+	// "echo one"/"echo two" rather than pwd/ls -- ls and pwd are Safe under
+	// bashTier and never reach the reviewer at all, so they cannot exercise
+	// this test's actual point (different arguments must not share an
+	// approval).
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)
-	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"pwd"}`)); err != nil {
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo one"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`)); err != nil {
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo two"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if reviewer.calls != 2 {
@@ -102,11 +106,31 @@ func TestGuardYoloAllowsAskButNotConfiguredDeny(t *testing.T) {
 	}
 }
 
-func TestGuardYoloDoesNotAllowHighRiskTools(t *testing.T) {
+func TestGuardYoloDoesNotAllowCriticalRiskTools(t *testing.T) {
 	guard := New(testPermissions(), true, nil)
 	err := guard.Authorize(context.Background(), "tool_create", json.RawMessage(`{}`))
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("Authorize() error = %v, want ErrDenied", err)
+	}
+}
+
+// TestGuardYoloDoesNotBypassCriticalBashCommand pins §21.16 decision 2 at
+// the bash level specifically: --yolo turning ask into allow for bash
+// commands in general must still stop short of a Critical-shaped one like
+// git push, exactly as it already does for the "tool_create is Critical"
+// case above.
+func TestGuardYoloDoesNotBypassCriticalBashCommand(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), true, reviewer)
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"git push origin main"}`))
+	if err != nil {
+		t.Fatalf("Authorize() error = %v, want nil (reviewer allowed it)", err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1 (yolo must not bypass a Critical bash command)", reviewer.calls)
+	}
+	if reviewer.request.Tier != Critical {
+		t.Fatalf("tier = %v, want Critical", reviewer.request.Tier)
 	}
 }
 
@@ -126,54 +150,54 @@ func TestGuardAllowsFetchWithoutReview(t *testing.T) {
 	}
 }
 
-func TestGuardFetchTierIsLow(t *testing.T) {
-	if got := tierFor("fetch"); got != Low {
-		t.Fatalf("tierFor(%q) = %v, want Low", "fetch", got)
+func TestGuardFetchTierIsSafe(t *testing.T) {
+	if got := tierFor("fetch"); got != Safe {
+		t.Fatalf("tierFor(%q) = %v, want Safe", "fetch", got)
 	}
 }
 
-// TestGuardDispatchTierIsHighAndNative pins dispatch's (Step 22) explicit
-// case in tierFor/isNativeToolName: High like bash, and a manifest naming
-// itself "dispatch" cannot reduce that tier via SetToolTiers, the same
-// guarantee TestGuardSetToolTiersCannotLowerNativeToolTier already checks
-// for bash.
-func TestGuardDispatchTierIsHighAndNative(t *testing.T) {
-	if got := tierFor("dispatch"); got != High {
-		t.Fatalf("tierFor(%q) = %v, want High", "dispatch", got)
+// TestGuardDispatchTierIsCriticalAndNative pins dispatch's (Step 22)
+// explicit case in tierFor/isNativeToolName: Critical like bash's own
+// fallback, and a manifest naming itself "dispatch" cannot reduce that tier
+// via SetToolTiers, the same guarantee
+// TestGuardSetToolTiersCannotLowerNativeToolTier already checks for bash.
+func TestGuardDispatchTierIsCriticalAndNative(t *testing.T) {
+	if got := tierFor("dispatch"); got != Critical {
+		t.Fatalf("tierFor(%q) = %v, want Critical", "dispatch", got)
 	}
 	if !isNativeToolName("dispatch") {
 		t.Fatal("isNativeToolName(\"dispatch\") = false, want true")
 	}
 	guard := New(testPermissions(), false, &recordingReviewer{})
-	guard.SetToolTiers(map[string]Tier{"dispatch": Low})
-	if got := guard.tierFor("dispatch"); got != High {
-		t.Fatalf("guard.tierFor(%q) after SetToolTiers(Low) = %v, want High (native tier cannot be lowered)", "dispatch", got)
+	guard.SetToolTiers(map[string]Tier{"dispatch": Safe})
+	if got := guard.tierFor("dispatch", json.RawMessage(`{}`)); got != Critical {
+		t.Fatalf("guard.tierFor(%q) after SetToolTiers(Safe) = %v, want Critical (native tier cannot be lowered)", "dispatch", got)
 	}
 }
 
-func TestGuardSetToolTiersLowSkipsReview(t *testing.T) {
+func TestGuardSetToolTiersSafeSkipsReview(t *testing.T) {
 	reviewer := &recordingReviewer{}
 	guard := New(testPermissions(), false, reviewer)
-	guard.SetToolTiers(map[string]Tier{"greet": Low})
+	guard.SetToolTiers(map[string]Tier{"greet": Safe})
 	if err := guard.Authorize(context.Background(), "greet", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("Authorize() error = %v", err)
 	}
 	if reviewer.calls != 0 {
-		t.Fatalf("reviewer calls = %d, want 0 (Low tier should never be reviewed)", reviewer.calls)
+		t.Fatalf("reviewer calls = %d, want 0 (Safe tier should never be reviewed)", reviewer.calls)
 	}
 }
 
-func TestGuardSetToolTiersMediumUsesWritePolicy(t *testing.T) {
+func TestGuardSetToolTiersSensitiveUsesWritePolicy(t *testing.T) {
 	permissions := testPermissions()
 	permissions.Write = "allow"
 	reviewer := &recordingReviewer{}
 	guard := New(permissions, false, reviewer)
-	guard.SetToolTiers(map[string]Tier{"greet": Medium})
+	guard.SetToolTiers(map[string]Tier{"greet": Sensitive})
 	if err := guard.Authorize(context.Background(), "greet", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("Authorize() error = %v", err)
 	}
 	if reviewer.calls != 0 {
-		t.Fatalf("reviewer calls = %d, want 0 (write=allow should skip review for a Medium-tier declarative tool)", reviewer.calls)
+		t.Fatalf("reviewer calls = %d, want 0 (write=allow should skip review for a Sensitive-tier declarative tool)", reviewer.calls)
 	}
 }
 
@@ -181,10 +205,13 @@ func TestGuardSetToolTiersCannotLowerNativeToolTier(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
 	guard := New(testPermissions(), false, reviewer)
 	// A manifest (or any caller) naming itself "bash" must not reduce
-	// bash's own hardcoded High tier -- tierFor's fixed switch always
-	// wins for the seven native names.
-	guard.SetToolTiers(map[string]Tier{"bash": Low})
-	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"pwd"}`)); err != nil {
+	// bash's own tier -- (*Guard).tierFor special-cases bash before ever
+	// consulting g.tiers, so SetToolTiers cannot affect it regardless of
+	// what it maps "bash" to. "echo hi" is a Sensitive-shaped command
+	// (not one of the safe/controlled prefixes), so this still reaches
+	// the reviewer as the test expects.
+	guard.SetToolTiers(map[string]Tier{"bash": Safe})
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo hi"}`)); err != nil {
 		t.Fatalf("Authorize() error = %v", err)
 	}
 	if reviewer.calls != 1 {
@@ -196,21 +223,21 @@ func TestGuardNilToolTiersBehavesAsBeforeStep20(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)
 	// SetToolTiers never called: an unrecognized name must still default
-	// to High and still consult the reviewer via Shell's policy, exactly
-	// like TestGuardUnknownToolIsHighAndCannotGainSessionApproval already
-	// pins for the pre-Step-20 case.
+	// to Critical and still consult the reviewer via Shell's policy,
+	// exactly like TestGuardUnknownToolIsCriticalAndCannotGainSessionApproval
+	// already pins for the pre-Step-20 case.
 	if err := guard.Authorize(context.Background(), "future_tool", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if reviewer.calls != 1 {
 		t.Fatalf("reviewer calls = %d, want 1", reviewer.calls)
 	}
-	if reviewer.request.Tier != High {
-		t.Fatalf("tier = %v, want High", reviewer.request.Tier)
+	if reviewer.request.Tier != Critical {
+		t.Fatalf("tier = %v, want Critical", reviewer.request.Tier)
 	}
 }
 
-func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
+func TestGuardUnknownToolIsCriticalAndCannotGainSessionApproval(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
 	guard := New(testPermissions(), false, reviewer)
 	args := json.RawMessage(`{}`)
@@ -221,6 +248,133 @@ func TestGuardUnknownToolIsHighAndCannotGainSessionApproval(t *testing.T) {
 	}
 	if reviewer.calls != 2 {
 		t.Fatalf("reviewer calls = %d, want 2", reviewer.calls)
+	}
+}
+
+// --- Step 28 closing criterion: ls/git status/go build never prompt; git
+// push always does (docs/PLAN.md §21.14) -----------------------------------
+
+// TestClosingCriterionSafeBashCommandsNeverPrompt is this step's own
+// closing criterion, half one: read-only bash commands must never reach a
+// reviewer regardless of configuration mode (testPermissions sets
+// Shell="ask", the strictest ordinary setting).
+func TestClosingCriterionSafeBashCommandsNeverPrompt(t *testing.T) {
+	for _, cmd := range []string{
+		"ls", "ls -la", "pwd", "cat notes.txt",
+		"git status", "git status --short",
+		"git diff", "git diff HEAD~1",
+		"git log", "git log --oneline",
+		"node -v", "node --version",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+			guard := New(testPermissions(), false, reviewer)
+			args, _ := json.Marshal(map[string]string{"command": cmd})
+			if err := guard.Authorize(context.Background(), "bash", args); err != nil {
+				t.Fatalf("Authorize(%q) error = %v", cmd, err)
+			}
+			if reviewer.calls != 0 {
+				t.Errorf("Authorize(%q) called the reviewer %d times, want 0", cmd, reviewer.calls)
+			}
+		})
+	}
+}
+
+// TestClosingCriterionControlledBashCommandsNeverPrompt is the closing
+// criterion's second half: go build (and its siblings) must never prompt
+// either, since Controlled bypasses review the same as Safe until Step 30
+// introduces autonomy (see Tier's own doc comment).
+func TestClosingCriterionControlledBashCommandsNeverPrompt(t *testing.T) {
+	for _, cmd := range []string{
+		"go test ./...", "go build ./...", "go vet ./...", "make", "npm test",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+			guard := New(testPermissions(), false, reviewer)
+			args, _ := json.Marshal(map[string]string{"command": cmd})
+			if err := guard.Authorize(context.Background(), "bash", args); err != nil {
+				t.Fatalf("Authorize(%q) error = %v", cmd, err)
+			}
+			if reviewer.calls != 0 {
+				t.Errorf("Authorize(%q) called the reviewer %d times, want 0", cmd, reviewer.calls)
+			}
+		})
+	}
+}
+
+// TestClosingCriterionGitPushAlwaysAsks is the closing criterion's third
+// clause: git push always asks, under both ordinary and --yolo operation.
+func TestClosingCriterionGitPushAlwaysAsks(t *testing.T) {
+	for _, yolo := range []bool{false, true} {
+		t.Run("", func(t *testing.T) {
+			reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+			guard := New(testPermissions(), yolo, reviewer)
+			err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"git push origin main"}`))
+			if err != nil {
+				t.Fatalf("Authorize() error = %v, want nil", err)
+			}
+			if reviewer.calls != 1 {
+				t.Errorf("yolo=%v: reviewer calls = %d, want exactly 1", yolo, reviewer.calls)
+			}
+			if reviewer.request.Tier != Critical {
+				t.Errorf("yolo=%v: tier = %v, want Critical", yolo, reviewer.request.Tier)
+			}
+		})
+	}
+}
+
+// TestGitPushCannotGainSessionApproval pins §21.16 decision 2's other
+// half: even if a reviewer offers AllowSession for a git push (which a
+// well-behaved UI never should, per tierLabel/newToolApproveDialog only
+// offering that row for Sensitive), Guard itself must not honor it.
+func TestGitPushCannotGainSessionApproval(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
+	guard := New(testPermissions(), false, reviewer)
+	args := json.RawMessage(`{"command":"git push origin main"}`)
+	for i := 0; i < 2; i++ {
+		if err := guard.Authorize(context.Background(), "bash", args); err != nil {
+			t.Fatalf("Authorize() error = %v", err)
+		}
+	}
+	if reviewer.calls != 2 {
+		t.Fatalf("reviewer calls = %d, want 2 (git push must never gain a session grant)", reviewer.calls)
+	}
+}
+
+// TestBashTierClassifiesUnrecognizedCommandsAsSensitive also pins the
+// compound-command safety guard: a naive prefix check would have
+// classified "ls && rm -rf /tmp/x" as Safe merely because it starts with
+// "ls" -- this table caught that real bug during development.
+func TestBashTierClassifiesUnrecognizedCommandsAsSensitive(t *testing.T) {
+	for _, cmd := range []string{
+		"echo hi",
+		"npm install left-pad",
+		"ls && rm -rf /tmp/x",
+		"lsof -i",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": cmd})
+			if got := bashTier(args); got != Sensitive {
+				t.Errorf("bashTier(%q) = %v, want Sensitive", cmd, got)
+			}
+		})
+	}
+}
+
+// TestBashTierCatchesGitPushAfterSequencing pins containsAfterMeta: a git
+// push embedded after a sequencing operator must still classify as
+// Critical, not fall through to Sensitive via the compound-command guard.
+func TestBashTierCatchesGitPushAfterSequencing(t *testing.T) {
+	for _, cmd := range []string{
+		"go build ./... && git push origin main",
+		"echo done; git push origin main",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"command": cmd})
+			if got := bashTier(args); got != Critical {
+				t.Errorf("bashTier(%q) = %v, want Critical", cmd, got)
+			}
+		})
 	}
 }
 
@@ -249,7 +403,10 @@ func TestUserDeclineEndsTheTurn(t *testing.T) {
 	reviewer := &recordingReviewer{decision: Decision{Allow: false}}
 	guard := New(testPermissions(), false, reviewer)
 
-	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	// "echo hi", not "ls" -- ls is Safe under bashTier and never reaches
+	// the reviewer, so it cannot exercise this test's point (a decline
+	// must end the turn).
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo hi"}`))
 	if err == nil {
 		t.Fatal("a declined request must return an error")
 	}
@@ -266,7 +423,7 @@ func TestNoReviewerEndsTheTurn(t *testing.T) {
 	// turn can produce an approval, so retrying variants is pure cost.
 	guard := New(testPermissions(), false, nil)
 
-	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo hi"}`))
 	if err == nil {
 		t.Fatal("no reviewer must refuse an ask-tier request")
 	}
@@ -278,7 +435,7 @@ func TestNoReviewerEndsTheTurn(t *testing.T) {
 func TestReviewerFailureEndsTheTurn(t *testing.T) {
 	guard := New(testPermissions(), false, failingReviewer{})
 
-	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls"}`))
+	err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"echo hi"}`))
 	if err == nil {
 		t.Fatal("a failing reviewer must refuse")
 	}
