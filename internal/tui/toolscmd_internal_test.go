@@ -544,6 +544,154 @@ func (f *fakeToolsListerCapturingEdit) EditTool(name, oldString, newString strin
 	return f.fakeToolsLister.EditTool(name, oldString, newString, replaceAll)
 }
 
+// typeToolsCreateAndEnter feeds "/tools create <name>", then each of
+// bodyLines (one "key: value" pair or "--force" per line), each
+// terminated by ctrl+j -- the same literal-newline-without-submitting
+// mechanism typeToolsEditAndEnter's own doc comment explains, needed
+// here for the identical reason: parseToolsCreateArg's own body is
+// multi-line, and typeAndEnter alone would submit prematurely on the
+// first literal "\n" it saw. Enter is pressed exactly once at the end.
+func typeToolsCreateAndEnter(m tea.Model, firstLine string, bodyLines ...string) tea.Model {
+	for _, r := range firstLine {
+		m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+	}
+	for _, line := range bodyLines {
+		m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+		for _, r := range line {
+			m, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+		}
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	return m
+}
+
+func TestSlashToolsCreateReportsSuccess(t *testing.T) {
+	tl := &fakeToolsLister{createOK: map[string]string{
+		"weather": "created \"weather\" (danger: low, state: unverified). Run tool_probe to verify it before it can be used.",
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsCreateAndEnter(m, "/tools create weather",
+		"description: fetches the weather",
+		"url: https://example.com/weather",
+		"reason: needed it a lot",
+	)
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected one notice entry, got %d: %v", len(got.transcript), got.transcript)
+	}
+	text := got.transcript[0].text
+	if !strings.Contains(text, "tools create") || !strings.Contains(text, "unverified") {
+		t.Errorf("notice should report the create status, got %q", text)
+	}
+}
+
+func TestSlashToolsCreateGate1RefusalReportedInline(t *testing.T) {
+	tl := &fakeToolsLister{createErr: map[string]error{
+		"weather": errors.New("gate 1 refused \"weather\":\n- duplicate: 92% similar to existing tool \"forecast\" (threshold 80%) -- extend it instead of creating a sibling"),
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsCreateAndEnter(m, "/tools create weather",
+		"description: fetches the weather",
+		"url: https://example.com/weather",
+		"reason: needed it a lot",
+	)
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "gate 1 refused") {
+		t.Errorf("notice should report the gate 1 refusal, got %q", got.transcript[0].text)
+	}
+}
+
+func TestSlashToolsCreateWithNoneConfiguredSaysSo(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsCreateAndEnter(m, "/tools create weather",
+		"description: fetches the weather",
+		"url: https://example.com/weather",
+		"reason: needed it a lot",
+	)
+
+	root := m.(Root)
+	if !strings.Contains(root.transcript[0].text, "no hay herramientas de capa 2 configuradas") {
+		t.Errorf("notice should explain tools are not configured, got %q", root.transcript[0].text)
+	}
+}
+
+func TestSlashToolsCreateForceFlagPassesThrough(t *testing.T) {
+	var gotForce bool
+	tl := &fakeToolsListerCapturingCreate{fakeToolsLister: &fakeToolsLister{
+		createOK: map[string]string{"weather": "created \"weather\" (danger: low, state: unverified). Run tool_probe to verify it before it can be used."},
+	}, onCreate: func(name, description, url, method, reason string, sources []string, force bool) {
+		gotForce = force
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsCreateAndEnter(m, "/tools create weather",
+		"description: fetches the weather",
+		"url: https://example.com/weather",
+		"reason: an operator typed --force",
+		"--force",
+	)
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "tools create") {
+		t.Fatalf("notice should report the create status, got %q", got.transcript[0].text)
+	}
+	if !gotForce {
+		t.Error("expected --force to be passed through as true")
+	}
+}
+
+func TestSlashToolsCreateWithoutForceFlagPassesThroughFalse(t *testing.T) {
+	var gotForce = true
+	tl := &fakeToolsListerCapturingCreate{fakeToolsLister: &fakeToolsLister{
+		createOK: map[string]string{"weather": "created \"weather\" (danger: low, state: unverified). Run tool_probe to verify it before it can be used."},
+	}, onCreate: func(name, description, url, method, reason string, sources []string, force bool) {
+		gotForce = force
+	}}
+	root := withToolsLister(newHeadlessRoot(), tl)
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeToolsCreateAndEnter(m, "/tools create weather",
+		"description: fetches the weather",
+		"url: https://example.com/weather",
+		"reason: an ordinary reason",
+	)
+
+	got := m.(Root)
+	if !strings.Contains(got.transcript[0].text, "tools create") {
+		t.Fatalf("notice should report the create status, got %q", got.transcript[0].text)
+	}
+	if gotForce {
+		t.Error("expected force to be passed through as false without a --force line")
+	}
+}
+
+// fakeToolsListerCapturingCreate wraps fakeToolsLister to additionally
+// observe CreateTool's own arguments -- mirrors
+// fakeToolsListerCapturingEdit's own doc comment and reasoning, for the
+// same narrow purpose (only these two tests above need to inspect
+// CreateTool's own arguments this closely).
+type fakeToolsListerCapturingCreate struct {
+	*fakeToolsLister
+	onCreate func(name, description, url, method, reason string, sources []string, force bool)
+}
+
+func (f *fakeToolsListerCapturingCreate) CreateTool(name, description, url, method, reason string, sources []string, force bool) (string, error) {
+	f.onCreate(name, description, url, method, reason, sources, force)
+	return f.fakeToolsLister.CreateTool(name, description, url, method, reason, sources, force)
+}
+
 func TestParseToolsReviveArg(t *testing.T) {
 	cases := []struct {
 		args     string
@@ -659,6 +807,147 @@ func TestParseToolsEditArg(t *testing.T) {
 					c.wantName, c.wantOld, c.wantNew, c.wantReplaceAll)
 			}
 		})
+	}
+}
+
+func TestParseToolsCreateArg(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       string
+		wantFields toolsCreateFields
+		wantForce  bool
+		wantOK     bool
+	}{
+		{
+			name: "all fields present, in order",
+			args: "create weather\ndescription: fetches the weather\nurl: https://example.com/weather\nmethod: POST\nreason: needed it a lot\nsources: https://a.example.com, https://b.example.com",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "fetches the weather",
+				url: "https://example.com/weather", method: "POST",
+				reason:  "needed it a lot",
+				sources: []string{"https://a.example.com", "https://b.example.com"},
+			},
+			wantOK: true,
+		},
+		{
+			name: "out-of-order fields",
+			args: "create weather\nreason: needed it\nurl: https://example.com/weather\ndescription: fetches the weather",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "fetches the weather",
+				url: "https://example.com/weather", reason: "needed it",
+			},
+			wantOK: true,
+		},
+		{
+			name: "some fields omitted (method/sources absent)",
+			args: "create weather\ndescription: d\nurl: https://example.com/x\nreason: r",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "d", url: "https://example.com/x", reason: "r",
+				sources: nil,
+			},
+			wantOK: true,
+		},
+		{
+			name: "trailing --force line",
+			args: "create weather\ndescription: d\nurl: https://example.com/x\nreason: r\n--force",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "d", url: "https://example.com/x", reason: "r",
+			},
+			wantForce: true,
+			wantOK:    true,
+		},
+		{
+			name: "sources with extra whitespace and an empty entry",
+			args: "create weather\ndescription: d\nurl: https://example.com/x\nreason: r\nsources:  https://a.example.com ,  , https://b.example.com ",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "d", url: "https://example.com/x", reason: "r",
+				sources: []string{"https://a.example.com", "https://b.example.com"},
+			},
+			wantOK: true,
+		},
+		{
+			name: "empty sources value yields an empty, non-nil slice",
+			args: "create weather\ndescription: d\nurl: https://example.com/x\nreason: r\nsources: ",
+			wantFields: toolsCreateFields{
+				name: "weather", description: "d", url: "https://example.com/x", reason: "r",
+				sources: []string{},
+			},
+			wantOK: true,
+		},
+		{name: "empty args", args: "", wantOK: false},
+		{name: "just the word create, nothing else", args: "create", wantOK: false},
+		{name: "name with no body at all", args: "create weather", wantOK: false},
+		{name: "name with embedded whitespace is rejected", args: "create weather now\ndescription: d", wantOK: false},
+		{name: "different first word falls through", args: "edit weather\ndescription: d", wantOK: false},
+		{name: "createx falls through (whole-word match only)", args: "createx weather\ndescription: d", wantOK: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fields, force, ok := parseToolsCreateArg(c.args)
+			if ok != c.wantOK {
+				t.Fatalf("parseToolsCreateArg(%q) ok = %v, want %v", c.args, ok, c.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if force != c.wantForce {
+				t.Errorf("parseToolsCreateArg(%q) force = %v, want %v", c.args, force, c.wantForce)
+			}
+			if fields.name != c.wantFields.name ||
+				fields.description != c.wantFields.description ||
+				fields.url != c.wantFields.url ||
+				fields.method != c.wantFields.method ||
+				fields.reason != c.wantFields.reason ||
+				!equalStringSlices(fields.sources, c.wantFields.sources) {
+				t.Errorf("parseToolsCreateArg(%q) fields = %+v, want %+v", c.args, fields, c.wantFields)
+			}
+		})
+	}
+}
+
+// equalStringSlices compares two []string for equality, treating a nil
+// slice and an empty-but-non-nil slice as equal -- parseToolsCreateArg's
+// own fields.sources is nil when the "sources:" line is entirely absent
+// (never set) and non-nil-but-empty when it is present with an empty
+// value, a distinction this test does not need to assert on for every
+// case (only "empty sources value yields an empty, non-nil slice" above
+// checks that distinction directly, by comparing len() rather than via
+// this helper).
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestParseToolsCreateArgSourcesNilVsEmptyDistinction confirms
+// parseToolsCreateArg's own doc comment on ToolsLister.CreateTool's
+// nil-vs-empty-but-present sources distinction (mandatory provenance:
+// "did not even address provenance" vs "explicitly declared none") is
+// preserved at the parsing layer too, not only inside ToolsLister.
+// TestParseToolsCreateArg's own table test above deliberately does not
+// check this distinction (equalStringSlices treats nil and empty as
+// equal) since only these two cases care about it directly.
+func TestParseToolsCreateArgSourcesNilVsEmptyDistinction(t *testing.T) {
+	absent, _, ok := parseToolsCreateArg("create weather\ndescription: d\nurl: https://example.com/x\nreason: r")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if absent.sources != nil {
+		t.Errorf("sources = %#v, want nil when the \"sources:\" line is entirely absent", absent.sources)
+	}
+
+	present, _, ok := parseToolsCreateArg("create weather\ndescription: d\nurl: https://example.com/x\nreason: r\nsources: ")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if present.sources == nil || len(present.sources) != 0 {
+		t.Errorf("sources = %#v, want a non-nil, empty slice when \"sources:\" is present with no value", present.sources)
 	}
 }
 
