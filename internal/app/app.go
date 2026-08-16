@@ -450,9 +450,16 @@ func missionGuardOrNil(g *permissions.Guard) tui.MissionGuard {
 // own "nil means never fires" degradation (Root.missionPolicy's own doc
 // comment) is only ever exercised by this package's own tests, not by a
 // real run.
+//
+// FetchAllowed is perm.Read != "deny", not perm.Shell — guard.go's own
+// mode() already established that fetch shares Read's policy knob, not
+// Shell's ("fetch shares Read's policy knob rather than getting its own
+// config key"), so this bridge asks the identical question of the
+// identical knob Authorize itself consults for a real fetch call.
 func missionPolicyOf(perm config.Permissions) *mission.Policy {
 	return &mission.Policy{
 		ShellAllowed: perm.Shell != "deny",
 		ShellDeny:    perm.ShellDeny,
+		FetchAllowed: perm.Read != "deny",
 	}
 }

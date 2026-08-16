@@ -331,6 +331,22 @@ func TestCheckToolPolicyFallsThroughWhenPolicyNeverWired(t *testing.T) {
 	}
 }
 
+func TestCheckToolPolicyOpensModeToolScopeWhenFetchCollidesWithPolicy(t *testing.T) {
+	// Step 31 part 10: the fetch-capability half of the collision check
+	// (mission.Policy.FetchAllowed), exercised through the real
+	// checkToolPolicy seam rather than only mission.OutsidePolicy's own
+	// unit tests -- shell is allowed here, only fetch is off, so this
+	// pins down that the bash half alone cannot mask a fetch collision.
+	r := newToolPolicyRoot(&mission.Policy{ShellAllowed: true, FetchAllowed: false})
+	next, ok := r.checkToolPolicy("use Playwright if you think it helps")
+	if !ok {
+		t.Fatal("checkToolPolicy returned ok=false for a goal colliding only on the fetch half of policy")
+	}
+	if next.mode != ModeToolScope {
+		t.Fatalf("mode = %v, want ModeToolScope", next.mode)
+	}
+}
+
 func TestCheckToolPolicyDoesNotDoubleUpWithANegatedConstraint(t *testing.T) {
 	// A goal that already negates the keyword is checkMission's own
 	// trigger (HasDeny()) — OutsidePolicy itself already excludes a
