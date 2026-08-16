@@ -204,8 +204,45 @@ type Guard struct {
 	// had, so a caller that ignores this field sees no behavior change.
 	tiers map[string]Tier
 
+	// missionDeny is §21.4 layer 4 (Mission, Step 31): the compiled
+	// deny-only half of internal/mission.Compile's own output, in a shape
+	// checked once inside hardDeny -- see that method's own doc comment
+	// for exactly where in Authorize's sequence this runs, and why there,
+	// not later. Read with the mutex held, the same as autonomy and
+	// session, because AddMissionRules (a mid-session §21.6 confirmation
+	// dialog, or a resumed session re-applying §21.16 decision 3's own
+	// "constraints are re-applied before the first tool call") can run
+	// concurrently with an in-flight Authorize call the same way
+	// SetAutonomy already can. nil (every pre-Step-31 caller, and every
+	// Guard a caller builds without ever calling AddMissionRules) means
+	// "no mission constraint": hardDeny's own mission check is then a
+	// no-op, so a caller that ignores this field sees no behavior change.
+	missionDeny []MissionRule
+
 	mu      sync.Mutex
 	session map[string]struct{}
+}
+
+// MissionRule is one Guard-enforceable constraint compiled from a goal's
+// natural language by internal/mission.Compile (§21.6) -- kept as this
+// package's own type, not a shared one with internal/mission, so neither
+// package has to import the other (§6.1's own boundary: a caller in
+// internal/app, the one package already trusted to bridge types across a
+// seam, converts a mission.Rule into a MissionRule field-by-field). Only
+// Effect == "deny" rules are meant to ever reach AddMissionRules -- see
+// that method's own doc comment for why an "allow" mission.Rule is never
+// converted into one of these at all.
+type MissionRule struct {
+	// Capability is "bash" or "fetch" -- the two native tools whose
+	// argument can name an arbitrary external technology by string,
+	// matching internal/mission.Rule.Capability's own doc comment on why
+	// only these two appear in a compiled constraint.
+	Capability string
+	// Pattern is matched against the command (for "bash") or url (for
+	// "fetch") argument using the same matches() glob engine hardDeny
+	// already uses for ShellDeny/WriteDeny, so "*playwright*" behaves
+	// identically to how a shell_deny pattern already would.
+	Pattern string
 }
 
 // SetToolTiers registers the Tier a tool name outside tierFor's own fixed
@@ -247,6 +284,57 @@ func (g *Guard) Autonomy() Autonomy {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.autonomy
+}
+
+// AddMissionRules appends rules to the Guard's mission-deny list (§21.4
+// layer 4, Step 31), following SetToolTiers'/SetAutonomy's own late-
+// binding shape: a Guard exists before a goal has been stated (a mission
+// is scoped to one task, not the whole session), so this is a call made
+// once §21.6's confirmation dialog resolves, not a constructor argument.
+//
+// Appends, never replaces -- a second mission stated later in the same
+// session (§21.16 decision 3's own "don't touch audio mid-run" narrative
+// example) narrows further, it does not un-narrow an earlier constraint,
+// matching §21.4's own table: "a lower layer can never widen a higher
+// one". There is deliberately no RemoveMissionRules: a mission constraint
+// is meant to hold until the session itself ends, the same "sticky until
+// something more authoritative changes it" shape autonomy has, not
+// something a tool call can quietly undo mid-turn.
+//
+// This method takes []MissionRule, not a mission.Mission or
+// mission.Constraint directly, so this package never imports
+// internal/mission (§6.1): the caller (internal/app) is the one place
+// that both compiles a goal and holds a *Guard, and it converts the
+// "deny"-effect half of a compiled Mission into MissionRule values one
+// field at a time before calling this. An "allow"-effect
+// mission.Constraint is never converted and never reaches this method at
+// all -- §21.6's inverse example ("use Playwright if you think it helps")
+// means auto decides freely, which is simply the absence of a deny rule,
+// not a second kind of active grant this package would need machinery
+// for.
+//
+// Safe to call while another goroutine is inside Authorize, guarded by
+// the same mutex autonomy and session grants already use.
+func (g *Guard) AddMissionRules(rules []MissionRule) {
+	if len(rules) == 0 {
+		return
+	}
+	g.mu.Lock()
+	g.missionDeny = append(g.missionDeny, rules...)
+	g.mu.Unlock()
+}
+
+// MissionRules reports the mission-deny rules currently in effect -- used
+// by a caller wanting to display "no browser · no network" the way
+// §21.11's own sub-agent mockup shows it on the children, and by tests
+// asserting a dispatched sub-agent's *Guard (the very same pointer
+// newSubAgentRunner threads through, see internal/app/dispatch.go's own
+// doc comment on why the parent's *permissions.Guard is reused as-is, not
+// rebuilt) carries the parent's own mission forward.
+func (g *Guard) MissionRules() []MissionRule {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]MissionRule(nil), g.missionDeny...)
 }
 
 // New creates a guard for one application session. yolo changes only ask into
@@ -598,10 +686,32 @@ func (g *Guard) mode(req Request) string {
 	}
 }
 
+// hardDeny checks, in order: configured write_deny (any tool with a path
+// argument), configured shell_deny (bash only), then this session's own
+// mission-deny rules (§21.4 layer 4, Step 31) for both bash and fetch.
+// Mission rules are checked last among the three not because they matter
+// less -- they run before mode, before the Readonly gate, before --yolo,
+// and before the reviewer, exactly like write_deny/shell_deny already do,
+// which is what "a lower layer can never widen a higher one" (§21.4)
+// actually requires here -- but because config's own deny lists are a
+// project-wide, human-authored floor that should be readable in isolation
+// from whatever mission happens to be active this task, the same way
+// reading this function top to bottom should not require knowing whether
+// a mission is even in play.
+//
+// A sub-agent's *Guard is the very same pointer as its parent's (see
+// internal/app/dispatch.go's newSubAgentRunner doc comment), so a mission
+// rule appended here is enforced on a child's own tool calls automatically
+// -- inheritance is a consequence of pointer identity, not a second
+// mechanism that could itself have a bug letting a child widen past its
+// parent (§21.11's own "cannot request a capability the parent lacks"
+// rule, and layer 1's own identical invariant, both fall out of this for
+// free rather than needing their own enforcement path).
 func (g *Guard) hardDeny(req Request) string {
 	var input struct {
 		Path    string `json:"path"`
 		Command string `json:"command"`
+		URL     string `json:"url"`
 	}
 	if err := json.Unmarshal(req.Arguments, &input); err != nil {
 		return "tool arguments are not valid JSON"
@@ -620,7 +730,48 @@ func (g *Guard) hardDeny(req Request) string {
 			}
 		}
 	}
+	if reason := g.missionHardDeny(req.Name, input.Command, input.URL); reason != "" {
+		return reason
+	}
 	return ""
+}
+
+// missionHardDeny matches value (the bash command, or the fetch url) for
+// name against every mission-deny rule whose Capability equals name,
+// reusing the exact glob engine (matches, matchesPath's own sibling)
+// hardDeny's config-driven checks above already use, so a mission-compiled
+// "*playwright*" pattern behaves identically to a hand-written
+// shell_deny entry of the same text -- no second pattern language for a
+// human or a test to learn.
+func (g *Guard) missionHardDeny(name, command, url string) string {
+	g.mu.Lock()
+	rules := g.missionDeny
+	g.mu.Unlock()
+	for _, rule := range rules {
+		if rule.Capability != name {
+			continue
+		}
+		value := command
+		if name == "fetch" {
+			value = url
+		}
+		if matches(rule.Pattern, value) {
+			return fmt.Sprintf("%s matches a mission constraint (%s %s deny)", describeMissionValue(name, value), rule.Capability, rule.Pattern)
+		}
+	}
+	return ""
+}
+
+// describeMissionValue names the value hardDeny's mission message quotes,
+// kept as its own tiny function only so the message reads the same
+// regardless of which capability triggered it ("command %q" for bash,
+// "url %q" for fetch) without missionHardDeny's own loop needing an
+// if/else at the call site.
+func describeMissionValue(name, value string) string {
+	if name == "fetch" {
+		return fmt.Sprintf("url %q", value)
+	}
+	return fmt.Sprintf("command %q", value)
 }
 
 func (g *Guard) hasSessionGrant(key string) bool {

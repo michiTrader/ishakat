@@ -172,3 +172,31 @@ func TestAskStaysPresentationFree(t *testing.T) {
 		}
 	}
 }
+
+// TestMissionStaysPureAndDoesNotImportPermissions protects §21.6's own
+// package boundary (internal/mission/mission.go's own doc comment):
+// mission.Rule and permissions.MissionRule are deliberately two separate
+// types rather than one shared type, so that internal/app (the one
+// package §6.1 already trusts to bridge types across a seam) is the only
+// place that ever converts between them. If internal/mission imported
+// internal/permissions directly, that boundary would already be broken
+// even before any code used the shortcut — a caller reaching for
+// mission.Rule expecting it to already satisfy some permissions.Guard
+// method is the exact coupling this test exists to catch early, the same
+// way TestAskStaysPresentationFree catches internal/ask reaching for a
+// door-specific type.
+func TestMissionStaysPureAndDoesNotImportPermissions(t *testing.T) {
+	list, ok := depsOpt(t, "internal/mission", "mission")
+	if !ok {
+		return
+	}
+	for _, mal := range []string{
+		"net/http", "lipgloss", "bubbletea", "bubbles", "colorprofile",
+		"ishakat/internal/tui", "ishakat/internal/theme", "ishakat/internal/config",
+		"ishakat/internal/permissions", "ishakat/internal/tools", "ishakat/internal/engine",
+	} {
+		if strings.Contains(list, mal) {
+			t.Errorf("internal/mission imports %s: the constraint compiler must stay pure text-in/data-out so any door can render its own confirmation dialog from the same Mission value", mal)
+		}
+	}
+}
