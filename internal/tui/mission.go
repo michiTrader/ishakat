@@ -33,23 +33,26 @@ import (
 	"github.com/MichiTrader/ishakat/internal/permissions"
 )
 
-// MissionGuard is §21.4 layer 4's own persistence seam: the two methods
-// this package needs from a *permissions.Guard —
-// AddMissionRules (guard.go, added alongside MissionRule in Step 31 part 1)
-// to make a confirmed mission's deny rules actually enforced for the rest
-// of the session, and MissionRules (added in the same part 1 pass, but
-// with no caller in this package until Step 31 part 3) to read them back
-// for display, the exact use its own doc comment names: "used by a caller
-// wanting to display 'no browser · no network' the way §21.11's own
-// sub-agent mockup shows it on the children". *permissions.Guard already
-// satisfies this exactly as it stands — no adapter type is needed, unlike
-// TrustStore's fileTrustStore, because both methods already take and
-// return exactly the shapes this package needs, the same "the real type
-// already fits" shortcut EvolveStore's own comment notes is not always
-// available but is here.
+// MissionGuard is §21.4 layer 4's own persistence seam, now backing both of
+// §21.6's dialogs (not just its first): AddMissionRules (guard.go, added
+// alongside MissionRule in Step 31 part 1) to make a confirmed mission's
+// deny rules actually enforced for the rest of the session, MissionRules
+// (added in the same part 1 pass, but with no caller in this package until
+// Step 31 part 3) to read them back for display, the exact use its own doc
+// comment names: "used by a caller wanting to display 'no browser · no
+// network' the way §21.11's own sub-agent mockup shows it on the
+// children" — and SetBashScope (added in Step 31 part 7, toolscope.go's own
+// resolveToolScope) to make a chosen tool-scope option actually restrict
+// which bash subcommands the rest of the session may run.
+// *permissions.Guard already satisfies this exactly as it stands — no
+// adapter type is needed, unlike TrustStore's fileTrustStore, because every
+// method already takes and returns exactly the shape this package needs,
+// the same "the real type already fits" shortcut EvolveStore's own comment
+// notes is not always available but is here.
 type MissionGuard interface {
 	AddMissionRules([]permissions.MissionRule)
 	MissionRules() []permissions.MissionRule
+	SetBashScope(allow []string)
 }
 
 // missionOption is one selectable row of the dialog, in §21.6's own mockup

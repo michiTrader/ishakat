@@ -1,17 +1,22 @@
-// toolscope.go implements §21.6's own second dialog (Step 31, part 6):
-// "Tools for this mission", the tool-scope proposal shown alongside the
+// toolscope.go implements §21.6's own second dialog: "Tools for this
+// mission", the tool-scope proposal shown alongside the
 // constraint-confirmation dialog mission.go already implements (part 2).
 // Where mission.go asks "should this constraint be enforced", this file
 // asks "which tools may this mission use at all" — §21.6's own "auto
 // proposes, the human confirms or corrects, and confirming costs one
-// keystroke" line.
+// keystroke" line. The dialog itself (rendering, keyboard handling)
+// landed in Step 31 part 6; resolveToolScope's own wiring into a real
+// session's Guard (the bash-subcommand half of ToolScope — see that
+// function's own doc comment for why Base is not restricted by this pass)
+// landed in part 7.
 //
-// Like mission.go, this is the dialog half only: internal/mission.ProposeTools
-// (Step 31 part 5) already compiled the pure data this file renders and
-// reacts to. This file adds no new compilation logic of its own — it is
-// purely a presentation and keyboard-handling layer over ToolScope, the
-// exact "compile now, dialog later" split part 1 → part 2 already
-// established for the section's other mockup.
+// Like mission.go, this file adds no new compilation logic of its own:
+// internal/mission.ProposeTools (Step 31 part 5) already compiled the pure
+// data this file renders and reacts to — this is purely a presentation,
+// keyboard-handling, and (as of part 7) Guard-wiring layer over ToolScope,
+// the exact "compile now, dialog later, wire enforcement last" order part
+// 1 → part 2 already established for the section's other mockup (Compile,
+// then ModeMission, then hardDeny's own missionHardDeny enforcement).
 //
 // This dialog is chained after ModeMission, not offered independently:
 // per checkMission's own doc comment and §21.6's own three stated
@@ -158,29 +163,82 @@ func (m Root) updateToolScope(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// resolveToolScope applies the chosen option, then always starts the turn
-// resolveMission itself already paused for and handed forward via
-// openToolScope's own m.missionText re-set — mirroring resolveMission's
-// own "opened in the middle of submit" shape one level further in: two
-// dialogs have now closed in sequence, but only one turn has ever been
-// paused, and this is what finally starts it.
+// browserBashAllow is the fixed, documented set of extra bash prefixes
+// "2. Proposed + browser" adds on top of the proposed BashAllow — the
+// same "small, named table a human confirming can trust completely, not a
+// general classifier" discipline internal/mission's own keywordRules and
+// bashSubcommandKeywords already state for themselves. "npx" is included
+// because that is how a browser-automation tool is actually invoked in
+// practice ("npx playwright test"), not merely its own bare name; the
+// three named tools are included too for the less common case of a
+// globally-installed binary invoked directly. This intentionally
+// duplicates a subset of internal/mission's own browserKeywords rather
+// than importing it as a shape to widen with, because that var names goal
+// *keywords* to scan text for (including the generic alias "browser",
+// which is not itself an invokable command), while this one names actual
+// bash-invokable prefixes — two different vocabularies that happen to
+// overlap on three entries, not one the other can be derived from.
+var browserBashAllow = []string{"npx", "playwright", "puppeteer", "selenium"}
+
+// resolveToolScope applies the chosen option to the real session's Guard
+// (Step 31 part 7: wiring a chosen tool scope into a real session,
+// picking up where part 6 left off — see this function's git history for
+// that pass's own version of this comment, describing why nothing was
+// wired yet), then always starts the turn resolveMission itself already
+// paused for and handed forward via openToolScope's own m.missionText
+// re-set — mirroring resolveMission's own "opened in the middle of
+// submit" shape one level further in: two dialogs have now closed in
+// sequence, but only one turn has ever been paused, and this is what
+// finally starts it.
 //
-// No option here actually restricts or widens what tools.Registry exposes
-// or what Guard allows yet — see this file's own package comment for why:
-// there is no wiring from a chosen ToolScope into a real session's
-// Registry/Guard in this pass, the same "compiler and dialog before
-// enforcement" order part 1's own Mission/Guard split already followed
-// (Compile existed for a full pass before hardDeny's own missionHardDeny
-// enforced anything it produced). Every option below therefore only
-// closes the dialog and starts the turn — the option chosen is not yet
-// observable in what the turn can call, which is the next Step 31 slice
-// this pass leaves explicitly open, not silently.
+// This wires the bash-subcommand half of §21.6's second mockup only —
+// mission.ToolScope.Base ("read · edit · dispatch") is not restricted by
+// any option here, because every option in the mockup itself proposes the
+// exact same Base regardless of which row is chosen (compare the mockup's
+// own four rows: only the bash scope and the browser/everything additions
+// ever change). Restricting Base would mean refusing read/edit/dispatch
+// outright for some option, which is not what any of the four rows
+// actually describe. A future pass that adds a mockup row meaning
+// "restrict Base too" would need a second Guard-side mechanism the same
+// shape as this one; this pass wires the one axis §21.6's own four rows
+// actually vary today.
+//
+// m.missionGuard == nil (every test in this package that calls
+// newMissionRoot(nil), and any real caller that never wires
+// Options.MissionGuard) degrades the same way resolveMission's own
+// missionAccept branch already does: the dialog still closes and the turn
+// still starts, it simply enforces nothing.
 func (m Root) resolveToolScope(opt toolScopeOption) (tea.Model, tea.Cmd) {
 	text := m.missionText
+	scope := m.toolScope.s
 	m.toolScope = toolScopeDialog{}
 	m.missionText = ""
 	m.mode = ModeChat
-	_ = opt // no session-scoping effect yet; see this method's own comment
+
+	if m.missionGuard != nil {
+		switch opt {
+		case toolScopeAsProposed:
+			m.missionGuard.SetBashScope(scope.BashAllow)
+		case toolScopeProposedPlusBrowser:
+			m.missionGuard.SetBashScope(append(append([]string(nil), scope.BashAllow...), browserBashAllow...))
+		case toolScopeEverything:
+			// "invariants still apply" (§21.6's own mockup line) — nil
+			// clears any bash-subcommand restriction, but AddMissionRules'
+			// own deny rules (checked first inside hardDeny, see that
+			// method's own doc comment) are never touched by this call,
+			// so a stated "no Playwright" constraint still refuses it even
+			// under "Everything installed".
+			m.missionGuard.SetBashScope(nil)
+		case toolScopePickOneByOne:
+			// No free-standing checkbox widget yet (see this option's own
+			// doc comment on toolScopeOption) — resolves to the same
+			// scope as toolScopeAsProposed for now, the identical "not
+			// invented here half-finished" deferral missionAdjust already
+			// applies for §21.6's first dialog.
+			m.missionGuard.SetBashScope(scope.BashAllow)
+		}
+	}
+
 	return m.submit(text)
 }
 
