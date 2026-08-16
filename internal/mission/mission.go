@@ -527,6 +527,37 @@ type Policy struct {
 	// for this pass: not a new policy concept, but a mission's own stated
 	// intent already colliding with one that exists today.
 	ShellDeny []string
+
+	// FetchAllowed is config.Permissions.Read != "deny" -- whether fetch
+	// may run at all under this project's own configured policy. This is
+	// Read's knob, not a Fetch-specific one, because guard.go's own mode()
+	// already established that "fetch shares Read's policy knob rather
+	// than getting its own config key" (both are danger:low, read-only
+	// operations); OutsidePolicy asks the identical question of fetch
+	// that ShellAllowed asks of bash, through the one config knob that
+	// actually governs it, so a project that has turned reading (and
+	// therefore fetch) off entirely makes any affirmed fetch-shaped
+	// capability "outside policy" regardless of which technology was
+	// named -- the same reasoning ShellAllowed's own doc comment states.
+	//
+	// There is deliberately no FetchDeny counterpart to ShellDeny: unlike
+	// bash, which has a project-authored, keyword-shaped deny list
+	// (config.Permissions.ShellDeny, "patterns a command may never
+	// match") to compare an affirmed technology's name against, fetch's
+	// only configured policy surface is config.Egress{Allow, AllowAll}
+	// (internal/config/schema.go) -- an allowlist of *hosts* a fetch call
+	// may reach, not a denylist of *keywords* a fetch call may not name.
+	// "playwright" is not a host, so there is no meaningful way to ask
+	// whether it "already appears" in an egress allowlist the way
+	// "playwright" can appear in a shell_deny pattern; the two config
+	// concepts answer structurally different questions ("which
+	// destinations are allowed" vs. "which command shapes are forbidden
+	// regardless of approval") and are not interchangeable. FetchAllowed
+	// alone is therefore the whole of this trigger's fetch half, exactly
+	// mirroring the one part of the bash half (ShellAllowed) that has a
+	// like-for-like fetch analogue, and stopping there rather than
+	// forcing Egress into a role it was never shaped for.
+	FetchAllowed bool
 }
 
 // keywordName strips keywordRules' own doubled-star bracketing
@@ -547,20 +578,24 @@ func keywordName(pattern string) string {
 }
 
 // OutsidePolicy reports whether goal affirms (does not negate) a
-// recognized keywordRules technology that collides with policy: either
-// policy.ShellAllowed is false (bash is off project-wide, so any
-// affirmed bash-shaped capability is outside policy by definition), or
-// the technology's own name already appears in one of policy.ShellDeny's
-// patterns (the project has already, separately, forbidden exactly what
-// this goal is now asking auto to use freely).
+// recognized keywordRules technology that collides with policy. For a
+// bash-capability Rule: either policy.ShellAllowed is false (bash is off
+// project-wide, so any affirmed bash-shaped capability is outside policy
+// by definition), or the technology's own name already appears in one of
+// policy.ShellDeny's patterns (the project has already, separately,
+// forbidden exactly what this goal is now asking auto to use freely). For
+// a fetch-capability Rule: policy.FetchAllowed is false (fetch is off
+// project-wide, by the identical reasoning) — see Policy.FetchAllowed's
+// own doc comment for why there is no fetch-side ShellDeny analogue to
+// check a name against.
 //
 // This is §21.6's second stated dialog-opening trigger ("the mission
 // requests a capability outside current policy") — the one condition
 // ProposeTools' own doc comment, and every earlier Step 31 part's own
 // "still missing" list, named as having no Go concept to compile against
 // yet. Policy (above) is that concept: "current policy" means
-// config.Permissions' own Shell mode and ShellDeny list, bridged into
-// Policy by a caller the same way denyRulesOf already bridges
+// config.Permissions' own Shell/Read modes and ShellDeny list, bridged
+// into Policy by a caller the same way denyRulesOf already bridges
 // permissions.MissionRule.
 //
 // Only affirmed constraints are checked, never negated ones: a goal that
@@ -587,15 +622,19 @@ func OutsidePolicy(goal string, policy Policy) bool {
 			continue
 		}
 		for _, r := range c.Rules {
-			if r.Capability != "bash" {
-				continue
-			}
-			if !policy.ShellAllowed {
-				return true
-			}
-			name := keywordName(r.Pattern)
-			for _, deny := range policy.ShellDeny {
-				if strings.Contains(strings.ToLower(deny), name) {
+			switch r.Capability {
+			case "bash":
+				if !policy.ShellAllowed {
+					return true
+				}
+				name := keywordName(r.Pattern)
+				for _, deny := range policy.ShellDeny {
+					if strings.Contains(strings.ToLower(deny), name) {
+						return true
+					}
+				}
+			case "fetch":
+				if !policy.FetchAllowed {
 					return true
 				}
 			}

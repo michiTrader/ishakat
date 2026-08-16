@@ -244,19 +244,22 @@ func TestOutsidePolicyTrueWhenAffirmedKeywordMatchesShellDeny(t *testing.T) {
 	got := OutsidePolicy("use Playwright if you think it helps", Policy{
 		ShellAllowed: true,
 		ShellDeny:    []string{"**playwright**"},
+		FetchAllowed: true,
 	})
 	if !got {
 		t.Error("OutsidePolicy = false, want true (playwright already matches shell_deny)")
 	}
 }
 
-// TestOutsidePolicyFalseWhenNothingCollides is the ordinary case: shell is
-// allowed, nothing in ShellDeny names the affirmed technology, so the
-// goal's own stated intent does not collide with anything configured.
+// TestOutsidePolicyFalseWhenNothingCollides is the ordinary case: shell and
+// fetch are both allowed, nothing in ShellDeny names the affirmed
+// technology, so the goal's own stated intent does not collide with
+// anything configured.
 func TestOutsidePolicyFalseWhenNothingCollides(t *testing.T) {
 	got := OutsidePolicy("use Playwright if you think it helps", Policy{
 		ShellAllowed: true,
 		ShellDeny:    []string{"**rm -rf**"},
+		FetchAllowed: true,
 	})
 	if got {
 		t.Error("OutsidePolicy = true, want false (nothing configured collides with playwright)")
@@ -297,5 +300,49 @@ func TestOutsidePolicyIgnoresUnrelatedShellDenyEntries(t *testing.T) {
 	})
 	if got {
 		t.Error("OutsidePolicy = true, want false (docker matches neither configured deny pattern)")
+	}
+}
+
+// TestOutsidePolicyTrueWhenFetchIsDeniedEntirely covers Policy.FetchAllowed
+// == false, the fetch-capability half of the collision check: a goal
+// affirming a technology whose keywordRules entry compiles a fetch Rule
+// (playwright does) is outside policy when fetch is off project-wide,
+// mirroring ShellAllowed's own "off entirely" reasoning for bash.
+func TestOutsidePolicyTrueWhenFetchIsDeniedEntirely(t *testing.T) {
+	got := OutsidePolicy("use Playwright if you think it helps", Policy{
+		ShellAllowed: true,
+		FetchAllowed: false,
+	})
+	if !got {
+		t.Error("OutsidePolicy = false, want true (fetch is not allowed at all)")
+	}
+}
+
+// TestOutsidePolicyFalseWhenBothCapabilitiesAllowed is the ordinary case
+// for the fetch half: both bash and fetch are allowed project-wide, so an
+// affirmed keyword with both capability Rules does not collide with
+// anything.
+func TestOutsidePolicyFalseWhenBothCapabilitiesAllowed(t *testing.T) {
+	got := OutsidePolicy("use Playwright if you think it helps", Policy{
+		ShellAllowed: true,
+		FetchAllowed: true,
+	})
+	if got {
+		t.Error("OutsidePolicy = true, want false (both bash and fetch are allowed)")
+	}
+}
+
+// TestOutsidePolicyFetchDeniedDoesNotFlagABashOnlyKeyword confirms
+// FetchAllowed is only consulted for a Rule whose own Capability is
+// "fetch": "docker" compiles to a bash-only Rule (keywordRules has no
+// fetch entry for it), so turning fetch off entirely must not make an
+// affirmed "docker" look like a collision it never asked about.
+func TestOutsidePolicyFetchDeniedDoesNotFlagABashOnlyKeyword(t *testing.T) {
+	got := OutsidePolicy("use Docker for the build", Policy{
+		ShellAllowed: true,
+		FetchAllowed: false,
+	})
+	if got {
+		t.Error("OutsidePolicy = true, want false (docker has no fetch-capability Rule to collide with FetchAllowed)")
 	}
 }
