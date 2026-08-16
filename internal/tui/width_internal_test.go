@@ -87,6 +87,22 @@ func TestNoOverflowAtCriticalWidths(t *testing.T) {
 				t.Fatal("checkMission did not open ModeMission for a goal with a recognized constraint")
 			}
 			assertNoOverflow(t, "diálogo de misión (§21.6)", r2, width)
+
+			// ModeToolScope's own dialog (§21.6's second mockup, Step 31
+			// part 6, toolscope.go) is chained straight off resolveMission
+			// — see resolveMission's own doc comment — so reaching it here
+			// means resolving the mission dialog first. Its own mockup's
+			// "⚠ ~180 MB download; your phone will struggle" line is the
+			// densest literal text this package draws in any dialog, and
+			// exactly the kind of fixed-width line most likely to overflow
+			// a 40-column terminal — the same reason the ModeMission block
+			// above exists at all.
+			tsModel, _ := r2.resolveMission(missionAccept)
+			r3, ok := tsModel.(Root)
+			if !ok || r3.mode != ModeToolScope {
+				t.Fatal("resolveMission did not chain into ModeToolScope")
+			}
+			assertNoOverflow(t, "diálogo de tool-scope (§21.6)", r3, width)
 		})
 	}
 }

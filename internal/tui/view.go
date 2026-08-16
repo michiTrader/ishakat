@@ -75,6 +75,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeMission {
 		return m.renderMission()
 	}
+	if m.mode == ModeToolScope {
+		return m.renderToolScope()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())
