@@ -1,6 +1,9 @@
 package mission
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestCompileNoPlaywrightProducesDenyRules is §21.6's own worked example,
 // verbatim: "fix orbital-dash... no Playwright" must compile to exactly the
@@ -129,5 +132,95 @@ func TestCompileNoRecognizedKeywordDefaultsToNegate(t *testing.T) {
 	}
 	if !m.Constraints[0].Negated {
 		t.Fatal("Negated = false, want true (default polarity with no cue phrase)")
+	}
+}
+
+// TestProposeToolsWorkedExampleMatchesTheMockupVerbatim is §21.6's own
+// second mockup's worked example: "fix orbital-dash" (no ecosystem
+// keyword named at all) must propose exactly "read · edit · bash(node,
+// npm, git) · dispatch", the mockup's own literal row 1 text.
+func TestProposeToolsWorkedExampleMatchesTheMockupVerbatim(t *testing.T) {
+	got := ProposeTools("fix orbital-dash performance properly")
+	wantBase := []string{"read", "edit", "dispatch"}
+	if !reflect.DeepEqual(got.Base, wantBase) {
+		t.Errorf("Base = %v, want %v", got.Base, wantBase)
+	}
+	wantBash := []string{"node", "npm", "git"}
+	if !reflect.DeepEqual(got.BashAllow, wantBash) {
+		t.Errorf("BashAllow = %v, want %v (the mockup's own default)", got.BashAllow, wantBash)
+	}
+	if !got.BrowserOffered {
+		t.Error("BrowserOffered = false, want true (goal never mentions browser automation)")
+	}
+	if got.BrowserWeightMB != 180 {
+		t.Errorf("BrowserWeightMB = %d, want 180 (the mockup's own figure)", got.BrowserWeightMB)
+	}
+}
+
+// TestProposeToolsDetectsNamedEcosystem covers bashAllowFor's own keyword
+// table: a goal naming Python's own ecosystem must propose "python" (and
+// "pip" if pip itself is named), not silently fall back to the Node.js
+// default meant for goals naming no ecosystem at all.
+func TestProposeToolsDetectsNamedEcosystem(t *testing.T) {
+	got := ProposeTools("fix the flaky pip install in this Python script")
+	want := []string{"python", "pip"}
+	if !reflect.DeepEqual(got.BashAllow, want) {
+		t.Errorf("BashAllow = %v, want %v", got.BashAllow, want)
+	}
+}
+
+// TestProposeToolsDeduplicatesAliasedKeywords covers bashAllowFor's own
+// "javascript" and "typescript" both meaning "node" — a goal naming both
+// must propose "node" once, not twice.
+func TestProposeToolsDeduplicatesAliasedKeywords(t *testing.T) {
+	got := ProposeTools("migrate this TypeScript file, it started as plain JavaScript")
+	want := []string{"node"}
+	if !reflect.DeepEqual(got.BashAllow, want) {
+		t.Errorf("BashAllow = %v, want %v (deduplicated, not doubled)", got.BashAllow, want)
+	}
+}
+
+// TestProposeToolsBrowserOfferedWhenGoalIsSilentOnIt is the ordinary case:
+// a goal that never mentions browser automation at all still offers
+// option 2, since nothing has ruled it in or out yet.
+func TestProposeToolsBrowserOfferedWhenGoalIsSilentOnIt(t *testing.T) {
+	got := ProposeTools("why does the game stutter?")
+	if !got.BrowserOffered {
+		t.Error("BrowserOffered = false, want true (goal says nothing about browser automation)")
+	}
+}
+
+// TestProposeToolsBrowserOfferedWhenGoalDeniesIt covers §21.6's own "what
+// auto considered and rejected, with the reason shown" line: a goal that
+// already denies Playwright still offers option 2 — the offer itself IS
+// the surfaced reasoning, not something a denial should hide.
+func TestProposeToolsBrowserOfferedWhenGoalDeniesIt(t *testing.T) {
+	got := ProposeTools("fix orbital-dash, no playwright")
+	if !got.BrowserOffered {
+		t.Error("BrowserOffered = false, want true (a denial is shown, not hidden)")
+	}
+}
+
+// TestProposeToolsBrowserNotOfferedWhenGoalAlreadyAffirmsIt covers the one
+// case ProposeTools' own doc comment names as correctly suppressing the
+// offer: a goal that already says "use Playwright" already has browser
+// automation in its proposed set (via Compile's own "allow" rule), so
+// option 2 has nothing left to add.
+func TestProposeToolsBrowserNotOfferedWhenGoalAlreadyAffirmsIt(t *testing.T) {
+	got := ProposeTools("use Playwright if you think it helps")
+	if got.BrowserOffered {
+		t.Error("BrowserOffered = true, want false (goal already affirms Playwright)")
+	}
+}
+
+// TestProposeToolsBrowserOfferedForAnUnrelatedAffirmedKeyword pins
+// browserKeywords' own narrower set against keywordRules' full one: a
+// goal affirming "docker" (a keywordRules entry that is not browser
+// automation) must not be mistaken for one that already granted browser
+// automation.
+func TestProposeToolsBrowserOfferedForAnUnrelatedAffirmedKeyword(t *testing.T) {
+	got := ProposeTools("use Docker for the build")
+	if !got.BrowserOffered {
+		t.Error("BrowserOffered = false, want true (docker is not browser automation)")
 	}
 }
