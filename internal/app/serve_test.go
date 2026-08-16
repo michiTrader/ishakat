@@ -415,6 +415,86 @@ func TestServePermissionRoundTripDenied(t *testing.T) {
 	}
 }
 
+// TestServeAskUserRoundTrip is serveAsker's own end-to-end proof, the
+// ask_request/ask_response sibling of TestServePermissionRoundTrip above:
+// the model calls ask_user, this test's own fake client answers with an
+// ask_response naming the same question ID askUserQuestionID
+// (internal/tools/ask_user.go) always uses, and the model's second turn
+// receives that answer as the tool's OK result -- proving §21.7's own
+// door table entry for serve ("ask available? yes, over WS") actually
+// resolves a real ask_user call, not merely that the wire types compile.
+func TestServeAskUserRoundTrip(t *testing.T) {
+	var turn atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		write := func(s string) {
+			_, _ = w.Write([]byte(s))
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		if turn.Add(1) == 1 {
+			write(fake.SSEChunk(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"ask_user","arguments":"{\"question\":\"which color?\",\"options\":[\"red\",\"blue\"]}"}}]}}]}`))
+			write(fake.SSEChunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
+			write(fake.SSEDone())
+			return
+		}
+		write(fake.SSEDelta("Got it: blue."))
+		write(fake.SSEDone())
+	}))
+	defer srv.Close()
+
+	cfg := serveCfg(t, srv.URL, true)
+	wsURL := startServe(t, ServeOptions{Config: cfg})
+
+	conn := dialServe(t, wsURL, "")
+	_ = readEvent(t, conn) // hello
+
+	sendClientMsg(t, conn, clientMsg{Type: "prompt", Text: "pick a color"})
+
+	req := readEventUntil(t, conn, "ask_request")
+	if req.ID == "" {
+		t.Fatal("ask_request.ID is empty; the client has nothing to correlate its response with")
+	}
+	var form struct {
+		Questions []struct {
+			ID     string `json:"ID"`
+			Prompt string `json:"Prompt"`
+		} `json:"Questions"`
+	}
+	if err := json.Unmarshal(req.Form, &form); err != nil {
+		t.Fatalf("ask_request.Form did not decode: %v", err)
+	}
+	if len(form.Questions) != 1 || form.Questions[0].Prompt != "which color?" {
+		t.Fatalf("ask_request.Form questions = %+v, want one question prompting \"which color?\"", form.Questions)
+	}
+	qid := form.Questions[0].ID
+
+	answers, err := json.Marshal(map[string]any{qid: map[string]string{"Value": "blue"}})
+	if err != nil {
+		t.Fatalf("marshal answers: %v", err)
+	}
+	sendClientMsg(t, conn, clientMsg{Type: "ask_response", ID: req.ID, Answers: answers})
+
+	toolResult := readEventUntil(t, conn, "tool_result")
+	if toolResult.Name != "ask_user" {
+		t.Errorf("tool_result.Name = %q, want ask_user", toolResult.Name)
+	}
+	if toolResult.Error {
+		t.Errorf("tool_result.Error = true, want false (the human answered): %s", toolResult.Text)
+	}
+	if toolResult.Text != "blue" {
+		t.Errorf("tool_result.Text = %q, want %q", toolResult.Text, "blue")
+	}
+
+	done := readEventUntil(t, conn, "done")
+	if !strings.Contains(done.Text, "Got it: blue.") {
+		t.Errorf("done.Text = %q, want it to contain %q", done.Text, "Got it: blue.")
+	}
+}
+
 // TestServeRejectsWrongToken confirms checkBearerToken's own constant-time
 // comparison actually refuses a caller presenting the wrong secret, from
 // outside the process -- a plain HTTP GET against the upgrade endpoint.

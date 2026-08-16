@@ -316,7 +316,15 @@ func Headless(opts HeadlessOptions) int {
 			hist = &convo.Conversation{}
 		}
 		guard := permissions.New(cfg.Tools.Permissions, opts.Yolo, nil)
-		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, modelCaps, cfg.App.MaxRetries, req, user, s, store, conv, hist, opts.AllowToolCreate)
+		// asker is nil: §21.7's own door table gives `-p` headless "no" for
+		// "ask available?" -- there is no human on the other end of a
+		// headless process the way there is for the TUI or a live `serve`
+		// connection, so ask_user always degrades to reporting "no human
+		// is present to ask" as tool-error data here, exactly as it always
+		// has (this is the final, documented answer for this door, not
+		// merely an unwired seam -- see runAgentTurnHeadless's own doc
+		// comment on its asker parameter).
+		msg, turnErr = runAgentTurnHeadless(ctx, prov, cfg.Tools, guard, modelCost, modelCaps, cfg.App.MaxRetries, req, user, s, store, conv, hist, opts.AllowToolCreate, nil)
 	} else {
 		msg, turnErr = runTurn(ctx, prov, req, s, cfg.App.MaxRetries)
 	}

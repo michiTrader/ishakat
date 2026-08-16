@@ -256,7 +256,7 @@ func TestDispatchedSubAgentIsRefusedByADialogPathMissionRule(t *testing.T) {
 	// identity, exactly as dispatch.go's own doc comment claims, but now
 	// exercised starting from the dialog's own compiled output rather than
 	// a hand-built MissionRule.
-	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false)
+	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false, nil)
 	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}

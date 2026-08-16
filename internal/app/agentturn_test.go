@@ -243,7 +243,7 @@ func TestRunAgentTurnHeadlessSeedsBudgetFromPersistedSpend(t *testing.T) {
 
 	_, turnErr := runAgentTurnHeadless(
 		context.Background(), prov, cfgTools, guard, cost, tools.Caps{},
-		2, req, user, s, nil, nil, hist, false,
+		2, req, user, s, nil, nil, hist, false, nil,
 	)
 	if turnErr != nil {
 		t.Fatalf("runAgentTurnHeadless: %v", turnErr)
@@ -413,7 +413,7 @@ func TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue(t *testing
 
 	if _, turnErr := runAgentTurnHeadless(
 		context.Background(), prov, cfgTools, guard, nil, tools.Caps{},
-		2, req, user, s, nil, nil, hist, false,
+		2, req, user, s, nil, nil, hist, false, nil,
 	); turnErr != nil {
 		t.Fatalf("runAgentTurnHeadless (allowToolCreate=false): %v", turnErr)
 	}
@@ -425,7 +425,7 @@ func TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue(t *testing
 	hist = &convo.Conversation{}
 	if _, turnErr := runAgentTurnHeadless(
 		context.Background(), prov, cfgTools, guard, nil, tools.Caps{},
-		2, req, user, s, nil, nil, hist, true,
+		2, req, user, s, nil, nil, hist, true, nil,
 	); turnErr != nil {
 		t.Fatalf("runAgentTurnHeadless (allowToolCreate=true): %v", turnErr)
 	}
