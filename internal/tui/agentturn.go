@@ -121,6 +121,19 @@ func (m Root) openToolApprove(msg ToolApproveRequestMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openAskUser is AskUserRequestMsg's handler: the agent loop's own
+// goroutine (blocked inside internal/app's tuiAsker.Ask, itself blocked on
+// msg.Reply) is waiting on the far side of msg.Reply for whatever
+// resolveAskUserWith eventually sends. Mirrors openToolApprove's own
+// reasoning for opening regardless of mode: dropping the request would
+// leave that goroutine (and its channel) blocked forever with nothing on
+// screen able to answer it.
+func (m Root) openAskUser(msg AskUserRequestMsg) (tea.Model, tea.Cmd) {
+	m.askUser = newAskUserDialog(msg.Form, msg.Reply)
+	m.mode = ModeAskUser
+	return m, nil
+}
+
 // finishAgentTurn is agentTurnDoneMsg's handler: fold the background
 // goroutine's private history back into the Root actually being returned,
 // persist every message it added, then close the turn out with the same
@@ -231,6 +244,7 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 func (m Root) cancelAgentTurn() (tea.Model, tea.Cmd) {
 	m.live.aborted = true
 	m.toolApprove = toolApproveDialog{}
+	m.askUser = askUserDialog{}
 	if m.cancel != nil {
 		m.cancel()
 	}

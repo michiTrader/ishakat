@@ -123,6 +123,15 @@ const (
 	// "opened mid-submit, closing starts the turn" shape ModeMission's
 	// own comment describes, one level further chained in.
 	ModeToolScope
+	// ModeAskUser: Step 32 part 3's own overlay (askuser.go), opened when
+	// the model's ask_user tool call reaches this session's ask.Asker
+	// (internal/app's tuiAsker) and needs a human answer. Opens mid-turn —
+	// the same "the turn is not over, only the pause is" shape
+	// ModeToolApprove already follows — so closing it (by answering or by
+	// Esc, which sends an empty ask.Answers rather than any allow/deny
+	// value, since ask_user has no such axis) returns to ModeBusy, not
+	// ModeChat.
+	ModeAskUser
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -482,6 +491,10 @@ type Root struct {
 	// toolApprove is Step 16's overlay state (toolapprove.go), live only
 	// while mode == ModeToolApprove.
 	toolApprove toolApproveDialog
+
+	// askUser is Step 32 part 3's overlay state (askuser.go), live only
+	// while mode == ModeAskUser.
+	askUser askUserDialog
 
 	// agentTurn is startAgentTurn's own bookkeeping (agentturn.go) for
 	// whichever tools-enabled turn is currently running through
@@ -1114,7 +1127,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resolveToolApprove returns to ModeBusy, which would otherwise
 		// leave the rest of that same turn's spinner frozen after the
 		// first approval dialog closes.
-		if m.mode != ModeBusy && m.mode != ModeCompact && m.mode != ModeToolApprove && m.mode != ModeLogin {
+		if m.mode != ModeBusy && m.mode != ModeCompact && m.mode != ModeToolApprove && m.mode != ModeAskUser && m.mode != ModeLogin {
 			return m, nil
 		}
 		m.animOffset++
@@ -1160,6 +1173,15 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openToolApprove(msg)
+
+	case AskUserRequestMsg:
+		// Same reasoning as ToolApproveRequestMsg above: a turn may call
+		// ask_user more than once, so any agent turn currently in ModeBusy
+		// is a legitimate turn that may legitimately ask again.
+		if m.mode != ModeBusy {
+			return m, nil
+		}
+		return m.openAskUser(msg)
 
 	case loginCodeMsg:
 		// Same "outlived its turn" guard compactDoneMsg's own case
@@ -1215,6 +1237,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateResumeMenu(msg)
 	case ModeToolApprove:
 		return m.updateToolApprove(msg)
+	case ModeAskUser:
+		return m.updateAskUser(msg)
 	case ModeLogin:
 		return m.updateLogin(msg)
 	case ModeSuggest:
@@ -1262,6 +1286,15 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			// bridge's channel with no answer coming — rather than risk
 			// quitting the whole program while a goroutine is still
 			// blocked waiting on it.
+			next, cmd := m.cancelAgentTurn()
+			return true, next, cmd
+		}
+		if m.mode == ModeAskUser {
+			// Same reasoning again: the agent loop's goroutine is parked
+			// behind this exact dialog (see askuser.go's own comment on
+			// updateAskUser's esc/Cancel case), so a lone ctrl+c must
+			// resolve it rather than risk quitting the whole program while
+			// a goroutine is still blocked waiting on it.
 			next, cmd := m.cancelAgentTurn()
 			return true, next, cmd
 		}

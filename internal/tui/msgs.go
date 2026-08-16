@@ -3,6 +3,7 @@ package tui
 import (
 	"time"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/permissions"
@@ -91,6 +92,30 @@ type CatalogRefreshedMsg struct{ Catalog *catalog.Catalog }
 type ToolApproveRequestMsg struct {
 	Req   permissions.Request
 	Reply chan<- permissions.Decision
+}
+
+// AskUserRequestMsg is how an ask.Asker bridge running inside
+// RunAgentTurn's goroutine (started by agentTurnCmd, a tea.Cmd — see
+// agentturn.go) asks Update to open the ModeAskUser overlay: the bridge's
+// Ask call is blocked, deep inside the agent loop's own ask_user tool
+// call, on Reply — the channel Update's eventual ask.Answers travels back
+// on — and this message is the only way that goroutine can reach Root at
+// all, the identical role ToolApproveRequestMsg already plays for a
+// paused permissions.Reviewer. It is not a one-shot *result* either: the
+// turn is not over when this arrives, only paused, until
+// resolveAskUserWith sends ask.Answers down Reply.
+//
+// It is exported (unlike every other message in this file, but exactly
+// like CatalogRefreshedMsg/ToolApproveRequestMsg above and for the same
+// reason) because the ask.Asker implementation that produces it lives in
+// internal/app, on the far side of the import boundary §6.1 draws: the
+// asker holds the *tea.Program app.Run built and calls p.Send with a
+// value of this exact type from inside internal/tools' AskUser.Run,
+// which only internal/app can construct since askuser.go/agentturn.go
+// (internal/tui) never import a concrete Asker.
+type AskUserRequestMsg struct {
+	Form  ask.Form
+	Reply chan<- ask.Answers
 }
 
 // agentTurnDoneMsg is agentTurnCmd's result (see agentturn.go/root.go's
