@@ -92,6 +92,17 @@ func UsageFile() string { return filepath.Join(StateDir(), "usage.jsonl") }
 // disposable cache.
 func SuggestStateFile() string { return filepath.Join(StateDir(), "suggest-state.json") }
 
+// TrustFile is §21.4 layer 2's own persisted answer: one JSON record per
+// project path the human has already been asked "how should I work here?",
+// so the question is not asked again on the next run — Pi's own
+// ~/.pi/agent/trust.json, adapted (docs/PLAN.md §21.2/§21.4). It lives
+// under StateDir, not DataDir or CacheDir, for the same reasoning
+// UsageFile's own comment already gives: this is neither backed-up user
+// data nor a disposable cache safe to silently redownload — losing it only
+// means the trust question is asked again, exactly the "frequently
+// changed, small, not worth backing up" shape $XDG_STATE_HOME exists for.
+func TrustFile() string { return filepath.Join(StateDir(), "trust.json") }
+
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
 
