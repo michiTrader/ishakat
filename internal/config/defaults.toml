@@ -166,6 +166,16 @@ allow = [
 ]
 allow_all = false
 
+# §21.4 layer 3 / §21.12: what a project with no trust.json record falls
+# back to before its first-run trust dialog (§21.4 layer 2) ever answers it,
+# and whether that dialog's own answer gets written down at all. "ask" here
+# is not itself an autonomy value -- it is the fourth state, "no decision
+# recorded yet", so the dialog opens on first run rather than silently
+# picking agile or auto for a project nobody has looked at.
+[autonomy]
+default = "ask"
+remember = true
+
 # Step 23: the third door. Loopback-only by default (addr) and no token
 # required, which is safe together — an empty token only skips checking a
 # secret that a non-loopback address would otherwise need. Changing addr to
