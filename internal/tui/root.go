@@ -107,6 +107,21 @@ const (
 	// m.submit(text) and starts the turn, going to ModeBusy from there
 	// the same as an ordinary submit would.
 	ModeMission
+	// ModeToolScope: §21.6's own second dialog (Step 31 part 6,
+	// toolscope.go), "Tools for this mission" — the tool-scope proposal
+	// mockup, distinct from ModeMission's own constraint-confirmation
+	// mockup. Unlike ModeMission it never opens from checkMission
+	// directly: it is chained from resolveMission's own tail, because
+	// §21.6's own dialog-opening trigger ("the goal contains a
+	// constraint") is exactly the condition that already opened
+	// ModeMission in the first place — there is no second, independent
+	// check to duplicate. Resolving it — by choosing an option or by
+	// Esc, which like the other two dialogs' own Esc defaults to the
+	// safer choice (see toolScopeDialogDefault's own comment) — is what
+	// actually calls m.submit(text) and starts the turn, the same
+	// "opened mid-submit, closing starts the turn" shape ModeMission's
+	// own comment describes, one level further chained in.
+	ModeToolScope
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -539,6 +554,13 @@ type Root struct {
 	// "session-only, or here not even that" degradation TrustStore's own
 	// nil case documents for a different failure mode.
 	missionGuard MissionGuard
+
+	// toolScope is §21.6's second dialog's own state (toolscope.go),
+	// "Tools for this mission" — live only while mode == ModeToolScope.
+	// Unlike mission, this is never opened directly from checkMission:
+	// resolveMission's own tail is its only caller (see ModeToolScope's
+	// own doc comment below).
+	toolScope toolScopeDialog
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -1169,6 +1191,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTrust(msg)
 	case ModeMission:
 		return m.updateMission(msg)
+	case ModeToolScope:
+		return m.updateToolScope(msg)
 	default:
 		return m.updateChat(msg)
 	}

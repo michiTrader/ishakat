@@ -168,17 +168,23 @@ func (m Root) updateMission(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// resolveMission applies the chosen option, then always starts the turn
-// the dialog paused (§21.6's own dialog never blocks the goal itself, only
-// the moment the rule is confirmed) — unlike resolveTrust, which returns
-// to an idle ModeChat with nothing further to run, this dialog opened in
-// the middle of submit, so closing it has to finish what submit was
-// doing: the deferred text is still waiting in m.missionText.
+// resolveMission applies the chosen option, then always chains into
+// ModeToolScope (Step 31 part 6, toolscope.go) rather than calling
+// m.submit(text) directly — §21.6's own second dialog ("Tools for this
+// mission") has no independent trigger of its own to check (see
+// ModeToolScope's own doc comment on root.go): the one trigger this
+// codebase can act on today, "the goal contains a constraint", is exactly
+// what already opened ModeMission, regardless of which of its three rows
+// was chosen. So every outcome here — missionAccept, missionAdjust, and
+// missionSoft alike — opens the tool-scope dialog next; none of them
+// starts the turn directly anymore. openToolScope itself is what finally
+// re-captures the deferred text this dialog paused, the same
+// m.missionText seam resolveMission always used, just handed forward one
+// dialog further instead of consumed here.
 func (m Root) resolveMission(opt missionOption) (tea.Model, tea.Cmd) {
 	compiled := m.mission.m
 	text := m.missionText
 	m.mission = missionDialog{}
-	m.missionText = ""
 	m.mode = ModeChat
 
 	if opt == missionAccept && m.missionGuard != nil {
@@ -189,7 +195,7 @@ func (m Root) resolveMission(opt missionOption) (tea.Model, tea.Cmd) {
 	// why that is each one's correct behaviour today, not a shortcut
 	// shared by accident.
 
-	return m.submit(text)
+	return m.openToolScope(text), nil
 }
 
 // missionRulesOr degrades a nil m.missionGuard to "no rules in effect",
