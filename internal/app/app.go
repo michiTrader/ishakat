@@ -365,6 +365,22 @@ func Run(version string, resume bool) int {
 		GitBranch:       gitInfo.Branch,
 		InitialAutonomy: initialAutonomy,
 		TrustStore:      trustStore,
+
+		// §21.6 (Step 31, part 2) — the same guard already bound into
+		// agentOpts.Runner above, so a mission confirmed through
+		// ModeMission is enforced on the very same Guard every tool call
+		// this session already passes through. missionGuardOrNil (below)
+		// is needed rather than passing guard directly: guard is a
+		// *permissions.Guard, nil when cfg.Tools.Enabled is false, and a
+		// nil *permissions.Guard boxed directly into the tui.MissionGuard
+		// interface would be a non-nil interface value wrapping a nil
+		// pointer — Root's own "missionGuard == nil means enforce
+		// nowhere" check (root.go's own doc comment) tests the interface,
+		// not the pointer underneath it, so that boxed-nil case would
+		// panic the first time AddMissionRules dereferenced it instead of
+		// being silently skipped the way every other nil-Guard path in
+		// this function already is.
+		MissionGuard: missionGuardOrNil(guard),
 	})
 
 	p := tea.NewProgram(root)
@@ -401,4 +417,19 @@ func Run(version string, resume bool) int {
 		return 1
 	}
 	return 0
+}
+
+// missionGuardOrNil returns g boxed as a tui.MissionGuard, or a genuinely
+// nil interface value when g itself is nil — see this function's own call
+// site (tui.Options.MissionGuard, above) for why a plain `tui.MissionGuard(g)`
+// conversion is the wrong shortcut here: boxing a nil *permissions.Guard
+// directly into an interface produces a non-nil interface value (its type
+// word is set even though its data word is nil), which would defeat
+// Root.missionGuard's own "!= nil" nil check the moment a mission ever
+// tried to call AddMissionRules on it.
+func missionGuardOrNil(g *permissions.Guard) tui.MissionGuard {
+	if g == nil {
+		return nil
+	}
+	return g
 }

@@ -74,6 +74,19 @@ func TestNoOverflowAtCriticalWidths(t *testing.T) {
 			r := tm.(Root)
 			r.mode = ModeHelp
 			assertNoOverflow(t, "pantalla de ayuda", r, width)
+
+			// ModeMission's own dialog (§21.6, Step 31 part 2, mission.go)
+			// draws a compiled rule line per capability
+			// ("bash    **playwright**   deny") whose fixed-width
+			// fmt.Fprintf padding is exactly the kind of literal-width
+			// line most likely to overflow a narrow terminal — the same
+			// reason this file exists at all.
+			r2 := tm.(Root)
+			r2, ok := r2.checkMission("fix orbital-dash, no playwright")
+			if !ok {
+				t.Fatal("checkMission did not open ModeMission for a goal with a recognized constraint")
+			}
+			assertNoOverflow(t, "diálogo de misión (§21.6)", r2, width)
 		})
 	}
 }

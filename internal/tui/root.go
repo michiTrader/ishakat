@@ -91,6 +91,22 @@ const (
 	// for this to pause, the same reasoning ModeThemePicker's own
 	// comment gives for its one-way close.
 	ModeTrust
+	// ModeMission: §21.6's own constraint-compiler confirmation dialog
+	// (Step 31, mission.go), docs/PLAN.md's own worked example ("no
+	// Playwright" compiling to a deny rule). Unlike ModeTrust it opens
+	// mid-submit, not at construction: checkMission runs inside submit,
+	// before startEngineTurn, and only switches here when the goal's
+	// mission.Compile result carries at least one negated constraint
+	// (mission.Mission.HasDeny()) — "this dialog is not shown for every
+	// task" (§21.6). The turn itself has not started yet (unlike
+	// ModeToolApprove/ModeSuggest's mid-turn opens, there is no
+	// RunAgentTurn goroutine parked underneath this one), so resolving it
+	// — by choosing an option or by Esc, which like ModeTrust's own Esc
+	// defaults to the safer choice rather than either extreme (see
+	// missionDialogDefault's own comment) — is what actually calls
+	// m.submit(text) and starts the turn, going to ModeBusy from there
+	// the same as an ordinary submit would.
+	ModeMission
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -503,6 +519,26 @@ type Root struct {
 	// does not survive a restart, the same "session-only" degradation
 	// ThemeStore's own nil case already documents.
 	trustStore TrustStore
+
+	// mission is §21.6's ModeMission overlay's own state (mission.go),
+	// live only while mode == ModeMission.
+	mission missionDialog
+
+	// missionText is submit's own text, held here between checkMission
+	// opening ModeMission and resolveMission finally calling m.submit —
+	// see resolveMission's own comment for why the dialog has to
+	// remember what it paused, not just how it was answered.
+	missionText string
+
+	// missionGuard is §21.6's own persistence seam (mission.go's own doc
+	// comment on the §6.1 seam this draws — the same shape TrustStore
+	// draws for its own write). nil (every test in this package, and any
+	// caller that never wires Options.MissionGuard) means a confirmed
+	// mission's rules apply nowhere — the dialog still closes and the
+	// turn still starts, it simply enforces nothing, the same
+	// "session-only, or here not even that" degradation TrustStore's own
+	// nil case documents for a different failure mode.
+	missionGuard MissionGuard
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -755,6 +791,14 @@ type Options struct {
 	// doc comment on the §6.1 seam this draws) — see Root.trustStore's
 	// own comment for why nil is a supported value.
 	TrustStore TrustStore
+
+	// MissionGuard is §21.6's own enforcement seam (mission.go's own doc
+	// comment) — see Root.missionGuard's own comment for why nil is a
+	// supported value. internal/app is expected to pass the same
+	// *permissions.Guard already bound to AgentOptions.Runner (buildAgentOptions'
+	// own guard variable), since that is the exact Guard whose
+	// Authorize calls need to see a confirmed mission's rules.
+	MissionGuard MissionGuard
 }
 
 // NewRoot construye el modelo inicial.
@@ -819,33 +863,34 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:     o.Version,
-		cwd:         o.CWD,
-		mode:        startMode,
-		lay:         lay,
-		styles:      styles,
-		themesDir:   o.ThemesDir,
-		themeStore:  o.ThemeStore,
-		trustStore:  o.TrustStore,
-		input:       NewInput(lay.InputPrefix()),
-		fps:         fps,
-		cfg:         o.Cfg,
-		cfgBanner:   o.Cfg == nil || o.Cfg.UI.Banner,
-		cfgSyntax:   o.Cfg == nil || o.Cfg.UI.Syntax,
-		cfgMarkdown: o.Cfg == nil || o.Cfg.UI.Markdown,
-		animMode:    anim.Mode,
-		cap:         o.Cap,
-		eng:         engineOr(o.Engine),
-		engineFor:   o.EngineFor,
-		loginFor:    o.LoginFor,
-		model:       model,
-		system:      o.System,
-		commands:    slash.Default(),
-		cat:         o.Catalog,
-		skills:      o.Skills,
-		alias:       o.Alias,
-		preferFree:  o.PreferFree,
-		favorites:   o.Favorites,
+		version:      o.Version,
+		cwd:          o.CWD,
+		mode:         startMode,
+		lay:          lay,
+		styles:       styles,
+		themesDir:    o.ThemesDir,
+		themeStore:   o.ThemeStore,
+		trustStore:   o.TrustStore,
+		missionGuard: o.MissionGuard,
+		input:        NewInput(lay.InputPrefix()),
+		fps:          fps,
+		cfg:          o.Cfg,
+		cfgBanner:    o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:    o.Cfg == nil || o.Cfg.UI.Syntax,
+		cfgMarkdown:  o.Cfg == nil || o.Cfg.UI.Markdown,
+		animMode:     anim.Mode,
+		cap:          o.Cap,
+		eng:          engineOr(o.Engine),
+		engineFor:    o.EngineFor,
+		loginFor:     o.LoginFor,
+		model:        model,
+		system:       o.System,
+		commands:     slash.Default(),
+		cat:          o.Catalog,
+		skills:       o.Skills,
+		alias:        o.Alias,
+		preferFree:   o.PreferFree,
+		favorites:    o.Favorites,
 
 		compactEng:           o.CompactEngine,
 		compactModel:         o.CompactModel,
@@ -1122,6 +1167,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateThemePicker(msg)
 	case ModeTrust:
 		return m.updateTrust(msg)
+	case ModeMission:
+		return m.updateMission(msg)
 	default:
 		return m.updateChat(msg)
 	}
@@ -1380,6 +1427,16 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if slash.IsCommand(text) {
 				return m.runSlashLine(text)
+			}
+			// §21.6: a goal carrying a recognized constraint pauses here
+			// on ModeMission instead of starting the turn immediately —
+			// see checkMission's own comment for why most goals (no
+			// recognized keyword) fall straight through unchanged. The
+			// input is cleared either way, the same way submit's own
+			// m.input.Reset() would have done in the ordinary case.
+			if next, ok := m.checkMission(text); ok {
+				next.input.Reset()
+				return next, nil
 			}
 			return m.submit(text)
 		case m.keys.Newline:
