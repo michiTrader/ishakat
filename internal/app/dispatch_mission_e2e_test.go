@@ -257,7 +257,7 @@ func TestDispatchedSubAgentIsRefusedByADialogPathMissionRule(t *testing.T) {
 	// exercised starting from the dialog's own compiled output rather than
 	// a hand-built MissionRule.
 	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false)
-	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner)
+	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("delegate the Playwright run to a sub-agent, but no Playwright"))

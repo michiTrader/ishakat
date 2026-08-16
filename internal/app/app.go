@@ -200,7 +200,15 @@ func Run(version string, resume bool) int {
 		// on why a sub-agent reuses the parent's already-resolved
 		// provider/model rather than re-resolving one of its own.
 		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY)
-		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner)
+		// asker is nil here: no ask.Asker implementation exists yet -- this
+		// is the TUI's own call site, and the eventual home for a dialog
+		// bridging ask_user's Form to a real human, generalizing
+		// toolapprove.go's existing ask.State/ask.Form machinery (Step 32
+		// part 2's own changelog entry names this as the next open seam).
+		// Until that lands, ask_user stays visible in the model's own
+		// catalogue (WithMetaTools' unconditional registration) but any
+		// call against it degrades to tool-error data, same as headless.
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, nil)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}
 

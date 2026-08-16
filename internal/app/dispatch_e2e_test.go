@@ -164,7 +164,7 @@ func TestDispatchSubAgentRoundTripsThroughToolResult(t *testing.T) {
 	// production call sites (app.go's Run, agentturn.go's
 	// runAgentTurnHeadless) build, reusing this same *engine.Engine.
 	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false)
-	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner)
+	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("delegate research on fetch.go's egress allowlist to a sub-agent"))
@@ -260,7 +260,7 @@ func TestDispatchWithoutRunnerReportsAsToolErrorNotPanic(t *testing.T) {
 	// MetaToolsOptions.DispatchRunner doc comment), but the closure itself
 	// always fails, exactly like an eng == nil newSubAgentRunner would.
 	dispatchRunner := newSubAgentRunner(nil, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false)
-	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner)
+	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("delegate anything to a sub-agent"))

@@ -161,7 +161,7 @@ func runToolTurnWithCaps(t *testing.T, cfg *config.Config, guard *permissions.Gu
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("create the file"))
-	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, nil)
+	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, nil, nil)
 	result, err := eng.RunAgentTurn(context.Background(),
 		engine.Request{Model: "auto/coding"},
 		opts,

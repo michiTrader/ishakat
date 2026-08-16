@@ -298,7 +298,7 @@ url = "https://example.com/greet"
 		Enabled: true,
 		Dir:     toolsDir,
 	}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil, nil)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
@@ -330,7 +330,7 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	}
 
 	cfgTools := config.Tools{Enabled: true, Dir: toolsDir}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil, nil)
 	if warn == "" {
 		t.Fatal("expected a non-empty warn for an unparseable tool.toml")
 	}
@@ -340,9 +340,10 @@ func TestBuildAgentOptionsSurfacesDeclarativeDiscoveryWarn(t *testing.T) {
 	// meta-tools (Step 21, plus tool_archive/tool_revive) are still present
 	// once Dir is set, matching tools.WithMetaTools' own "Dir alone gates
 	// the six, TTY/Mode gate only tool_create" contract — 7 native +
-	// tool_list/probe/edit/archive/revive/delete.
-	if len(opts.Tools) != 13 {
-		t.Errorf("opts.Tools has %d entries, want 13 (7 native + 6 meta-tools, broken manifest skipped, no TTY so tool_create withheld)", len(opts.Tools))
+	// ask_user (Step 32 part 1, always present) + tool_list/probe/edit/
+	// archive/revive/delete.
+	if len(opts.Tools) != 14 {
+		t.Errorf("opts.Tools has %d entries, want 14 (7 native + ask_user + 6 meta-tools, broken manifest skipped, no TTY so tool_create withheld)", len(opts.Tools))
 	}
 }
 
@@ -435,17 +436,18 @@ func TestRunAgentTurnHeadlessAllowToolCreateAddsToolCreateToCatalogue(t *testing
 
 // TestBuildAgentOptionsEmptyDirBehavesAsBefore pins that an unset
 // cfgTools.Dir (the zero value, matching every pre-Step-20 config and every
-// existing test that never set it) yields exactly the same seven tools
-// buildAgentOptions always has, with no warn — Step 20 changes nothing for
-// an install that has not created a tools directory of its own.
+// existing test that never set it) yields exactly the native seven plus
+// ask_user (Step 32 part 1, always present regardless of Dir), with no
+// warn — Step 20 changes nothing for an install that has not created a
+// tools directory of its own.
 func TestBuildAgentOptionsEmptyDirBehavesAsBefore(t *testing.T) {
 	cfgTools := config.Tools{Enabled: true}
-	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil)
+	opts, warn := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, false, nil, nil)
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
-	if len(opts.Tools) != 7 {
-		t.Errorf("opts.Tools has %d entries, want 7", len(opts.Tools))
+	if len(opts.Tools) != 8 {
+		t.Errorf("opts.Tools has %d entries, want 8 (native seven + ask_user)", len(opts.Tools))
 	}
 }
 
@@ -492,7 +494,7 @@ func TestBuildAgentOptionsThreadsLedgerPathIntoToolCreate(t *testing.T) {
 		t.Errorf("LedgerPath %q does not respect the overridden XDG_STATE_HOME %q", tc.LedgerPath, stateHome)
 	}
 
-	opts, warn2 := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, true, nil)
+	opts, warn2 := buildAgentOptions(cfgTools, nil, nil, tools.Caps{}, true, nil, nil)
 	if warn2 != "" {
 		t.Fatalf("unexpected warn: %q", warn2)
 	}
