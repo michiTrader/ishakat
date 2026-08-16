@@ -500,3 +500,172 @@ type failingReviewer struct{}
 func (failingReviewer) Review(context.Context, Request) (Decision, error) {
 	return Decision{}, errors.New("no tty")
 }
+
+// --- Step 29 closing criterion: a session grant for a bash command covers
+// a flag variant, and bash can gain a session grant at all (docs/PLAN.md
+// §21.14, fixing §21.3 defects 2 and 3) -------------------------------------
+
+// TestClosingCriterionSessionGrantCoversFlagVariant is this step's own
+// closing criterion, first half. "ls" itself is Safe under bashTier (Step
+// 28) and never reaches the reviewer, so the literal example §21.3/§21.14
+// name has to be read against a Sensitive-tier command instead -- "npm
+// install left-pad" granted for the session must cover "npm install
+// left-pad --save-dev", the same flag-only variation defect 2's own worked
+// example describes for ls/ls -la.
+func TestClosingCriterionSessionGrantCoversFlagVariant(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
+	guard := New(testPermissions(), false, reviewer)
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"npm install left-pad"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"npm install left-pad --save-dev"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1 (a session grant must cover a flag-only variant, §21.3 defect 2)", reviewer.calls)
+	}
+}
+
+// TestClosingCriterionBashSessionGrantIsHonoured is the closing criterion's
+// second half, defect 3 by name: "the branch requires Tier == Medium; bash
+// is High (defect 1). So the one tool that generates most of the dialogs is
+// the one tool for which 'allow for session' is silently ignored." Step 28
+// already made bash's ordinary case Sensitive (not the old unconditional
+// High), which happens to satisfy Authorize's req.Tier == Sensitive guard
+// as a side effect; this test pins that the grant is genuinely honoured for
+// bash specifically, rather than merely assumed from Step 28's own tests
+// (none of which exercised AllowSession for a Sensitive-tier bash command
+// at all).
+func TestClosingCriterionBashSessionGrantIsHonoured(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
+	guard := New(testPermissions(), false, reviewer)
+	args := json.RawMessage(`{"command":"echo hi"}`)
+	for i := 0; i < 2; i++ {
+		if err := guard.Authorize(context.Background(), "bash", args); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1 (a bash session grant must be honoured, §21.3 defect 3)", reviewer.calls)
+	}
+}
+
+// TestBashFamilyGeneralizesOverFlagsOnly pins bashFamily's own scope
+// directly: it strips flag tokens (leading "-") but must never merge two
+// commands that disagree on a non-flag token, keeping
+// TestGuardDoesNotShareApprovalWithDifferentArguments's own guarantee true
+// at the unit level, not just observed through Authorize.
+func TestBashFamilyGeneralizesOverFlagsOnly(t *testing.T) {
+	if got := bashFamily("npm install left-pad"); got != bashFamily("npm install left-pad --save-dev") {
+		t.Errorf("bashFamily disagreed on a flag-only variant: %q vs %q", bashFamily("npm install left-pad"), bashFamily("npm install left-pad --save-dev"))
+	}
+	if got := bashFamily("echo one"); got == bashFamily("echo two") {
+		t.Errorf("bashFamily(%q) = %q must differ from bashFamily(\"echo two\"): different positional arguments must not collapse into one family", "echo one", got)
+	}
+}
+
+// TestGuardSessionGrantDoesNotLeakAcrossToolNames pins requestKey's own
+// boundary: bashSessionKey's generalization is bash-specific, and a
+// non-bash Sensitive tool (write_file) keeps the exact-byte key defect 2's
+// fix does not touch -- widening every tool's grant is future work
+// (§21.12), not this step's closing criterion.
+func TestGuardSessionGrantDoesNotLeakAcrossToolNames(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true, AllowSession: true}}
+	guard := New(testPermissions(), false, reviewer)
+	if err := guard.Authorize(context.Background(), "write_file", json.RawMessage(`{"path":"a.txt","content":"one"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.Authorize(context.Background(), "write_file", json.RawMessage(`{"path":"a.txt","content":"two"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 2 {
+		t.Fatalf("reviewer calls = %d, want 2 (write_file must keep its exact-byte session key)", reviewer.calls)
+	}
+}
+
+// TestParseAutonomyRoundTrips pins ParseAutonomy/Autonomy.String's shared
+// vocabulary ("auto", "agile", "readonly") and ParseAutonomy's own
+// "unrecognized or empty defaults to Auto" contract, matching the type's
+// zero-value rule.
+func TestParseAutonomyRoundTrips(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Autonomy
+	}{
+		{"auto", Auto},
+		{"agile", Agile},
+		{"readonly", Readonly},
+		{"", Auto},
+		{"bogus", Auto},
+	}
+	for _, c := range cases {
+		if got := ParseAutonomy(c.in); got != c.want {
+			t.Errorf("ParseAutonomy(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, a := range []Autonomy{Auto, Agile, Readonly} {
+		if got := ParseAutonomy(a.String()); got != a {
+			t.Errorf("ParseAutonomy(%v.String()) = %v, want %v", a, got, a)
+		}
+	}
+}
+
+// TestClosingCriterionReadonlyRefusesSensitiveAndCriticalWithoutAsking is
+// this step's own §21.5 pin: under Readonly, a Sensitive or Critical
+// request is refused outright -- the reviewer is never even consulted,
+// which is the "quieter, not just stricter" property an audit session
+// needs (see Authorize's own doc comment).
+func TestClosingCriterionReadonlyRefusesSensitiveAndCriticalWithoutAsking(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), false, reviewer)
+	guard.SetAutonomy(Readonly)
+
+	if err := guard.Authorize(context.Background(), "write_file", json.RawMessage(`{"path":"a.txt","content":"x"}`)); !errors.Is(err, ErrDenied) {
+		t.Fatalf("write_file under readonly: err = %v, want ErrDenied", err)
+	}
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"git push origin main"}`)); !errors.Is(err, ErrDenied) {
+		t.Fatalf("git push under readonly: err = %v, want ErrDenied", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 (readonly must refuse before asking)", reviewer.calls)
+	}
+}
+
+// TestReadonlyStillRunsSafeButAsksControlled pins the other two rows of
+// §21.5's Readonly column: reads/safe commands keep running with no
+// dialog, but a Controlled command (go test, go build, ...) -- which
+// bypasses review under every other autonomy -- now asks, since Readonly
+// is the one autonomy that does not trust an unattended build/test run.
+func TestReadonlyStillRunsSafeButAsksControlled(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), false, reviewer)
+	guard.SetAutonomy(Readonly)
+
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls -la"}`)); err != nil {
+		t.Fatalf("safe bash under readonly: err = %v, want nil", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls after safe command = %d, want 0", reviewer.calls)
+	}
+
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`)); err != nil {
+		t.Fatalf("controlled bash under readonly: err = %v, want nil (allowed, after asking)", err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls after controlled command = %d, want 1 (readonly must ask, not silently run, a Controlled command)", reviewer.calls)
+	}
+}
+
+// TestAutonomyZeroValueIsAutoAndUnchangedBehaviour guards the
+// non-regression contract every pre-Step-30 test in this file already
+// exercises implicitly: a Guard built by New, with SetAutonomy never
+// called, authorizes exactly as it did before this type existed.
+func TestAutonomyZeroValueIsAutoAndUnchangedBehaviour(t *testing.T) {
+	guard := New(testPermissions(), false, nil)
+	if got := guard.Autonomy(); got != Auto {
+		t.Fatalf("Autonomy() on a fresh Guard = %v, want Auto (the zero value)", got)
+	}
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"go build ./..."}`)); err != nil {
+		t.Fatalf("controlled bash under (default) auto: err = %v, want nil", err)
+	}
+}
