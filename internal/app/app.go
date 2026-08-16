@@ -45,15 +45,21 @@ func Run(version string, resume bool) int {
 		return 1
 	}
 
+	// rawCWD is captured before xdg.Pretty rewrites the display copy below:
+	// §21.4 layer 2's own trust.Store keys records by the real absolute
+	// path (trust.Set's own doc comment on cleanPath), never by the
+	// "~/dev/..." shorthand a human reads in the dialog, so a project
+	// under $HOME does not silently key differently from one outside it.
+	rawCWD, err := os.Getwd()
+	if err != nil {
+		rawCWD = "."
+	}
+
 	// The TUI receives the directory already in display form. Deciding what a
 	// path looks like to a human needs the home directory and the host's
 	// separator, which is filesystem knowledge tui must not have (§6.1); all
 	// the TUI does with it is fit it into the columns it has.
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-	cwd = xdg.Pretty(cwd)
+	cwd := xdg.Pretty(rawCWD)
 
 	noTTY := !term.IsTerminal(os.Stdout.Fd())
 	cap := theme.Detect(cfg.UI.Color)
@@ -160,6 +166,15 @@ func Run(version string, resume bool) int {
 	// skipping the ask would remove the one thing this whole step adds.
 	var agentOpts engine.AgentOptions
 	var reviewer *toolReviewer
+	// guard is declared outside the block below (unlike reviewer's own
+	// *toolReviewer, which nothing after this needs) because
+	// trustStoreFor's own fileTrustStore.Save bridges §21.4 layer 2's
+	// dialog choice straight into Guard.SetAutonomy for the running
+	// session — see fileTrustStore's own doc comment. nil (tools
+	// disabled) is a supported value there too: the chosen autonomy still
+	// updates FooterState.Autonomy and trust.json, it just has no live
+	// Guard left to narrow in a session with no tools at all.
+	var guard *permissions.Guard
 	if cfg.Tools.Enabled {
 		reviewer = newToolReviewer()
 		var modelCost *catalog.Cost
@@ -168,7 +183,7 @@ func Run(version string, resume bool) int {
 			modelCost = m.Cost
 			modelCaps = capsForTools(m)
 		}
-		guard := permissions.New(cfg.Tools.Permissions, false, reviewer)
+		guard = permissions.New(cfg.Tools.Permissions, false, reviewer)
 		var toolsWarn string
 		// hasTTY = !noTTY: the TUI is only ever running with a live
 		// terminal and a real reviewer bridge to resolve gate 2's approval
@@ -238,6 +253,15 @@ func Run(version string, resume bool) int {
 	// own, honouring [session] save exactly like NewSessionRecorder does.
 	lister, listerWarn := NewSessionLister(cfg, resumeStore)
 	warnp.Warn(os.Stderr, listerWarn)
+
+	// §21.4 layer 2: exactly one question on the first interactive run in
+	// a project with no saved decision (resolveProjectTrust's own doc
+	// comment). needsTrust/gitInfo/initialAutonomy/trustStore are the
+	// five pieces tui.Options below needs; a config with
+	// [autonomy].remember = false always reports needsTrust so the
+	// question really is asked every run, per that key's own doc comment
+	// in internal/config/schema.go.
+	needsTrust, gitInfo, initialAutonomy, trustStore := resolveProjectTrust(cfg, rawCWD, guard)
 
 	root := tui.NewRoot(tui.Options{
 		Version: version,
@@ -332,6 +356,15 @@ func Run(version string, resume bool) int {
 		SuggestPerSession: cfg.Tools.Evolve.SuggestPerSession,
 		SuggestPerWeek:    cfg.Tools.Evolve.SuggestPerWeek,
 		DecayAfterRejects: cfg.Tools.Evolve.DecayAfterRejects,
+
+		// §21.4 layer 2 (Step 30) — see resolveProjectTrust's own doc
+		// comment for how each of these five is decided.
+		NeedsTrust:      needsTrust,
+		GitInGit:        gitInfo.InGit,
+		GitClean:        gitInfo.Clean,
+		GitBranch:       gitInfo.Branch,
+		InitialAutonomy: initialAutonomy,
+		TrustStore:      trustStore,
 	})
 
 	p := tea.NewProgram(root)

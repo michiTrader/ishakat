@@ -721,6 +721,21 @@ type Options struct {
 	// pre-Step-30 behaviour of starting directly in ModeChat.
 	NeedsTrust bool
 
+	// InitialAutonomy is the status line's own starting word (footer.go's
+	// FooterState.Autonomy) for a project that already answered §21.4
+	// layer 2 — internal/app's own trust.Store.Lookup hit, or, absent
+	// that, [autonomy].default (config.Autonomy.Default) translated
+	// through permissions.ParseAutonomy(...).String() the same way
+	// internal/app never hands this package a *permissions.Autonomy
+	// value directly (§6.1, the exact rule FooterState.Autonomy's own
+	// doc comment states). Empty is "not wired" — every test in this
+	// package, and any caller from before this field existed — which
+	// draws nothing in the footer, the same as an untouched
+	// FooterState.Autonomy already does. Ignored when NeedsTrust is
+	// true: resolveTrust (trust.go) sets m.footer.Autonomy itself once
+	// the dialog closes, so a caller passes at most one of the two.
+	InitialAutonomy string
+
 	// GitInGit, GitClean and GitBranch are internal/app.DetectGit's own
 	// three fields (internal/app/gitstatus.go), flattened rather than
 	// passed through as that package's GitInfo type: internal/tui can
@@ -902,7 +917,12 @@ func NewRoot(o Options) Root {
 	}
 	// CWD is deliberately not stored in the footer state: it depends on the
 	// terminal width, so it is computed on every render by Root.footerState.
-	r.footer = FooterState{Model: model}
+	// Autonomy is o.InitialAutonomy's own value here (empty unless
+	// internal/app already resolved a trust.Store decision, or
+	// [autonomy].default, into a word) — a Root that instead opens
+	// ModeTrust below overwrites this the moment resolveTrust runs, so
+	// the two never actually disagree about what the footer shows.
+	r.footer = FooterState{Model: model, Autonomy: o.InitialAutonomy}
 	SetInputWidth(&r.input, r.lay)
 
 	// trust is only built when it will actually be shown: every other
