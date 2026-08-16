@@ -420,22 +420,42 @@ func New(permissions config.Permissions, yolo bool, reviewer Reviewer) *Guard {
 // explicitly, rather than relying on Critical simply never matching the
 // other branches' conditions.
 //
-// The Readonly gate (Step 30, §21.5's own table) runs first, right after
-// the hard denies and the configured deny mode -- both of those already
-// narrow what any autonomy could otherwise permit, so checking Readonly
-// after them, not before, keeps "a lower layer can never widen a higher
-// one" true in both directions. Under Readonly: Safe still runs (reading
-// cannot damage anything, regardless of who is deciding); Controlled asks
-// instead of bypassing review the way it does under every other autonomy;
-// Sensitive and Critical are refused outright, with no reviewer consulted
-// at all -- §21.5's table gives both the same "refuse" cell, and refusing
-// before ever building a Request for the reviewer is what makes this a
-// genuinely quieter mode for an audit session, not merely a stricter one.
-// Auto and Agile (this type's other two values) take neither branch below,
-// which is why a Guard nobody ever calls SetAutonomy on -- every
-// pre-Step-30 caller and test -- sees no behaviour change: Auto is the
-// zero value.
+// ask_user (§19.1's ninth core tool, §21.16 decision 1) is checked first
+// of all, before even the hard denies below: "a policy that could deny it
+// would produce an agent that is blocked and cannot say so" is not one
+// preference among the gates that follow, it is a property none of them
+// may ever contradict -- a WriteDeny pattern that happens to match
+// ask_user's own arguments, a Shell config set to "deny", Readonly
+// autonomy: none of these may refuse the one tool whose entire effect is
+// to stop and hand control back to a human, since refusing it would leave
+// the agent with no way to report that it is stuck. This is a dedicated,
+// unconditional early return rather than a Tier/mode combination threaded
+// through the gates below, because every one of those gates independently
+// has a path that can say no, and "never denyable" must not depend on all
+// of them individually agreeing to let it through. ask_user is still
+// bounded by the loop's own hard cap (§12bis) -- that limit is enforced
+// by the engine's own turn loop, not by this function, so a model cannot
+// spend an unbounded number of iterations merely asking in circles.
+//
+// The Readonly gate (Step 30, §21.5's own table) runs first of the
+// ordinary gates, right after the hard denies and the configured deny
+// mode -- both of those already narrow what any autonomy could otherwise
+// permit, so checking Readonly after them, not before, keeps "a lower
+// layer can never widen a higher one" true in both directions. Under
+// Readonly: Safe still runs (reading cannot damage anything, regardless
+// of who is deciding); Controlled asks instead of bypassing review the
+// way it does under every other autonomy; Sensitive and Critical are
+// refused outright, with no reviewer consulted at all -- §21.5's table
+// gives both the same "refuse" cell, and refusing before ever building a
+// Request for the reviewer is what makes this a genuinely quieter mode
+// for an audit session, not merely a stricter one. Auto and Agile (this
+// type's other two values) take neither branch below, which is why a
+// Guard nobody ever calls SetAutonomy on -- every pre-Step-30 caller and
+// test -- sees no behaviour change: Auto is the zero value.
 func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMessage) error {
+	if name == askUserToolName {
+		return nil
+	}
 	args := clone(arguments)
 	req := Request{Name: name, Arguments: args, Tier: g.tierFor(name, args)}
 	if reason := g.hardDeny(req); reason != "" {
@@ -498,6 +518,16 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	return nil
 }
 
+// askUserToolName is tools.AskUser's own Name() -- duplicated here as a
+// bare string, not an import, so this package never depends on
+// internal/tools to reason about the one tool whose bypass lives in Go
+// rather than in any Tier/mode combination (Authorize's own doc comment
+// explains why this must be a dedicated check, not a table entry). The
+// same "duplicate a small constant rather than import the other package"
+// choice bashCommand's own doc comment already makes for reading bash's
+// command argument back out of raw JSON.
+const askUserToolName = "ask_user"
+
 // isNativeToolName reports whether name is one of tierFor's/mode's own
 // eight recognized names (layer 1, §19.1) -- the boundary (*Guard).tierFor
 // and (*Guard).mode use to decide whether a name may ever be supplemented
@@ -509,27 +539,48 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 // tool-calling loop is treated with. Note that (*Guard).tierFor no longer
 // even needs this function's help for bash specifically -- see that
 // method's own doc comment -- but the guarantee it states remains true.
+//
+// ask_user (§19.1's ninth core tool, Step 32) is listed here too, for the
+// identical reason: a manifest or declarative tool naming itself
+// "ask_user" must never be able to claim the Safe tier this function would
+// otherwise hand out to it via g.tiers, even though Authorize's own
+// unconditional bypass (see that method's doc comment) means this
+// function's answer for the real ask_user is never actually consulted in
+// practice -- the guarantee is stated here anyway, matching dispatch's own
+// "explicit for legibility" precedent for a case its own gate structurally
+// cannot reach either.
 func isNativeToolName(name string) bool {
 	switch name {
-	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash", "dispatch":
+	case "read_file", "glob", "grep", "fetch", "write_file", "edit_file", "bash", "dispatch", askUserToolName:
 		return true
 	default:
 		return false
 	}
 }
 
-// tierFor is the fixed switch over layer 1's eight native tools -- kept as
-// a free function, not a method, so guard_test.go's existing
-// TestGuardFetchTierIsSafe (calling tierFor("fetch") directly) keeps
-// compiling unchanged, and so its own contract (these eight names, no
-// more) can never quietly depend on a Guard's tiers map. bash's case here
-// is only a fallback -- (*Guard).tierFor never actually reaches it, since
-// bash is special-cased there before this function is called at all -- but
-// it is kept here (rather than removed) so this switch still reads as the
-// complete eight-tool table §19.1 documents.
+// tierFor is the fixed switch over layer 1's nine native tools (the
+// original eight of §19.1 plus ask_user, §19.1's one documented
+// exception, Step 32) -- kept as a free function, not a method, so
+// guard_test.go's existing TestGuardFetchTierIsSafe (calling
+// tierFor("fetch") directly) keeps compiling unchanged, and so its own
+// contract can never quietly depend on a Guard's tiers map. bash's case
+// here is only a fallback -- (*Guard).tierFor never actually reaches it,
+// since bash is special-cased there before this function is called at
+// all -- but it is kept here (rather than removed) so this switch still
+// reads as the complete tool table §19.1 documents.
 func tierFor(name string) Tier {
 	switch name {
 	case "read_file", "glob", "grep", "fetch":
+		return Safe
+	case askUserToolName:
+		// ask_user is always Safe (§21.16 decision 1: "always present,
+		// always safe, never denyable") -- Authorize's own unconditional
+		// bypass means this case is never actually reached for a real
+		// call, the same "never reached, stated anyway" precedent
+		// dispatch's own case comment below already sets, kept for the
+		// same legibility reason: a reader of this switch should be able
+		// to answer "what tier is ask_user" without knowing Authorize
+		// short-circuits it earlier.
 		return Safe
 	case "write_file", "edit_file":
 		return Sensitive
