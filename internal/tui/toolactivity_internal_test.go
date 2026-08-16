@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/permissions"
 )
 
 // argsFor is a small helper so each case below reads as the tool call it
@@ -29,7 +30,7 @@ func TestToolActivityLinesIsEmptyWithoutToolCalls(t *testing.T) {
 		convo.User("hello"),
 		mustAssistantText("hi there"),
 	}}
-	if got := toolActivityLines(unicodeGlyphs, hist, 0); got != "" {
+	if got := toolActivityLines(unicodeGlyphs, hist, 0, nil); got != "" {
 		t.Errorf("toolActivityLines = %q, want empty for a turn with no tool calls", got)
 	}
 	if n := toolActivityCount(hist, 0); n != 0 {
@@ -45,7 +46,7 @@ func TestToolActivityLinesNamesTheToolAndItsTarget(t *testing.T) {
 		argsFor(t, map[string]string{"path": "step16-approval.txt", "content": "Step 16 approval works."})))
 	hist := &convo.Conversation{Messages: []convo.Message{convo.User("create it"), msg}}
 
-	got := toolActivityLines(unicodeGlyphs, hist, 0)
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
 	if !strings.Contains(got, "write_file") {
 		t.Errorf("toolActivityLines = %q, want it to name write_file", got)
 	}
@@ -77,7 +78,7 @@ func TestToolActivityLinesMarksAFailedCall(t *testing.T) {
 		"tool permission denied: user declined write_file\nsecond line must not appear"))
 	hist := &convo.Conversation{Messages: []convo.Message{convo.User("write it"), call, result}}
 
-	got := toolActivityLines(unicodeGlyphs, hist, 0)
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
 	if !strings.Contains(got, unicodeGlyphs.warnMark) {
 		t.Errorf("toolActivityLines = %q, want the warn glyph for a failed call", got)
 	}
@@ -101,7 +102,7 @@ func TestToolActivityLinesOnlySummarizesThisTurn(t *testing.T) {
 		argsFor(t, map[string]string{"pattern": "**/*.go"})))
 	hist := &convo.Conversation{Messages: []convo.Message{convo.User("a"), old, fresh}}
 
-	got := toolActivityLines(unicodeGlyphs, hist, 2) // only `fresh` is new.
+	got := toolActivityLines(unicodeGlyphs, hist, 2, nil) // only `fresh` is new.
 	if strings.Contains(got, "already-summarized.txt") {
 		t.Errorf("toolActivityLines = %q, want no earlier turn's tool calls", got)
 	}
@@ -121,7 +122,7 @@ func TestToolActivityLinesTruncatesALongCommand(t *testing.T) {
 		argsFor(t, map[string]string{"command": long})))
 	hist := &convo.Conversation{Messages: []convo.Message{call}}
 
-	got := toolActivityLines(unicodeGlyphs, hist, 0)
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
 	if runeLen(got) > 80 {
 		t.Errorf("toolActivityLines is %d runes long, want a truncated single line", runeLen(got))
 	}
@@ -135,7 +136,7 @@ func TestToolActivityLinesTruncatesALongCommand(t *testing.T) {
 // must still produce a true line (the tool's name) instead of panicking or
 // inventing a target.
 func TestToolActivityLinesHandlesNilAndUnknownArgs(t *testing.T) {
-	if got := toolActivityLines(unicodeGlyphs, nil, 0); got != "" {
+	if got := toolActivityLines(unicodeGlyphs, nil, 0, nil); got != "" {
 		t.Errorf("toolActivityLines(nil) = %q, want empty", got)
 	}
 
@@ -146,12 +147,96 @@ func TestToolActivityLinesHandlesNilAndUnknownArgs(t *testing.T) {
 	)
 	hist := &convo.Conversation{Messages: []convo.Message{call}}
 
-	got := toolActivityLines(unicodeGlyphs, hist, 0)
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
 	if !strings.Contains(got, "invented_tool") || !strings.Contains(got, "broken_args") {
 		t.Errorf("toolActivityLines = %q, want both tool names present", got)
 	}
 	if lines := strings.Count(got, "\n") + 1; lines != 2 {
 		t.Errorf("toolActivityLines produced %d lines, want one per call", lines)
+	}
+}
+
+// TestToolActivityLinesNamesADispatchedSubAgentsGoal covers §21.11's own
+// "every sub-agent states its goal in one sentence" requirement on the one
+// line the parent transcript actually shows for it: before this, dispatch's
+// "task" argument was not one of toolTarget's three recognized keys, so a
+// dispatch call summarized as bare "• dispatch" with no visible goal at
+// all — exactly the "the model did nothing" confusion this whole file
+// exists to end for every other tool.
+func TestToolActivityLinesNamesADispatchedSubAgentsGoal(t *testing.T) {
+	call := convo.NewMessage(convo.RoleAssistant)
+	call.Blocks = append(call.Blocks, convo.ToolCallBlock("c1", "dispatch",
+		argsFor(t, map[string]string{"task": "find every TODO in internal/tools"})))
+	hist := &convo.Conversation{Messages: []convo.Message{convo.User("delegate it"), call}}
+
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
+	if !strings.Contains(got, "dispatch") {
+		t.Errorf("toolActivityLines = %q, want it to name dispatch", got)
+	}
+	if !strings.Contains(got, "find every TODO in internal/tools") {
+		t.Errorf("toolActivityLines = %q, want the sub-agent's own stated goal", got)
+	}
+}
+
+// TestToolActivityLinesShowsInheritedMissionRulesOnDispatch is §21.11's own
+// "no browser · no network" mockup line, proven at the seam
+// Guard.MissionRules()'s own doc comment names as its caller: a dispatch
+// call running under an active mission must say, on the transcript, which
+// constraints the sub-agent it started inherits — the same visibility
+// principle that already applies to a failed call (silence is worst when
+// there is something the user needs to know that a bare tool name would
+// not say).
+func TestToolActivityLinesShowsInheritedMissionRulesOnDispatch(t *testing.T) {
+	call := convo.NewMessage(convo.RoleAssistant)
+	call.Blocks = append(call.Blocks, convo.ToolCallBlock("c1", "dispatch",
+		argsFor(t, map[string]string{"task": "benchmark the render loop"})))
+	hist := &convo.Conversation{Messages: []convo.Message{convo.User("delegate it"), call}}
+
+	rules := []permissions.MissionRule{
+		{Capability: "bash", Pattern: "**playwright**"},
+		{Capability: "fetch", Pattern: "**playwright**"},
+	}
+	got := toolActivityLines(unicodeGlyphs, hist, 0, rules)
+	if !strings.Contains(got, "no bash(**playwright**)") {
+		t.Errorf("toolActivityLines = %q, want the bash constraint spelled out", got)
+	}
+	if !strings.Contains(got, "no fetch(**playwright**)") {
+		t.Errorf("toolActivityLines = %q, want the fetch constraint spelled out", got)
+	}
+}
+
+// TestToolActivityLinesOmitsMissionRulesOnNonDispatchCalls keeps the
+// constraint line from becoming noise repeated on every single tool call:
+// an ordinary call already runs under the same Guard directly (Authorize
+// would simply have refused it if it violated the mission), so only a
+// dispatch call — the one case where enforcement is being handed to a
+// second, isolated loop — is the line honestly in need of saying so.
+func TestToolActivityLinesOmitsMissionRulesOnNonDispatchCalls(t *testing.T) {
+	call := convo.NewMessage(convo.RoleAssistant)
+	call.Blocks = append(call.Blocks, convo.ToolCallBlock("c1", "bash",
+		argsFor(t, map[string]string{"command": "go test ./..."})))
+	hist := &convo.Conversation{Messages: []convo.Message{convo.User("run tests"), call}}
+
+	rules := []permissions.MissionRule{{Capability: "bash", Pattern: "**playwright**"}}
+	got := toolActivityLines(unicodeGlyphs, hist, 0, rules)
+	if strings.Contains(got, "no bash") {
+		t.Errorf("toolActivityLines = %q, want no mission-rule line on a non-dispatch call", got)
+	}
+}
+
+// TestToolActivityLinesOmitsMissionRulesWhenNoneActive is the common-case
+// pin: a dispatch call in a session with no confirmed mission must render
+// exactly as it did before MissionRules existed, since the overwhelming
+// majority of sessions never state a constraint at all.
+func TestToolActivityLinesOmitsMissionRulesWhenNoneActive(t *testing.T) {
+	call := convo.NewMessage(convo.RoleAssistant)
+	call.Blocks = append(call.Blocks, convo.ToolCallBlock("c1", "dispatch",
+		argsFor(t, map[string]string{"task": "summarize fetch.go"})))
+	hist := &convo.Conversation{Messages: []convo.Message{convo.User("delegate it"), call}}
+
+	got := toolActivityLines(unicodeGlyphs, hist, 0, nil)
+	if strings.Contains(got, "no ") {
+		t.Errorf("toolActivityLines = %q, want no constraint line with an empty mission-rule list", got)
 	}
 }
 

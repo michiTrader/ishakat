@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/convo"
+	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
@@ -19,6 +21,19 @@ type fakeMissionGuard struct {
 
 func (g *fakeMissionGuard) AddMissionRules(rules []permissions.MissionRule) {
 	g.added = append(g.added, rules)
+}
+
+// MissionRules flattens every AddMissionRules call this fake has recorded,
+// mirroring the real Guard's own "appends, never replaces" contract
+// (guard.go's AddMissionRules doc comment) closely enough for this
+// package's own tests: a caller reading MissionRules back after resolving
+// one or more missions should see every rule any of them added, in order.
+func (g *fakeMissionGuard) MissionRules() []permissions.MissionRule {
+	var out []permissions.MissionRule
+	for _, rules := range g.added {
+		out = append(out, rules...)
+	}
+	return out
 }
 
 func newMissionRoot(guard MissionGuard) Root {
@@ -177,6 +192,67 @@ func TestRenderMissionShowsGoalAndCompiledRule(t *testing.T) {
 	}
 	if !contains(out, "That's right") || !contains(out, "Adjust the rule") || !contains(out, "Just a preference") {
 		t.Fatalf("renderMission missing one of the three options:\n%s", out)
+	}
+}
+
+// TestMissionRulesOrDegradesToNilWithoutAGuard pins missionRulesOr's own nil
+// check: a Root built with no MissionGuard (every pre-Step-31-part-3 test in
+// this package, and any caller that never wires Options.MissionGuard) must
+// see toolActivityLines render exactly as before this method existed, not
+// panic on a nil interface value the way calling MissionRules() directly on
+// it would.
+func TestMissionRulesOrDegradesToNilWithoutAGuard(t *testing.T) {
+	r := newMissionRoot(nil)
+	if got := r.missionRulesOr(); got != nil {
+		t.Fatalf("missionRulesOr() = %v, want nil with no MissionGuard wired", got)
+	}
+}
+
+// TestFinishAgentTurnShowsInheritedMissionRulesOnADispatchLine is the
+// end-to-end proof, through the real Root plumbing rather than a direct
+// toolActivityLines call: once a mission has been confirmed
+// (resolveMission -> guard.AddMissionRules), a turn that dispatches a
+// sub-agent must show the inherited constraint on its own transcript line
+// — the actual seam Guard.MissionRules()'s own doc comment names as its
+// caller, now wired all the way from ModeMission's own confirmation
+// through to finishAgentTurn's own summary.
+func TestFinishAgentTurnShowsInheritedMissionRulesOnADispatchLine(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := newMissionRoot(guard)
+
+	// Confirm the mission exactly the way a real session would: checkMission
+	// opens ModeMission, Enter accepts the preselected "1. That's right" row.
+	r, ok := mustCheckMission(t, r, "fix orbital-dash, no playwright")
+	if !ok {
+		t.Fatal("checkMission did not open ModeMission")
+	}
+	m, _ := r.updateMission(tea.KeyPressMsg{Code: tea.KeyEnter})
+	r = m.(Root)
+	if len(guard.added) != 1 {
+		t.Fatalf("guard.added = %v, want exactly one AddMissionRules call from accepting the mission", guard.added)
+	}
+
+	// A turn that dispatched a sub-agent, the same shape agentTurnState
+	// holds live between startAgentTurn and finishAgentTurn.
+	call := convo.NewMessage(convo.RoleAssistant)
+	call.Blocks = append(call.Blocks, convo.ToolCallBlock("c1", "dispatch",
+		argsFor(t, map[string]string{"task": "benchmark the render loop"})))
+	hist := &convo.Conversation{Messages: []convo.Message{convo.User("delegate it"), call}}
+	r.agentTurn = agentTurnState{hist: hist, before: 1}
+	r.live.start(r.model)
+
+	next, _ := r.finishAgentTurn(engine.AgentResult{Text: "done"}, nil)
+	got := next.(Root)
+
+	if len(got.transcript) == 0 {
+		t.Fatal("finishAgentTurn added no transcript entry")
+	}
+	last := got.transcript[len(got.transcript)-1].text
+	if !contains(last, "dispatch") {
+		t.Fatalf("transcript entry = %q, want it to name dispatch", last)
+	}
+	if !contains(last, "no bash(**playwright**)") {
+		t.Fatalf("transcript entry = %q, want the inherited mission rule spelled out", last)
 	}
 }
 

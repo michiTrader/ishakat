@@ -183,7 +183,7 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 	// precisely the confusion the original Step 16 report described
 	// (`ls` showed no file, and nothing on screen said whether a tool had
 	// even run). A turn that touched the filesystem has to say so.
-	if summary := toolActivityLines(m.lay.glyphs(), hist, before); summary != "" {
+	if summary := toolActivityLines(m.lay.glyphs(), hist, before, m.missionRulesOr()); summary != "" {
 		if text == "" {
 			text = summary
 		} else {
