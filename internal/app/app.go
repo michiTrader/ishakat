@@ -167,6 +167,7 @@ func Run(version string, resume bool) int {
 	// skipping the ask would remove the one thing this whole step adds.
 	var agentOpts engine.AgentOptions
 	var reviewer *toolReviewer
+	var asker *tuiAsker
 	// guard is declared outside the block below (unlike reviewer's own
 	// *toolReviewer, which nothing after this needs) because
 	// trustStoreFor's own fileTrustStore.Save bridges §21.4 layer 2's
@@ -200,15 +201,16 @@ func Run(version string, resume bool) int {
 		// on why a sub-agent reuses the parent's already-resolved
 		// provider/model rather than re-resolving one of its own.
 		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY)
-		// asker is nil here: no ask.Asker implementation exists yet -- this
-		// is the TUI's own call site, and the eventual home for a dialog
-		// bridging ask_user's Form to a real human, generalizing
-		// toolapprove.go's existing ask.State/ask.Form machinery (Step 32
-		// part 2's own changelog entry names this as the next open seam).
-		// Until that lands, ask_user stays visible in the model's own
-		// catalogue (WithMetaTools' unconditional registration) but any
-		// call against it degrades to tool-error data, same as headless.
-		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, nil)
+		// asker is built now, same two-step reasoning as reviewer above:
+		// buildAgentOptions needs an ask.Asker before tui.Options (and
+		// therefore the *tea.Program) exists at all, but tuiAsker cannot
+		// actually reach the running program until asker.SetProgram runs,
+		// right after tea.NewProgram below produces it -- see askuser.go's
+		// own comment (internal/app) for why that two-step construction is
+		// unavoidable, the identical shape toolreview.go's reviewer already
+		// follows.
+		asker = newTUIAsker()
+		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, asker)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}
 
@@ -407,6 +409,14 @@ func Run(version string, resume bool) int {
 	// rather than a constructor argument.
 	if reviewer != nil {
 		reviewer.SetProgram(p)
+	}
+	// asker (nil unless cfg.Tools.Enabled) has been waiting since it was
+	// built above for the same thing reviewer was: a running *tea.Program
+	// to send tui.AskUserRequestMsg to. See internal/app/askuser.go's own
+	// comment for why this has to be a second step rather than a
+	// constructor argument.
+	if asker != nil {
+		asker.SetProgram(p)
 	}
 
 	// §4.4/§11's background refresh: only worth doing when the cache

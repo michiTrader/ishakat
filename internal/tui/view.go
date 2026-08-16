@@ -60,6 +60,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeToolApprove {
 		return m.renderToolApprove()
 	}
+	if m.mode == ModeAskUser {
+		return m.renderAskUser()
+	}
 	if m.mode == ModeLogin {
 		return m.renderLogin()
 	}
