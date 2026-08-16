@@ -507,8 +507,72 @@ func (g *Guard) hasSessionGrant(key string) bool {
 	return ok
 }
 
+// requestKey computes the session-grant key for req, fixing §21.3 defect 2
+// for bash specifically: `requestKey(req Request) string { return req.Name +
+// "\x00" + string(req.Arguments) }` keyed a grant on the exact argument
+// bytes, so "allow for the session" covered "ls" and not "ls -la" -- the
+// human grants, the agent varies one flag, the dialog returns.
+//
+// bash routes through bashSessionKey, which generalizes over flags (see its
+// own doc comment for exactly how far, and why not further). Every other
+// tool keeps the original exact-byte key unchanged: write_file/edit_file's
+// arguments are a path and file content, not a command line with a
+// flag/positional distinction, so there is no equivalent narrow
+// generalization to apply without guessing -- widening their grants is not
+// what defect 2's own worked example asks for, and is left to §21.12's
+// richer [[permissions.rule]] pattern configuration (future work, not this
+// step).
 func requestKey(req Request) string {
+	if req.Name == "bash" {
+		if key, ok := bashSessionKey(req.Arguments); ok {
+			return key
+		}
+	}
 	return req.Name + "\x00" + string(req.Arguments)
+}
+
+// bashSessionKey builds bash's session-grant key from its command argument,
+// or reports ok=false for an unparseable/empty command (in which case
+// requestKey falls back to the exact-byte key, matching bashTier's own
+// "cannot be sure, do not guess" fallback to Sensitive for the same input).
+func bashSessionKey(args json.RawMessage) (key string, ok bool) {
+	var parsed bashCommand
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return "", false
+	}
+	cmd := strings.TrimSpace(parsed.Command)
+	if cmd == "" {
+		return "", false
+	}
+	return "bash\x00family\x00" + bashFamily(cmd), true
+}
+
+// bashFamily reduces cmd to the sequence of tokens that do not look like a
+// flag (do not start with "-"), joined back with single spaces. This is the
+// "family" §21.8's own dialog mockup names for a generalized, editable
+// pattern (e.g. `node tools/bench.js *`): two invocations agreeing on every
+// non-flag token differ only in which flags they pass, exactly the axis
+// defect 2's own worked example varies on ("ls" granting "ls -la"). Two
+// invocations that disagree on a non-flag token (e.g. "echo one" vs "echo
+// two") are genuinely different commands and must not share a grant --
+// TestGuardDoesNotShareApprovalWithDifferentArguments pins that half.
+//
+// This is deliberately narrower than a general glob/pattern engine: it
+// generalizes over flags only, never over positional arguments, so a grant
+// can never silently widen to cover a filename, host or other value it was
+// never shown approving. §21.12's own richer [[permissions.rule]] pattern
+// configuration remains future work; this is the minimal fix defect 2 asks
+// for, scoped to the one tool (bash) the closing criterion names.
+func bashFamily(cmd string) string {
+	tokens := strings.Fields(cmd)
+	kept := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		kept = append(kept, tok)
+	}
+	return strings.Join(kept, " ")
 }
 
 func clone(value json.RawMessage) json.RawMessage {
