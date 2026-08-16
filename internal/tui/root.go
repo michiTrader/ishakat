@@ -78,6 +78,19 @@ const (
 	// async branch, applying a theme (switchTheme) is synchronous, so
 	// there is no "turn not over" case to preserve here.
 	ModeThemePicker
+	// ModeTrust: §21.4 layer 2's first-run trust dialog (Step 30,
+	// docs/PLAN.md's own "New project" mockup, trust.go). Unlike every
+	// other overlay in this list, it never opens from a keybinding or a
+	// slash command mid-session — NewRoot itself sets this mode, in
+	// place of ModeChat, exactly once, when Options.NeedsTrust is true
+	// (internal/app already looked up internal/trust.Store and found no
+	// record covering this project's path). Closing it — by choosing an
+	// option or by Esc, which defaults to the same safer option §21.4
+	// names ("2. Ask before changes") rather than to the recommended
+	// one — always returns to ModeChat: there is no turn in flight yet
+	// for this to pause, the same reasoning ModeThemePicker's own
+	// comment gives for its one-way close.
+	ModeTrust
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -478,6 +491,18 @@ type Root struct {
 	// suggest is Step 25's ModeSuggest overlay's own state (suggest.go),
 	// live only while mode == ModeSuggest.
 	suggest suggestState
+
+	// trust is Step 30's ModeTrust overlay's own state (trust.go), live
+	// only while mode == ModeTrust.
+	trust trustDialog
+
+	// trustStore persists §21.4 layer 2's own decision (trust.go's own
+	// doc comment on the §6.1 seam this draws — the same one ThemeStore
+	// already draws for /theme's write). nil is a supported value: the
+	// chosen autonomy still applies for the running session, it just
+	// does not survive a restart, the same "session-only" degradation
+	// ThemeStore's own nil case already documents.
+	trustStore TrustStore
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -686,6 +711,35 @@ type Options struct {
 	SuggestPerSession int
 	SuggestPerWeek    int
 	DecayAfterRejects int
+
+	// NeedsTrust is true when internal/app looked up internal/trust.Store
+	// for this project's path (or any ancestor) and found no saved
+	// decision — §21.4 layer 2's own "first run in a directory that has
+	// no saved decision" condition. NewRoot opens ModeTrust instead of
+	// ModeChat exactly when this is true; false (the zero value, and
+	// every test in this package) keeps every existing caller on the
+	// pre-Step-30 behaviour of starting directly in ModeChat.
+	NeedsTrust bool
+
+	// GitInGit, GitClean and GitBranch are internal/app.DetectGit's own
+	// three fields (internal/app/gitstatus.go), flattened rather than
+	// passed through as that package's GitInfo type: internal/tui can
+	// never import internal/app (§6.1's own one-way rule — app.go's
+	// package comment names app as "the only package authorized to
+	// import both internal/config and internal/tui"), so these three
+	// plain fields travel the same way FooterState.GitBranch already
+	// does for an unrelated concern. All three are zero value ("not a
+	// repository") for a caller that never calls DetectGit, which is
+	// exactly what an ordinary non-git directory should show in the
+	// trust dialog's own "git: yes/no" line.
+	GitInGit  bool
+	GitClean  bool
+	GitBranch string
+
+	// TrustStore persists §21.4 layer 2's own decision (trust.go's own
+	// doc comment on the §6.1 seam this draws) — see Root.trustStore's
+	// own comment for why nil is a supported value.
+	TrustStore TrustStore
 }
 
 // NewRoot construye el modelo inicial.
@@ -740,14 +794,24 @@ func NewRoot(o Options) Root {
 		compactOnError = "drop-oldest"
 	}
 
+	// startMode is ModeChat for every pre-Step-30 caller (every test in
+	// this package, and any real run in an already-trusted project) and
+	// ModeTrust exactly when internal/app found no saved §21.4 layer 2
+	// decision for this project — see Options.NeedsTrust's own comment.
+	startMode := ModeChat
+	if o.NeedsTrust {
+		startMode = ModeTrust
+	}
+
 	r := Root{
 		version:     o.Version,
 		cwd:         o.CWD,
-		mode:        ModeChat,
+		mode:        startMode,
 		lay:         lay,
 		styles:      styles,
 		themesDir:   o.ThemesDir,
 		themeStore:  o.ThemeStore,
+		trustStore:  o.TrustStore,
 		input:       NewInput(lay.InputPrefix()),
 		fps:         fps,
 		cfg:         o.Cfg,
@@ -840,6 +904,15 @@ func NewRoot(o Options) Root {
 	// terminal width, so it is computed on every render by Root.footerState.
 	r.footer = FooterState{Model: model}
 	SetInputWidth(&r.input, r.lay)
+
+	// trust is only built when it will actually be shown: every other
+	// caller (an already-trusted project, or any test in this package
+	// that never sets NeedsTrust) leaves it at trustDialog{}, the same
+	// "do not build state nobody asked for" rule themePicker/confirm
+	// already follow for their own overlays.
+	if startMode == ModeTrust {
+		r.trust = newTrustDialog(o.CWD, o.GitInGit, o.GitClean, o.GitBranch)
+	}
 	return r
 }
 
@@ -1027,6 +1100,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSuggest(msg)
 	case ModeThemePicker:
 		return m.updateThemePicker(msg)
+	case ModeTrust:
+		return m.updateTrust(msg)
 	default:
 		return m.updateChat(msg)
 	}
