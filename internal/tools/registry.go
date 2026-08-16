@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/evolve"
 )
 
@@ -265,6 +266,25 @@ type MetaToolsOptions struct {
 	// 20's own fixtures and every hand-written tool.toml before this item
 	// landed already assumed.
 	ActiveCaps Caps
+
+	// Asker is ask_user's own injected capability (Step 32 part 1,
+	// §19.1's ninth core tool, §21.16 decision 1) -- see AskUser's own
+	// doc comment for why it is an ask.Asker interface value rather than
+	// a bare func. Unlike DispatchRunner, a nil Asker does NOT omit
+	// ask_user from the returned Registry: §19.1's exception is granted
+	// on the condition that the tool is "always present, always safe,
+	// never denyable", so WithMetaTools always adds it, regardless of
+	// opts.Dir or any other gate -- the "absent, not merely denied"
+	// shape this file uses for tool_create/dispatch does not apply here,
+	// because ask_user acquires no capability an absent wiring would
+	// need to protect against. A nil Asker instead degrades at call
+	// time (AskUser.Run's own doc comment): the tool stays visible in
+	// the model's own catalogue, and a call against it reports "no
+	// human is present to ask" as ordinary tool-error data, which is
+	// truthful for exactly the callers that leave this field unset
+	// today (every headless/sub-agent call site, until that seam is
+	// wired) rather than a silent capability gap the model cannot see.
+	Asker ask.Asker
 }
 
 // WithMetaTools builds a Registry over WithDeclarative's own catalogue plus
@@ -320,12 +340,25 @@ type MetaToolsOptions struct {
 // own catalogue cannot be talked into asking for it by anything in its
 // context, where a tool that exists but always errors is still a standing
 // invitation a sufficiently adversarial prompt could keep proposing.
+//
+// ask_user (Step 32 part 1, §19.1's ninth and last core tool) is added
+// unconditionally, right after dispatch and before the opts.Dir check --
+// unlike every other tool in this function, it does not need opts.Dir (it
+// touches no layer-2 tools directory) and, unlike dispatch, it is not
+// gated on opts.Asker being non-nil either: §19.1's exception is granted
+// on condition the tool is "always present, always safe, never denyable",
+// so a nil opts.Asker still yields a Registry containing ask_user -- it
+// degrades at call time instead (AskUser.Run's own doc comment), the same
+// way a headless caller with no human attached will see the tool but any
+// call against it will report that truthfully as tool-error data.
 func WithMetaTools(opts MetaToolsOptions) (*Registry, string) {
 	reg, warn := WithDeclarative(opts.Allow, opts.AllowAll, opts.Dir, opts.ActiveCaps)
 
 	if opts.DispatchRunner != nil {
 		reg = NewRegistry(append(reg.Tools(), Dispatch{Runner: opts.DispatchRunner})...)
 	}
+
+	reg = NewRegistry(append(reg.Tools(), AskUser{Asker: opts.Asker})...)
 
 	if strings.TrimSpace(opts.Dir) == "" {
 		return reg, warn

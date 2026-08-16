@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -84,7 +85,19 @@ import (
 // for what it gates. The zero value (every call site and every test
 // before this parameter existed) satisfies every manifest that declares
 // no requires_caps/min_context of its own, so this is purely additive.
-func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, caps tools.Caps, hasTTY bool, dispatchRunner tools.SubAgentRunner) (engine.AgentOptions, string) {
+//
+// asker is Step 32 part 2's own addition: tools.MetaToolsOptions.Asker,
+// passed straight through. nil (every call site in this package today —
+// no ask.Asker implementation has been built yet; that is the TUI/serve
+// bridge Step 32 part 1's own changelog entry names as still open) does
+// not omit ask_user the way a nil dispatchRunner omits dispatch — see
+// WithMetaTools' own doc comment for why ask_user has no "absent" mode at
+// all. A nil asker only means ask_user's own Run degrades to reporting
+// "no human is present to ask" as tool-error data, exactly as before this
+// parameter existed (ask_user was already unconditionally registered by
+// WithMetaTools with a zero-value Asker whenever this parameter did not
+// exist to set it).
+func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *catalog.Cost, caps tools.Caps, hasTTY bool, dispatchRunner tools.SubAgentRunner, asker ask.Asker) (engine.AgentOptions, string) {
 	reg, warn := tools.WithMetaTools(tools.MetaToolsOptions{
 		Dir:             cfgTools.Dir,
 		Allow:           cfgTools.Egress.Allow,
@@ -96,6 +109,7 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 		LedgerPath:      xdg.UsageFile(),
 		DispatchRunner:  dispatchRunner,
 		ActiveCaps:      caps,
+		Asker:           asker,
 	})
 	if guard != nil {
 		// Every tool beyond the native seven (declarative tools chief
@@ -222,7 +236,11 @@ func runAgentTurnHeadless(
 	// registry) is threaded through identically, so a sub-agent sees the
 	// exact same tool_create visibility rule the parent turn does.
 	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate)
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner)
+	// asker is nil here: headless has no reviewer channel wired for gate 2
+	// either (see this function's own doc comment above on hasTTY), and no
+	// ask.Asker implementation exists yet for any door — see
+	// buildAgentOptions' own doc comment on its asker parameter.
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner, nil)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}

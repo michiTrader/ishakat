@@ -381,17 +381,22 @@ func TestWithDeclarativeSurfacesDiscoveryWarn(t *testing.T) {
 
 // TestWithMetaToolsEmptyDirBehavesLikeWithDeclarative pins that an unset
 // Dir (the zero value, matching every install that has not configured a
-// layer-2 tools directory) yields exactly the native seven with none of
-// §19.5's five meta-tools added -- WithMetaTools' own doc comment's "no Dir
-// means nothing to act on yet" contract, mirrored from DeclarativeTools'
-// identical "dir == \"\" is a no-op" rule.
+// layer-2 tools directory) yields exactly the native seven plus ask_user
+// (Step 32 part 1's ninth core tool, always present regardless of Dir --
+// see WithMetaTools' own doc comment) with none of §19.5's five meta-tools
+// added -- WithMetaTools' own doc comment's "no Dir means nothing to act
+// on yet" contract, mirrored from DeclarativeTools' identical "dir == \"\"
+// is a no-op" rule.
 func TestWithMetaToolsEmptyDirBehavesLikeWithDeclarative(t *testing.T) {
 	reg, warn := WithMetaTools(MetaToolsOptions{EvolveMode: "suggest", HasTTY: true})
 	if warn != "" {
 		t.Fatalf("unexpected warn: %q", warn)
 	}
-	if len(reg.Tools()) != 7 {
-		t.Errorf("got %d tools, want 7 (native only, no Dir configured)", len(reg.Tools()))
+	if len(reg.Tools()) != 8 {
+		t.Errorf("got %d tools, want 8 (native seven + ask_user, no Dir configured)", len(reg.Tools()))
+	}
+	if _, ok := reg.Lookup("ask_user"); !ok {
+		t.Error("Lookup(\"ask_user\") found nothing with no Dir configured -- ask_user must be always present")
 	}
 	for _, name := range []string{"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_delete"} {
 		if _, ok := reg.Lookup(name); ok {
@@ -419,9 +424,9 @@ func TestWithMetaToolsDirSetAddsSixAlwaysAvailableMetaTools(t *testing.T) {
 	if _, ok := reg.Lookup("tool_create"); ok {
 		t.Error("tool_create must not be present when EvolveMode is \"off\"")
 	}
-	// 7 native + 6 meta-tools, tool_create withheld.
-	if got := len(reg.Tools()); got != 13 {
-		t.Errorf("got %d tools, want 13", got)
+	// 7 native + ask_user + 6 meta-tools, tool_create withheld.
+	if got := len(reg.Tools()); got != 14 {
+		t.Errorf("got %d tools, want 14", got)
 	}
 }
 
@@ -464,6 +469,25 @@ func TestWithMetaToolsDispatchRunnerAddsDispatchRegardlessOfDir(t *testing.T) {
 		}
 		if res.Text != "ok: x" {
 			t.Errorf("dispatch run text = %q for dir=%q, want %q", res.Text, dir, "ok: x")
+		}
+	}
+}
+
+// TestWithMetaToolsAskUserAlwaysPresentRegardlessOfAskerOrDir pins §19.1's
+// own contract for ask_user (Step 32 part 1, the ninth core tool): it is
+// always present, safe and never denyable, so unlike DispatchRunner and
+// tool_create it has no "absent, not merely denied" mode at all -- a nil
+// Asker (every call site before the TUI/serve bridge lands) and/or an
+// unset Dir must still leave ask_user in the registry, with DangerLow.
+func TestWithMetaToolsAskUserAlwaysPresentRegardlessOfAskerOrDir(t *testing.T) {
+	for _, dir := range []string{"", t.TempDir()} {
+		reg, _ := WithMetaTools(MetaToolsOptions{Dir: dir})
+		tool, ok := reg.Lookup("ask_user")
+		if !ok {
+			t.Fatalf("ask_user missing for dir=%q with a nil Asker", dir)
+		}
+		if tool.Danger() != DangerLow {
+			t.Errorf("ask_user.Danger() = %v for dir=%q, want DangerLow", tool.Danger(), dir)
 		}
 	}
 }
@@ -537,6 +561,7 @@ func TestWithMetaToolsModeAndTTYBothSatisfiedAddsToolCreate(t *testing.T) {
 	}
 	wantOrder := []string{
 		"read_file", "write_file", "edit_file", "bash", "glob", "grep", "fetch",
+		"ask_user",
 		"tool_list", "tool_probe", "tool_create", "tool_edit", "tool_archive", "tool_revive", "tool_delete",
 	}
 	got := reg.Tools()
@@ -590,9 +615,9 @@ func TestWithMetaToolsDeclarativeToolStillDiscovered(t *testing.T) {
 			t.Errorf("Lookup(%q) found nothing", name)
 		}
 	}
-	// 7 native + 1 declarative + 7 meta-tools.
-	if got := len(reg.Tools()); got != 15 {
-		t.Errorf("got %d tools, want 15", got)
+	// 7 native + 1 declarative + ask_user + 7 meta-tools.
+	if got := len(reg.Tools()); got != 16 {
+		t.Errorf("got %d tools, want 16", got)
 	}
 }
 
