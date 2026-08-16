@@ -16,6 +16,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
+	"github.com/MichiTrader/ishakat/internal/mission"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tools"
@@ -381,6 +382,12 @@ func Run(version string, resume bool) int {
 		// being silently skipped the way every other nil-Guard path in
 		// this function already is.
 		MissionGuard: missionGuardOrNil(guard),
+
+		// §21.6's second dialog-opening trigger (Step 31 part 9) — bridges
+		// the same cfg.Tools.Permissions already threaded through
+		// permissions.New above into a mission.Policy, mirroring
+		// missionGuardOrNil's own bridge for the enforcement seam.
+		MissionPolicy: missionPolicyOf(cfg.Tools.Permissions),
 	})
 
 	p := tea.NewProgram(root)
@@ -432,4 +439,20 @@ func missionGuardOrNil(g *permissions.Guard) tui.MissionGuard {
 		return nil
 	}
 	return g
+}
+
+// missionPolicyOf converts a real config.Permissions into a *mission.Policy
+// for tui.Options.MissionPolicy — the same field-by-field bridge
+// mission.Policy's own doc comment says a caller in this package must build,
+// since internal/mission never imports internal/config. Always returns a
+// non-nil pointer: unlike missionGuardOrNil, there is no "disabled" case to
+// preserve here — cfg.Tools.Permissions always exists, so checkToolPolicy's
+// own "nil means never fires" degradation (Root.missionPolicy's own doc
+// comment) is only ever exercised by this package's own tests, not by a
+// real run.
+func missionPolicyOf(perm config.Permissions) *mission.Policy {
+	return &mission.Policy{
+		ShellAllowed: perm.Shell != "deny",
+		ShellDeny:    perm.ShellDeny,
+	}
 }
