@@ -582,3 +582,90 @@ func TestGuardSessionGrantDoesNotLeakAcrossToolNames(t *testing.T) {
 		t.Fatalf("reviewer calls = %d, want 2 (write_file must keep its exact-byte session key)", reviewer.calls)
 	}
 }
+
+// TestParseAutonomyRoundTrips pins ParseAutonomy/Autonomy.String's shared
+// vocabulary ("auto", "agile", "readonly") and ParseAutonomy's own
+// "unrecognized or empty defaults to Auto" contract, matching the type's
+// zero-value rule.
+func TestParseAutonomyRoundTrips(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Autonomy
+	}{
+		{"auto", Auto},
+		{"agile", Agile},
+		{"readonly", Readonly},
+		{"", Auto},
+		{"bogus", Auto},
+	}
+	for _, c := range cases {
+		if got := ParseAutonomy(c.in); got != c.want {
+			t.Errorf("ParseAutonomy(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, a := range []Autonomy{Auto, Agile, Readonly} {
+		if got := ParseAutonomy(a.String()); got != a {
+			t.Errorf("ParseAutonomy(%v.String()) = %v, want %v", a, got, a)
+		}
+	}
+}
+
+// TestClosingCriterionReadonlyRefusesSensitiveAndCriticalWithoutAsking is
+// this step's own §21.5 pin: under Readonly, a Sensitive or Critical
+// request is refused outright -- the reviewer is never even consulted,
+// which is the "quieter, not just stricter" property an audit session
+// needs (see Authorize's own doc comment).
+func TestClosingCriterionReadonlyRefusesSensitiveAndCriticalWithoutAsking(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), false, reviewer)
+	guard.SetAutonomy(Readonly)
+
+	if err := guard.Authorize(context.Background(), "write_file", json.RawMessage(`{"path":"a.txt","content":"x"}`)); !errors.Is(err, ErrDenied) {
+		t.Fatalf("write_file under readonly: err = %v, want ErrDenied", err)
+	}
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"git push origin main"}`)); !errors.Is(err, ErrDenied) {
+		t.Fatalf("git push under readonly: err = %v, want ErrDenied", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 (readonly must refuse before asking)", reviewer.calls)
+	}
+}
+
+// TestReadonlyStillRunsSafeButAsksControlled pins the other two rows of
+// §21.5's Readonly column: reads/safe commands keep running with no
+// dialog, but a Controlled command (go test, go build, ...) -- which
+// bypasses review under every other autonomy -- now asks, since Readonly
+// is the one autonomy that does not trust an unattended build/test run.
+func TestReadonlyStillRunsSafeButAsksControlled(t *testing.T) {
+	reviewer := &recordingReviewer{decision: Decision{Allow: true}}
+	guard := New(testPermissions(), false, reviewer)
+	guard.SetAutonomy(Readonly)
+
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"ls -la"}`)); err != nil {
+		t.Fatalf("safe bash under readonly: err = %v, want nil", err)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls after safe command = %d, want 0", reviewer.calls)
+	}
+
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`)); err != nil {
+		t.Fatalf("controlled bash under readonly: err = %v, want nil (allowed, after asking)", err)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls after controlled command = %d, want 1 (readonly must ask, not silently run, a Controlled command)", reviewer.calls)
+	}
+}
+
+// TestAutonomyZeroValueIsAutoAndUnchangedBehaviour guards the
+// non-regression contract every pre-Step-30 test in this file already
+// exercises implicitly: a Guard built by New, with SetAutonomy never
+// called, authorizes exactly as it did before this type existed.
+func TestAutonomyZeroValueIsAutoAndUnchangedBehaviour(t *testing.T) {
+	guard := New(testPermissions(), false, nil)
+	if got := guard.Autonomy(); got != Auto {
+		t.Fatalf("Autonomy() on a fresh Guard = %v, want Auto (the zero value)", got)
+	}
+	if err := guard.Authorize(context.Background(), "bash", json.RawMessage(`{"command":"go build ./..."}`)); err != nil {
+		t.Fatalf("controlled bash under (default) auto: err = %v, want nil", err)
+	}
+}

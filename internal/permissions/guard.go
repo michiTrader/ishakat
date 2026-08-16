@@ -24,21 +24,21 @@ import (
 //     Bypasses review entirely.
 //   - Controlled: executes code or writes derived artifacts, but stays
 //     inside the project and is reversible via git (a bash command such as
-//     "go build"/"go test"/"make"). As of this step Controlled also bypasses
-//     review, the same as Safe -- NOT because it is risk-free, but because
-//     §21.5's table only asks it under "readonly" autonomy, and autonomy
-//     (readonly/agile/auto) does not exist in code yet (§21.14 assigns it to
-//     Step 30). Introducing the class now, distinct from Safe, means Step 30
-//     only has to add a readonly branch here -- nothing needs reclassifying.
+//     "go build"/"go test"/"make"). Bypasses review the same as Safe under
+//     every autonomy except Readonly (see Authorize's own autonomy gate,
+//     added in Step 30) -- NOT because it is risk-free, but because §21.5's
+//     table only asks it under "readonly" autonomy.
 //   - Sensitive: changes source, installs something, or reaches the network
 //     (write_file, edit_file, and any bash command not otherwise
 //     classified). This is the one class with session grants, and the class
-//     --yolo turns ask into allow for.
+//     --yolo turns ask into allow for. Refused outright, with no dialog at
+//     all, under Readonly autonomy.
 //   - Critical: irreversible or externally visible (dispatch, and a bash
 //     command shaped like "git push"). Never session-grantable and never
 //     bypassed by --yolo either (§21.16 decision 2) -- Authorize enforces
 //     this with an explicit req.Tier != Critical check in the yolo branch,
-//     not by omission.
+//     not by omission. Refused outright under Readonly, exactly like
+//     Sensitive -- §21.5's table gives both the same "refuse" cell there.
 //
 // Safe is the zero value only so the four constants read in increasing risk
 // order; nothing in this package treats the zero value as a default --
@@ -51,6 +51,67 @@ const (
 	Sensitive
 	Critical
 )
+
+// Autonomy is §21.4 layer 3: how much ishakat may decide without asking,
+// set once by the human -- at the §21.4 layer 2 trust dialog (Step 30's own
+// other half, see internal/trust), or later via a future /permissions (Step
+// 32) -- and shown permanently in the status line (§21.1's own mockup:
+// "auto·exec" left of the phase dot). It is a session-scoped Guard field,
+// not a config.Permissions field, because it narrows what config's own
+// ask/allow/deny mode is even allowed to answer, the same "a lower layer
+// can never widen a higher one" rule §21.4's own table states for every
+// pair of adjacent layers.
+//
+// Auto is the zero value so a Guard nobody ever calls SetAutonomy on --
+// every pre-Step-30 caller, and every existing test in this file -- keeps
+// exactly its previous behaviour: Authorize's own autonomy gate (see its
+// doc comment) only ever changes a decision when the field is Readonly.
+// Agile and Auto are deliberately left equivalent to each other inside
+// this package for now: distinguishing them further -- §21.5's table gives
+// Sensitive "ask" under Agile but "run" under Auto -- is future work this
+// step's own closing criterion ("second run in a known project asks
+// nothing", §21.14) does not require, since that criterion is about the
+// trust question itself, not about every dialog Guard ever raises
+// afterward. What Auto and Agile share today, and always have: Sensitive
+// and Critical are governed by config.Permissions' own mode plus the
+// reviewer, precisely as they were before this type existed.
+type Autonomy uint8
+
+const (
+	Auto Autonomy = iota
+	Agile
+	Readonly
+)
+
+// ParseAutonomy converts the persisted/configured string form ("auto",
+// "agile", "readonly") into an Autonomy, defaulting to Auto for an empty or
+// unrecognized value -- matching the type's own zero-value contract, so a
+// config with no [autonomy] table, or a trust record written before an
+// unrecognized future value existed, behaves identically to one that spells
+// out default = "auto".
+func ParseAutonomy(s string) Autonomy {
+	switch s {
+	case "agile":
+		return Agile
+	case "readonly":
+		return Readonly
+	default:
+		return Auto
+	}
+}
+
+// String names a in the same lowercase form ParseAutonomy reads back and
+// the status line displays (§21.1's own "auto·exec" mockup).
+func (a Autonomy) String() string {
+	switch a {
+	case Agile:
+		return "agile"
+	case Readonly:
+		return "readonly"
+	default:
+		return "auto"
+	}
+}
 
 // Request is the immutable description shown to an approval UI.
 type Request struct {
@@ -128,6 +189,13 @@ type Guard struct {
 	yolo        bool
 	reviewer    Reviewer
 
+	// autonomy is §21.4 layer 3 (Autonomy's own doc comment). Read with
+	// the mutex held, the same as session, because SetAutonomy (a future
+	// /permissions command, Step 32) is expected to run concurrently with
+	// an in-flight Authorize call the same way a session grant already
+	// can.
+	autonomy Autonomy
+
 	// tiers supplements tierFor's fixed switch (the eight native tools)
 	// for names it does not recognize -- Step 20's declarative tools chief
 	// among them. nil (the zero value, and every pre-Step-20 caller that
@@ -158,6 +226,29 @@ func (g *Guard) SetToolTiers(tiers map[string]Tier) {
 	g.tiers = tiers
 }
 
+// SetAutonomy sets the autonomy Authorize's own gate (see its doc comment)
+// consults, following SetToolTiers' own late-binding shape: a Guard is
+// constructed by New before the trust decision (internal/trust, §21.4
+// layer 2) or a future /permissions command (Step 32) has necessarily been
+// resolved, so this is a second step rather than a constructor argument,
+// exactly like SetToolTiers already is. Safe to call while another
+// goroutine is inside Authorize, guarded by the same mutex session grants
+// use.
+func (g *Guard) SetAutonomy(a Autonomy) {
+	g.mu.Lock()
+	g.autonomy = a
+	g.mu.Unlock()
+}
+
+// Autonomy reports the autonomy Authorize is currently gating on -- Auto
+// (the zero value) for a Guard that never had SetAutonomy called, matching
+// every pre-Step-30 caller and test in this package.
+func (g *Guard) Autonomy() Autonomy {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.autonomy
+}
+
 // New creates a guard for one application session. yolo changes only ask into
 // allow for file writes and shell commands; it never overrides hard denies.
 func New(permissions config.Permissions, yolo bool, reviewer Reviewer) *Guard {
@@ -174,6 +265,22 @@ func New(permissions config.Permissions, yolo bool, reviewer Reviewer) *Guard {
 // (§21.16 decision 2) -- both checks below test req.Tier != Critical
 // explicitly, rather than relying on Critical simply never matching the
 // other branches' conditions.
+//
+// The Readonly gate (Step 30, §21.5's own table) runs first, right after
+// the hard denies and the configured deny mode -- both of those already
+// narrow what any autonomy could otherwise permit, so checking Readonly
+// after them, not before, keeps "a lower layer can never widen a higher
+// one" true in both directions. Under Readonly: Safe still runs (reading
+// cannot damage anything, regardless of who is deciding); Controlled asks
+// instead of bypassing review the way it does under every other autonomy;
+// Sensitive and Critical are refused outright, with no reviewer consulted
+// at all -- §21.5's table gives both the same "refuse" cell, and refusing
+// before ever building a Request for the reviewer is what makes this a
+// genuinely quieter mode for an audit session, not merely a stricter one.
+// Auto and Agile (this type's other two values) take neither branch below,
+// which is why a Guard nobody ever calls SetAutonomy on -- every
+// pre-Step-30 caller and test -- sees no behaviour change: Auto is the
+// zero value.
 func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMessage) error {
 	args := clone(arguments)
 	req := Request{Name: name, Arguments: args, Tier: g.tierFor(name, args)}
@@ -185,10 +292,26 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	if mode == "deny" {
 		return fmt.Errorf("%w: %s is disabled by configuration", ErrDenied, req.Name)
 	}
+
+	autonomy := g.Autonomy()
+	if autonomy == Readonly {
+		if req.Tier == Sensitive || req.Tier == Critical {
+			return refusal("%s is refused under read-only autonomy", req.Name)
+		}
+		if req.Tier == Safe {
+			return nil
+		}
+		// Controlled falls through to the reviewer below instead of the
+		// Safe/Controlled bypass two lines down -- the one row §21.5's
+		// table asks Readonly to ask rather than run or refuse.
+	} else if req.Tier == Safe || req.Tier == Controlled {
+		return nil
+	}
+
 	if g.yolo && req.Tier != Critical && (req.Name == "write_file" || req.Name == "edit_file" || req.Name == "bash") {
 		return nil
 	}
-	if mode == "allow" || req.Tier == Safe || req.Tier == Controlled {
+	if mode == "allow" {
 		return nil
 	}
 
