@@ -72,6 +72,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeTrust {
 		return m.renderTrust()
 	}
+	if m.mode == ModeMission {
+		return m.renderMission()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())
