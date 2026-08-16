@@ -11,6 +11,7 @@ type Config struct {
 	Catalog   Catalog           `toml:"catalog"`
 	Compact   Compact           `toml:"compact"`
 	Tools     Tools             `toml:"tools"`
+	Autonomy  Autonomy          `toml:"autonomy"`
 	Serve     Serve             `toml:"serve"`
 	Favorites Favorites         `toml:"favorites"`
 	Alias     map[string]string `toml:"alias"`
@@ -203,6 +204,28 @@ type Tools struct {
 	Permissions Permissions `toml:"permissions"`
 	Evolve      Evolve      `toml:"evolve"`
 	Egress      Egress      `toml:"egress"`
+}
+
+// Autonomy configures §21.4 layer 3: the sticky, human-granted decision about
+// how much ishakat may do without asking, for a project with no trust.json
+// record yet, and whether the first-run trust dialog's own answer (§21.4
+// layer 2) is worth remembering at all.
+type Autonomy struct {
+	// Default is the autonomy word ("auto", "agile" or "readonly", per
+	// permissions.ParseAutonomy) a project falls back to before its first
+	// trust decision is made -- effectively what the trust dialog's own
+	// preselected option maps to when nothing has been asked yet. "ask"
+	// is not an Autonomy value itself; it names the fourth state, "no
+	// decision recorded, so show the dialog", which is why it is the
+	// shipped default here rather than "agile".
+	Default string `toml:"default"`
+
+	// Remember controls whether the trust dialog's answer is persisted to
+	// trust.json at all (§21.4 layer 2's "remembered per path" behaviour).
+	// False makes every run ask again, which exists for a scripted or
+	// disposable environment where a stored per-path record is pointless
+	// or even undesirable (e.g. a throwaway container).
+	Remember bool `toml:"remember"`
 }
 
 // Permissions is §19's danger tiering: what ishakat may do without asking.

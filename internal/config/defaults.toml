@@ -53,7 +53,12 @@ gradient_scroll = true
 battery_saver = "auto"
 
 [ui.footer]
-items = ["model", "context", "tokens", "cost", "git", "cwd"]
+# "autonomy" is §21.4 layer 3's own status word (auto/agile/readonly),
+# "shown permanently in the status line" per that section's own table —
+# on by default, right after "model", for the same reason the mockup
+# places it left-most among the transient/state items: it changes rarely
+# and is the one item a human is meant to be able to trust without asking.
+items = ["model", "autonomy", "context", "tokens", "cost", "git", "cwd"]
 
 [keys]
 submit = "enter"
@@ -160,6 +165,16 @@ allow = [
   "pkg.go.dev",
 ]
 allow_all = false
+
+# §21.4 layer 3 / §21.12: what a project with no trust.json record falls
+# back to before its first-run trust dialog (§21.4 layer 2) ever answers it,
+# and whether that dialog's own answer gets written down at all. "ask" here
+# is not itself an autonomy value -- it is the fourth state, "no decision
+# recorded yet", so the dialog opens on first run rather than silently
+# picking agile or auto for a project nobody has looked at.
+[autonomy]
+default = "ask"
+remember = true
 
 # Step 23: the third door. Loopback-only by default (addr) and no token
 # required, which is safe together — an empty token only skips checking a

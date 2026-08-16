@@ -17,12 +17,36 @@ type FooterState struct {
 	CostUSD    float64
 	GitBranch  string
 	CWD        string
+
+	// Autonomy is §21.4 layer 3's own persistent value ("auto", "agile" or
+	// "readonly"), rendered in the same lowercase form
+	// permissions.Autonomy.String() already produces — this package never
+	// imports internal/permissions itself (§6.1: tui stays ignorant of
+	// what a tier or an autonomy *is*, only that it is a string to draw),
+	// so Root's own caller (internal/app) is what calls .String() before
+	// this field is ever set. Empty is the supported "not wired" value —
+	// every test in this package, and any Root built before Step 30's own
+	// app.go wiring landed — which is why "autonomy" (below) draws nothing
+	// rather than a bare "" the way "git"/"cwd" already treat their own
+	// empty string.
+	//
+	// §21.1's full mockup pairs this with a transient phase word
+	// ("auto·exec", "auto·wait 22s") on the same line — that half is
+	// Step 32's own scope (the phase concept does not exist in code yet,
+	// only autonomy does after Step 30), so this field carries the
+	// autonomy word alone for now; a future phase field joins it with the
+	// same "·" separator once RunAgentTurn has something to report.
+	Autonomy string
 }
 
 // footerItemOrder son las claves válidas de ui.footer.items, en el mismo
 // orden que documenta §9.3: el footer recorta de derecha a izquierda según
-// esta lista cuando no entra completo.
-var footerItemOrder = []string{"model", "context", "tokens", "cost", "git", "cwd"}
+// esta lista cuando no entra completo. "autonomy" sits right after "model"
+// — the two identity-ish items a human glances at together ("which model,
+// how much can it decide alone") — rather than at either end, which would
+// bury it behind context/tokens/cost in a narrow terminal's right-to-left
+// drop order.
+var footerItemOrder = []string{"model", "autonomy", "context", "tokens", "cost", "git", "cwd"}
 
 // RenderFooter arma el footer según el breakpoint. En BPMinimo es una sola
 // línea recortada al ancho; en el resto, el número de secciones que agregue
@@ -61,6 +85,10 @@ func renderItems(g glyphs, st FooterState, items []string) []string {
 		case "model":
 			if st.Model != "" {
 				parts = append(parts, g.modelMark+" "+st.Model)
+			}
+		case "autonomy":
+			if st.Autonomy != "" {
+				parts = append(parts, st.Autonomy)
 			}
 		case "context":
 			parts = append(parts, contextBar(g, st.ContextPct))
