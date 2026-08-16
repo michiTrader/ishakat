@@ -13,6 +13,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/evolve"
+	"github.com/MichiTrader/ishakat/internal/mission"
 	"github.com/MichiTrader/ishakat/internal/skills"
 	"github.com/MichiTrader/ishakat/internal/slash"
 	"github.com/MichiTrader/ishakat/internal/theme"
@@ -555,6 +556,29 @@ type Root struct {
 	// nil case documents for a different failure mode.
 	missionGuard MissionGuard
 
+	// missionPolicy is §21.6's own second dialog-opening trigger's
+	// bridged config (checkToolPolicy's own doc comment, toolscope.go):
+	// the same config.Permissions.Shell/ShellDeny a real caller already
+	// has, converted to a mission.Policy value by internal/app the same
+	// way denyRulesOf already bridges permissions.MissionRule — see
+	// mission.Policy's own doc comment for why internal/mission cannot
+	// build this conversion itself.
+	//
+	// A *mission.Policy, not a plain mission.Policy, precisely so a
+	// caller that never wires Options.MissionPolicy (every test in this
+	// package that does not set it, and any real caller not yet updated)
+	// degrades to "this trigger never fires" rather than to
+	// mission.Policy{}'s own zero value: ShellAllowed's own zero value is
+	// false, and per OutsidePolicy's own doc comment that would make
+	// *every* affirmed keywordRules technology look like a policy
+	// collision, the opposite of the "no wiring means no new behaviour"
+	// degradation every other optional seam on this struct already
+	// follows (missionGuard above, trustStore, evolveStore). nil is
+	// checked directly by checkToolPolicy before ever calling
+	// OutsidePolicy, the same "check the seam, not its zero value" shape
+	// missionGuard's own "!= nil" check already establishes.
+	missionPolicy *mission.Policy
+
 	// toolScope is §21.6's second dialog's own state (toolscope.go),
 	// "Tools for this mission" — live only while mode == ModeToolScope.
 	// Unlike mission, this is never opened directly from checkMission:
@@ -821,6 +845,15 @@ type Options struct {
 	// own guard variable), since that is the exact Guard whose
 	// Authorize calls need to see a confirmed mission's rules.
 	MissionGuard MissionGuard
+
+	// MissionPolicy is §21.6's own second dialog-opening trigger's bridged
+	// config — see Root.missionPolicy's own comment for why this is a
+	// *mission.Policy (nil is the supported "trigger never fires" value)
+	// rather than a plain mission.Policy. internal/app is expected to
+	// convert the same cfg.Tools.Permissions already threaded through
+	// permissions.New elsewhere in that package, mirroring how
+	// MissionGuard (above) bridges *permissions.Guard.
+	MissionPolicy *mission.Policy
 }
 
 // NewRoot construye el modelo inicial.
@@ -885,34 +918,35 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:      o.Version,
-		cwd:          o.CWD,
-		mode:         startMode,
-		lay:          lay,
-		styles:       styles,
-		themesDir:    o.ThemesDir,
-		themeStore:   o.ThemeStore,
-		trustStore:   o.TrustStore,
-		missionGuard: o.MissionGuard,
-		input:        NewInput(lay.InputPrefix()),
-		fps:          fps,
-		cfg:          o.Cfg,
-		cfgBanner:    o.Cfg == nil || o.Cfg.UI.Banner,
-		cfgSyntax:    o.Cfg == nil || o.Cfg.UI.Syntax,
-		cfgMarkdown:  o.Cfg == nil || o.Cfg.UI.Markdown,
-		animMode:     anim.Mode,
-		cap:          o.Cap,
-		eng:          engineOr(o.Engine),
-		engineFor:    o.EngineFor,
-		loginFor:     o.LoginFor,
-		model:        model,
-		system:       o.System,
-		commands:     slash.Default(),
-		cat:          o.Catalog,
-		skills:       o.Skills,
-		alias:        o.Alias,
-		preferFree:   o.PreferFree,
-		favorites:    o.Favorites,
+		version:       o.Version,
+		cwd:           o.CWD,
+		mode:          startMode,
+		lay:           lay,
+		styles:        styles,
+		themesDir:     o.ThemesDir,
+		themeStore:    o.ThemeStore,
+		trustStore:    o.TrustStore,
+		missionGuard:  o.MissionGuard,
+		missionPolicy: o.MissionPolicy,
+		input:         NewInput(lay.InputPrefix()),
+		fps:           fps,
+		cfg:           o.Cfg,
+		cfgBanner:     o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:     o.Cfg == nil || o.Cfg.UI.Syntax,
+		cfgMarkdown:   o.Cfg == nil || o.Cfg.UI.Markdown,
+		animMode:      anim.Mode,
+		cap:           o.Cap,
+		eng:           engineOr(o.Engine),
+		engineFor:     o.EngineFor,
+		loginFor:      o.LoginFor,
+		model:         model,
+		system:        o.System,
+		commands:      slash.Default(),
+		cat:           o.Catalog,
+		skills:        o.Skills,
+		alias:         o.Alias,
+		preferFree:    o.PreferFree,
+		favorites:     o.Favorites,
 
 		compactEng:           o.CompactEngine,
 		compactModel:         o.CompactModel,
@@ -1459,6 +1493,15 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// input is cleared either way, the same way submit's own
 			// m.input.Reset() would have done in the ordinary case.
 			if next, ok := m.checkMission(text); ok {
+				next.input.Reset()
+				return next, nil
+			}
+			// §21.6's second trigger, "the mission requests a capability
+			// outside current policy" — only reached when checkMission
+			// itself found no constraint to confirm: see checkToolPolicy's
+			// own comment for why a goal that already opened ModeMission
+			// must not be checked twice for the same dialog.
+			if next, ok := m.checkToolPolicy(text); ok {
 				next.input.Reset()
 				return next, nil
 			}

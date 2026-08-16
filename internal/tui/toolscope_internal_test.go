@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/mission"
+	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
 // mustOpenToolScope drives the real chain this dialog is only ever reached
@@ -278,5 +281,65 @@ func TestRenderToolScopeHidesBrowserWarningWhenGoalAlreadyAffirmsIt(t *testing.T
 	out := r.renderToolScope()
 	if contains(out, "180 MB download") {
 		t.Fatalf("renderToolScope shows the browser-widen reason even though the goal already affirms Playwright:\n%s", out)
+	}
+}
+
+// newToolPolicyRoot builds a Root with the given policy wired the same way
+// internal/app's missionPolicyOf does, for checkToolPolicy's own tests.
+func newToolPolicyRoot(policy *mission.Policy) Root {
+	return NewRoot(Options{
+		Version:       "0.0.0-test",
+		CWD:           "/home/user/projects/orbital-dash",
+		Theme:         theme.Load(""),
+		Cap:           theme.CapNone,
+		NoTTY:         true,
+		MissionPolicy: policy,
+	})
+}
+
+func TestCheckToolPolicyOpensModeToolScopeWhenGoalCollidesWithPolicy(t *testing.T) {
+	r := newToolPolicyRoot(&mission.Policy{ShellAllowed: false})
+	next, ok := r.checkToolPolicy("use Playwright if you think it helps")
+	if !ok {
+		t.Fatal("checkToolPolicy returned ok=false for a goal colliding with policy")
+	}
+	if next.mode != ModeToolScope {
+		t.Fatalf("mode = %v, want ModeToolScope", next.mode)
+	}
+	if next.missionText != "use Playwright if you think it helps" {
+		t.Fatalf("missionText = %q, not preserved", next.missionText)
+	}
+}
+
+func TestCheckToolPolicyFallsThroughForAnOrdinaryGoal(t *testing.T) {
+	r := newToolPolicyRoot(&mission.Policy{ShellAllowed: true})
+	_, ok := r.checkToolPolicy("why does the game stutter?")
+	if ok {
+		t.Fatal("checkToolPolicy returned ok=true for a goal with no recognized keyword")
+	}
+}
+
+func TestCheckToolPolicyFallsThroughWhenPolicyNeverWired(t *testing.T) {
+	// mission.Policy{}'s own zero value (ShellAllowed: false) would make
+	// every affirmed keyword look like a collision — Root.missionPolicy's
+	// own doc comment states why nil, not that zero value, is what an
+	// unwired caller must get instead.
+	r := newToolPolicyRoot(nil)
+	_, ok := r.checkToolPolicy("use Playwright if you think it helps")
+	if ok {
+		t.Fatal("checkToolPolicy returned ok=true even though Options.MissionPolicy was never wired (nil)")
+	}
+}
+
+func TestCheckToolPolicyDoesNotDoubleUpWithANegatedConstraint(t *testing.T) {
+	// A goal that already negates the keyword is checkMission's own
+	// trigger (HasDeny()) — OutsidePolicy itself already excludes a
+	// negated constraint (see that function's own doc comment), so this
+	// is the "no second dialog for the same word" guarantee, exercised
+	// through the real Submit-key seam this pass wired in root.go.
+	r := newToolPolicyRoot(&mission.Policy{ShellAllowed: false})
+	_, ok := r.checkToolPolicy("fix orbital-dash, no playwright")
+	if ok {
+		t.Fatal("checkToolPolicy returned ok=true for a negated constraint, which checkMission already handles")
 	}
 }

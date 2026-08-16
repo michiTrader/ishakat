@@ -18,16 +18,22 @@
 // 1 → part 2 already established for the section's other mockup (Compile,
 // then ModeMission, then hardDeny's own missionHardDeny enforcement).
 //
-// This dialog is chained after ModeMission, not offered independently:
-// per checkMission's own doc comment and §21.6's own three stated
-// triggers, "the goal contains a constraint" is the one trigger this
-// codebase can act on today (the other two — "a capability outside
-// current policy" and explicit "/plan" — have no Go concept to compile
-// against yet, see internal/mission.ProposeTools' own doc comment). A
-// goal that opens ModeMission at all has, by definition, already met that
-// one trigger, so resolveMission's own tail is where this dialog opens
-// next rather than a second, independent check duplicating checkMission's
-// own gate.
+// This dialog has two ways to open, both of §21.6's own three stated
+// triggers that this codebase can act on today (the third, explicit
+// "/plan", still has no Go concept to compile against — not yet a real
+// slash.Kind, per Step 32's own still-⬜ row): "the goal contains a
+// constraint" chains it after ModeMission (resolveMission's own tail,
+// below — a goal that opens ModeMission at all has, by definition,
+// already met that trigger, so there is no second, independent check
+// duplicating checkMission's own gate for it); "the mission requests a
+// capability outside current policy" opens it directly, via
+// checkToolPolicy (below), for a goal that never opened ModeMission at
+// all (no negated constraint to confirm, only a scope proposal to show).
+// §21.6's own mockup prose places its "this dialog is not shown for
+// every task... appears when..." sentence immediately after describing
+// this dialog, not the first one, which is why both triggers land here
+// rather than on ModeMission: there is no constraint to confirm in the
+// policy-collision case, only a scope worth surfacing.
 package tui
 
 import (
@@ -136,6 +142,42 @@ func (m Root) openToolScope(goal string) Root {
 	m.toolScope = newToolScopeDialog(mission.ProposeTools(goal))
 	m.mode = ModeToolScope
 	return m
+}
+
+// checkToolPolicy is submit's own second pre-flight hook, a sibling of
+// checkMission for §21.6's own second stated trigger ("the mission
+// requests a capability outside current policy") — now that
+// internal/mission.OutsidePolicy (Step 31 part 8) exists to answer it.
+// Only called when checkMission itself returned ok == false: a goal
+// that already opened ModeMission has, by definition, already reached
+// this dialog too, via resolveMission's own unconditional tail, so
+// checking again here would open ModeToolScope a second time for the
+// same goal.
+//
+// m.missionPolicy == nil (every test in this package that never sets
+// Options.MissionPolicy, and any real caller not yet updated) means this
+// trigger never fires — see Root.missionPolicy's own doc comment for why
+// that is the correct degradation, not mission.Policy{}'s own zero
+// value. Only once a policy is actually wired is text compiled through
+// mission.OutsidePolicy against *m.missionPolicy and, only when it
+// reports true, ModeToolScope opens directly via openToolScope, exactly
+// the same dialog resolveMission's own tail already opens for the other
+// trigger. A goal that does not collide with policy (the ordinary case:
+// OutsidePolicy itself already excludes a goal with no recognized
+// keyword, one that only affirms an unrelated technology, or one that
+// negates the keyword entirely -- see that function's own doc comment)
+// returns ok == false and the caller proceeds exactly as before this
+// function existed, the same "gate the existing submit call on this
+// function's ok return" contract checkMission's own doc comment already
+// states.
+func (m Root) checkToolPolicy(text string) (Root, bool) {
+	if m.missionPolicy == nil {
+		return m, false
+	}
+	if !mission.OutsidePolicy(text, *m.missionPolicy) {
+		return m, false
+	}
+	return m.openToolScope(text), true
 }
 
 // updateToolScope handles every key while mode == ModeToolScope. Like
