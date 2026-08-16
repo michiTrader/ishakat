@@ -39,6 +39,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -277,11 +278,13 @@ func checkBearerToken(r *http.Request, want string) bool {
 // serveEvent is one NDJSON line this door ever sends, server → client. Its
 // shape deliberately mirrors jsonEvent (sink.go)'s own --json vocabulary —
 // same field names for the events both share (delta, tool_call, usage,
-// done, …) — plus the two events unique to a bidirectional socket:
-// "session" (sent once, right after connect, in place of --json's "meta")
-// and "permission_request" (§19.7's own round trip, answered by a
-// permission_response client message, never emitted by --json since
-// headless has nothing to send it to).
+// done, …) — plus the events unique to a bidirectional socket: "session"
+// (sent once, right after connect, in place of --json's "meta"),
+// "permission_request" (§19.7's own round trip, answered by a
+// permission_response client message), and "ask_request" (§21.7's own
+// serve-door round trip for the model's ask_user tool, answered by an
+// ask_response client message) — none of these three are ever emitted by
+// --json, since headless has nothing to send them to.
 type serveEvent struct {
 	Type string `json:"type"`
 
@@ -305,10 +308,23 @@ type serveEvent struct {
 	// contract runTurn/runAgentTurnHeadless already give --json.
 	Error bool `json:"error,omitempty"`
 
-	// permission_request / permission_response's own correlation id and
-	// the tier a human should weigh the request against.
+	// permission_request / permission_response's own correlation id, and
+	// ask_request / ask_response's own — the two round trips never share
+	// an id (registerPending/registerAskPending each draw from their own
+	// counter, "perm-N" vs "ask-N"), so a response naming the wrong kind's
+	// id simply matches nothing, the same silently-dropped shape either
+	// pending map already gives a stale or mistyped id.
 	ID   string `json:"id,omitempty"`
 	Tier string `json:"tier,omitempty"`
+
+	// ask_request's own payload: form is ask.Form, marshaled with
+	// encoding/json's own default field names (Title, Questions, ID,
+	// Prompt, Options, AllowFreeText, Label, Value) — ask.Form carries no
+	// json tags of its own (internal/ask's own presentation-free rule,
+	// §6.1, stops short of dictating a wire encoding), so this is exactly
+	// what json.Marshal(form) already produces without this file adding
+	// any translation of its own.
+	Form json.RawMessage `json:"form,omitempty"`
 
 	Usage *convo.Usage `json:"usage,omitempty"`
 
@@ -332,6 +348,16 @@ type clientMsg struct {
 	ID           string `json:"id,omitempty"`
 	Allow        bool   `json:"allow,omitempty"`
 	AllowSession bool   `json:"allow_session,omitempty"`
+
+	// "ask_response": Answers is ask.Answers (map[string]ask.Answer),
+	// keyed by each Question.ID the matching ask_request's own Form
+	// carried — the client answers by echoing those same ids back, the
+	// identical shape ask.State.Submit itself produces on the TUI side of
+	// this same primitive. ID (above) is this response's own correlation
+	// id, shared with the same field permission_response already uses,
+	// but drawn from registerAskPending's own separate counter (see
+	// serveEvent.ID's own doc comment).
+	Answers json.RawMessage `json:"answers,omitempty"`
 }
 
 // tierName keeps emitting the wire protocol's existing "low"/"medium"/
@@ -379,9 +405,23 @@ type serveSession struct {
 	pending   map[string]chan permissions.Decision
 	nextID    atomic.Uint64
 
+	// pendingAsk/nextAskID are ask_request/ask_response's own separate
+	// bookkeeping, parallel to pending/nextID above rather than reusing
+	// them: permissions.Decision and ask.Answers are unrelated shapes (a
+	// yes/no versus a map of arbitrary answers), so one channel type
+	// cannot serve both round trips, and giving each its own id counter
+	// (serveAsker.newRequestID's own "ask-N" versus serveReviewer's own
+	// "perm-N") means a stray response naming an id from the wrong round
+	// trip matches nothing in either map, rather than needing a type
+	// assertion here to tell them apart.
+	pendingAskMu sync.Mutex
+	pendingAsk   map[string]chan ask.Answers
+	nextAskID    atomic.Uint64
+
 	turnActive atomic.Bool
 
 	guard *permissions.Guard
+	asker *serveAsker
 
 	store *convo.Store
 	conv  *convo.Conversation
@@ -406,8 +446,15 @@ func newServeSession(cfg *config.Config, version string, allowToolCreate bool, i
 		ctx:             ctx,
 		cancel:          cancel,
 		pending:         make(map[string]chan permissions.Decision),
+		pendingAsk:      make(map[string]chan ask.Answers),
 	}
 	sess.guard = permissions.New(cfg.Tools.Permissions, false, &serveReviewer{sess: sess})
+	// asker is always built, mirroring serveReviewer immediately above:
+	// §21.7's own door table gives serve "yes, over WS" for "ask
+	// available?" unconditionally, the same way a real, non-nil
+	// permissions.Reviewer is always wired here regardless of whether any
+	// given connection ever actually triggers either round trip.
+	sess.asker = &serveAsker{sess: sess}
 	return sess
 }
 
@@ -451,6 +498,15 @@ func (sess *serveSession) run() {
 			sess.handlePrompt(msg)
 		case "permission_response":
 			sess.resolvePending(msg.ID, permissions.Decision{Allow: msg.Allow, AllowSession: msg.AllowSession})
+		case "ask_response":
+			var answers ask.Answers
+			if len(msg.Answers) > 0 {
+				if err := json.Unmarshal(msg.Answers, &answers); err != nil {
+					sess.sendEvent(serveEvent{Type: "error", Text: fmt.Sprintf("ask_response: invalid answers: %v", err)})
+					continue
+				}
+			}
+			sess.resolveAskPending(msg.ID, answers)
 		default:
 			sess.sendEvent(serveEvent{Type: "error", Text: fmt.Sprintf("unknown message type %q", msg.Type)})
 		}
@@ -529,7 +585,7 @@ func (sess *serveSession) runTurn(msg clientMsg) {
 			hist = &convo.Conversation{}
 		}
 		out, turnErr = runAgentTurnHeadless(sess.ctx, sess.prov, sess.cfg.Tools, sess.guard, sess.modelCost, sess.modelCaps,
-			sess.cfg.App.MaxRetries, req, user, s, sess.store, sess.conv, hist, sess.allowToolCreate)
+			sess.cfg.App.MaxRetries, req, user, s, sess.store, sess.conv, hist, sess.allowToolCreate, sess.asker)
 	} else {
 		out, turnErr = runTurn(sess.ctx, sess.prov, req, s, sess.cfg.App.MaxRetries)
 	}
@@ -687,6 +743,44 @@ func (sess *serveSession) newRequestID() string {
 	return fmt.Sprintf("perm-%d", sess.nextID.Add(1))
 }
 
+// registerAskPending/unregisterAskPending/resolveAskPending/
+// newAskRequestID are ask_request/ask_response's own round trip,
+// parallel to registerPending/unregisterPending/resolvePending/
+// newRequestID above but keyed into pendingAsk (chan ask.Answers) instead
+// of pending (chan permissions.Decision) — see serveSession's own
+// pendingAsk field comment for why these stay two separate maps rather
+// than one generic one.
+func (sess *serveSession) registerAskPending(id string) chan ask.Answers {
+	ch := make(chan ask.Answers, 1)
+	sess.pendingAskMu.Lock()
+	sess.pendingAsk[id] = ch
+	sess.pendingAskMu.Unlock()
+	return ch
+}
+
+func (sess *serveSession) unregisterAskPending(id string) {
+	sess.pendingAskMu.Lock()
+	delete(sess.pendingAsk, id)
+	sess.pendingAskMu.Unlock()
+}
+
+func (sess *serveSession) resolveAskPending(id string, answers ask.Answers) {
+	sess.pendingAskMu.Lock()
+	ch, ok := sess.pendingAsk[id]
+	sess.pendingAskMu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case ch <- answers:
+	default:
+	}
+}
+
+func (sess *serveSession) newAskRequestID() string {
+	return fmt.Sprintf("ask-%d", sess.nextAskID.Add(1))
+}
+
 // ─────────────────────────────────────────────────────────────
 // permissions.Reviewer over the socket
 // ─────────────────────────────────────────────────────────────
@@ -722,6 +816,44 @@ func (r *serveReviewer) Review(ctx context.Context, req permissions.Request) (pe
 	case <-ctx.Done():
 		return permissions.Decision{}, ctx.Err()
 	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// ask.Asker over the socket
+// ─────────────────────────────────────────────────────────────
+
+// serveAsker implements ask.Asker by sending an ask_request event over the
+// session's own connection and blocking on either the matching
+// ask_response or ctx.Done(), whichever comes first — serveReviewer's own
+// direct sibling (its own doc comment explains the shared shape in full),
+// this time carrying a serialized ask.Form out and ask.Answers back
+// instead of a permissions.Request/Decision pair. Built with
+// ask.AwaitReply rather than hand-rolled, the same choice tuiAsker.Ask
+// (askuser.go) already made — see AwaitReply's own doc comment for why
+// this is the second, not the first, caller it was written for.
+//
+// This is what closes §21.7's own door table for `serve`: "ask available?
+// yes, over WS" — a connected client answering ask_request is exactly as
+// genuine a decision-maker for the model's own ask_user tool as it
+// already is for a permission_request, the same reasoning serveReviewer's
+// own doc comment gives, applied to the ask primitive's other producer.
+type serveAsker struct {
+	sess *serveSession
+}
+
+func (a *serveAsker) Ask(ctx context.Context, form ask.Form) (ask.Answers, error) {
+	formJSON, err := json.Marshal(form)
+	if err != nil {
+		return nil, fmt.Errorf("serve: could not encode ask.Form: %w", err)
+	}
+
+	id := a.sess.newAskRequestID()
+	reply := a.sess.registerAskPending(id)
+	defer a.sess.unregisterAskPending(id)
+
+	return ask.AwaitReply(ctx, reply, func() {
+		a.sess.sendEvent(serveEvent{Type: "ask_request", ID: id, Form: formJSON})
+	})
 }
 
 // ─────────────────────────────────────────────────────────────

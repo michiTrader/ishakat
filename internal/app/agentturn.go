@@ -210,6 +210,23 @@ func buildAgentOptions(cfgTools config.Tools, guard *permissions.Guard, cost *ca
 // caps is §20.11 item 4's own addition, threaded through to both
 // buildAgentOptions and newSubAgentRunner below — see buildAgentOptions'
 // own doc comment for what it gates.
+//
+// asker is Step 32's own "serve bridge" addition: this function is the
+// single implementation both Headless (headless.go) and `serve`
+// (serve.go's own runTurn) call, and §21.7's door table gives those two
+// doors opposite answers to "ask available?" — serve: "yes, over WS";
+// `-p` headless: "no… policy decides". Rather than fork this function in
+// two, the door table's own difference is threaded straight through as a
+// parameter: Headless's own call site passes nil (matching its own
+// permissions.New(..., nil) reviewer immediately above it — no human, no
+// ask_user either), and serve's own call site passes a real *serveAsker
+// (serve.go) that round-trips an ask_request/ask_response pair over the
+// same WebSocket connection serveReviewer already uses for
+// permission_request/permission_response. A nil asker here does not
+// disable ask_user (WithMetaTools' own "always present" contract,
+// tools.AskUser's own doc comment) — it only means AskUser.Run degrades
+// to reporting "no human is present to ask" as tool-error data, the exact
+// behaviour every call site had before this parameter existed.
 func runAgentTurnHeadless(
 	ctx context.Context,
 	prov provider.Provider,
@@ -225,6 +242,7 @@ func runAgentTurnHeadless(
 	conv *convo.Conversation,
 	hist *convo.Conversation,
 	allowToolCreate bool,
+	asker ask.Asker,
 ) (convo.Message, error) {
 	stream := NewStreamer(prov, provider.Caps{Tools: true})
 	eng := engine.New(stream, maxRetries)
@@ -235,12 +253,16 @@ func runAgentTurnHeadless(
 	// value this call site already passes to buildAgentOptions for its own
 	// registry) is threaded through identically, so a sub-agent sees the
 	// exact same tool_create visibility rule the parent turn does.
-	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate)
-	// asker is nil here: headless has no reviewer channel wired for gate 2
-	// either (see this function's own doc comment above on hasTTY), and no
-	// ask.Asker implementation exists yet for any door — see
-	// buildAgentOptions' own doc comment on its asker parameter.
-	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner, nil)
+	// asker is passed straight through to the sub-agent runner too: a
+	// serve-driven dispatch call inherits the parent connection's own
+	// ask.Asker (the same human is still on the other end of the socket),
+	// exactly as it already inherits guard/cost/caps rather than any of
+	// those being re-derived or nulled out for the sub-agent's own nested
+	// turn — see newSubAgentRunner's own doc comment for the identical
+	// reasoning already applied to every other capability it threads
+	// through unchanged.
+	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate, asker)
+	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner, asker)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
 	}

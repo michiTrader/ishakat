@@ -200,7 +200,6 @@ func Run(version string, resume bool) int {
 		// answer with -- see newSubAgentRunner's own doc comment (dispatch.go)
 		// on why a sub-agent reuses the parent's already-resolved
 		// provider/model rather than re-resolving one of its own.
-		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY)
 		// asker is built now, same two-step reasoning as reviewer above:
 		// buildAgentOptions needs an ask.Asker before tui.Options (and
 		// therefore the *tea.Program) exists at all, but tuiAsker cannot
@@ -208,8 +207,11 @@ func Run(version string, resume bool) int {
 		// right after tea.NewProgram below produces it -- see askuser.go's
 		// own comment (internal/app) for why that two-step construction is
 		// unavoidable, the identical shape toolreview.go's reviewer already
-		// follows.
+		// follows. Built before dispatchRunner below so a sub-agent's own
+		// dispatched turn can be given the same asker the parent turn gets
+		// (see newSubAgentRunner's own doc comment on why).
 		asker = newTUIAsker()
+		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker)
 		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, asker)
 		warnp.Warn(os.Stderr, toolsWarn)
 	}

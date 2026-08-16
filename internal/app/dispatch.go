@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
@@ -60,6 +61,19 @@ import (
 // as the parent (see this function's own doc comment above on model/
 // system), so it must see the same set of tools that model can actually
 // use, not a second, independently-derived one.
+//
+// asker is Step 32's own "serve bridge" addition, threaded straight
+// through from the caller's own top-level asker (runAgentTurnHeadless,
+// app.go's Run): a sub-agent's own ask_user call reaches the exact same
+// human the parent turn would have asked, on the theory that "isolated
+// context" (this function's own doc comment above) is about conversation
+// history, not about who is allowed to answer a genuinely blocking
+// question -- the same person is still on the other end of the TUI or the
+// WebSocket regardless of which turn (parent or dispatched) is currently
+// running. nil (every call site before this parameter existed, and still
+// every dispatch_e2e_test.go/dispatch_mission_e2e_test.go call today)
+// means a sub-agent's own ask_user degrades exactly like the parent's
+// does with no asker wired -- see AskUser.Run's own doc comment.
 func newSubAgentRunner(
 	eng *engine.Engine,
 	model string,
@@ -69,6 +83,7 @@ func newSubAgentRunner(
 	cost *catalog.Cost,
 	caps tools.Caps,
 	hasTTY bool,
+	asker ask.Asker,
 ) tools.SubAgentRunner {
 	return func(ctx context.Context, task string) (string, error) {
 		if eng == nil {
@@ -77,12 +92,8 @@ func newSubAgentRunner(
 
 		// dispatchRunner is nil here on purpose -- see this function's own
 		// doc comment on why a sub-agent's own registry never contains
-		// dispatch itself. asker is also nil: no ask.Asker implementation
-		// exists yet for any door (see buildAgentOptions' own doc comment
-		// on its asker parameter), so a sub-agent sees ask_user in its
-		// own catalogue -- same as the parent -- but any call against it
-		// degrades identically until that seam is wired.
-		opts, _ := buildAgentOptions(cfgTools, guard, cost, caps, hasTTY, nil, nil)
+		// dispatch itself.
+		opts, _ := buildAgentOptions(cfgTools, guard, cost, caps, hasTTY, nil, asker)
 
 		// The sub-agent's history starts with nothing but task -- not the
 		// parent's own hist, not even the parent's most recent message.
