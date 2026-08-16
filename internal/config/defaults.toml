@@ -53,7 +53,12 @@ gradient_scroll = true
 battery_saver = "auto"
 
 [ui.footer]
-items = ["model", "context", "tokens", "cost", "git", "cwd"]
+# "autonomy" is §21.4 layer 3's own status word (auto/agile/readonly),
+# "shown permanently in the status line" per that section's own table —
+# on by default, right after "model", for the same reason the mockup
+# places it left-most among the transient/state items: it changes rarely
+# and is the one item a human is meant to be able to trust without asking.
+items = ["model", "autonomy", "context", "tokens", "cost", "git", "cwd"]
 
 [keys]
 submit = "enter"

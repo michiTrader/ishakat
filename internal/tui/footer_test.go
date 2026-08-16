@@ -78,3 +78,33 @@ func TestRenderFooterSinItemsUsaOrdenPorDefecto(t *testing.T) {
 		t.Errorf("RenderFooter() con items nil debería usar el orden por defecto: %q", line)
 	}
 }
+
+// TestRenderFooterDrawsAutonomy is Step 30's own closing-adjacent test for
+// the status-line half of §21.4 layer 3: the autonomy word appears in the
+// default item order, right after the model, matching §21.1's own
+// "auto·exec" mockup's left-of-the-dot half (the "·exec" phase half is
+// Step 32's scope, not drawn here since it does not exist in code yet).
+func TestRenderFooterDrawsAutonomy(t *testing.T) {
+	lay := tui.NewLayout(120, 40, 0, false, false)
+	st := tui.FooterState{Model: "sonnet-4-5", Autonomy: "auto"}
+	line := tui.RenderFooter(lay, st, nil)
+	if !strings.Contains(line, "auto") {
+		t.Errorf("RenderFooter() = %q, esperaba que contuviera la autonomía %q", line, "auto")
+	}
+}
+
+// TestRenderFooterOmiteAutonomyVacia is the "not wired" default (every
+// Root built before app.go sets FooterState.Autonomy — see its own doc
+// comment) drawing nothing, the same empty-is-invisible rule "git"/"cwd"
+// already follow for their own zero value.
+func TestRenderFooterOmiteAutonomyVacia(t *testing.T) {
+	lay := tui.NewLayout(120, 40, 0, false, false)
+	st := tui.FooterState{Model: "sonnet-4-5"}
+	line := tui.RenderFooter(lay, st, []string{"model", "autonomy"})
+	if strings.Contains(line, "  ") {
+		t.Errorf("RenderFooter() = %q, expected no double-space gap left by an omitted empty autonomy item", line)
+	}
+	if !strings.Contains(line, "sonnet-4-5") {
+		t.Errorf("RenderFooter() = %q, expected the model to still be drawn", line)
+	}
+}
