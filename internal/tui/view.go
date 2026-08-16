@@ -69,6 +69,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeThemePicker {
 		return m.renderThemePicker()
 	}
+	if m.mode == ModeTrust {
+		return m.renderTrust()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())
