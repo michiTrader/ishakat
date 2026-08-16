@@ -16,7 +16,9 @@ import (
 // reasoning mission.go's own package comment gives for why MissionGuard
 // exists at all.
 type fakeMissionGuard struct {
-	added [][]permissions.MissionRule
+	added        [][]permissions.MissionRule
+	bashScope    []string
+	bashScopeSet bool
 }
 
 func (g *fakeMissionGuard) AddMissionRules(rules []permissions.MissionRule) {
@@ -34,6 +36,17 @@ func (g *fakeMissionGuard) MissionRules() []permissions.MissionRule {
 		out = append(out, rules...)
 	}
 	return out
+}
+
+// SetBashScope records the most recent call, mirroring the real Guard's
+// own "replaces, never appends" contract (guard.go's SetBashScope doc
+// comment) — see toolscope_internal_test.go's own tests for why both the
+// value and whether it was ever called at all (bashScopeSet) matter: a
+// dialog resolving to "no scope change" must be distinguishable from one
+// that explicitly cleared it back to nil.
+func (g *fakeMissionGuard) SetBashScope(allow []string) {
+	g.bashScope = allow
+	g.bashScopeSet = true
 }
 
 func newMissionRoot(guard MissionGuard) Root {

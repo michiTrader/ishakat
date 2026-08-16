@@ -219,6 +219,29 @@ type Guard struct {
 	// no-op, so a caller that ignores this field sees no behavior change.
 	missionDeny []MissionRule
 
+	// bashScopeAllow is §21.6's second mockup ("Tools for this mission")
+	// wired into real enforcement (Step 31, part 7): the bash subcommand
+	// prefixes a chosen mission.ToolScope allows, checked once inside
+	// hardDeny the same way missionDeny already is (see bashScopeHardDeny's
+	// own doc comment for exactly how). nil (the zero value, and every
+	// pre-part-7 caller that never calls SetBashScope) means "no scope
+	// restriction" -- hardDeny's own bashScopeHardDeny check is then a
+	// no-op, so a caller that ignores this field sees no behavior change,
+	// matching missionDeny's own "nil means no constraint" contract.
+	//
+	// Unlike missionDeny, this field is *replaced*, not appended to, by
+	// SetBashScope -- see that method's own doc comment for why: a
+	// mission's deny rules are meant to accumulate for the life of a
+	// session ("a second mission stated later... narrows further"), but a
+	// tool scope is re-proposed fresh every time §21.6's second dialog
+	// resolves for a new goal, and the mockup's own "Everything installed"
+	// option is a real, intentional widening back to no restriction, not
+	// a layer-ordering violation -- §21.4's "narrows, never widens" rule
+	// governs missionDeny (a stated constraint enforced for the rest of
+	// the session), not this per-task proposal a human re-confirms every
+	// time it changes.
+	bashScopeAllow []string
+
 	mu      sync.Mutex
 	session map[string]struct{}
 }
@@ -335,6 +358,49 @@ func (g *Guard) MissionRules() []MissionRule {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return append([]MissionRule(nil), g.missionDeny...)
+}
+
+// SetBashScope sets (replacing any previous value -- see g.bashScopeAllow's
+// own doc comment for why replace rather than append) the bash subcommand
+// prefixes bash is scoped to for the rest of the session, following
+// SetToolTiers'/SetAutonomy's own late-binding shape: a Guard exists before
+// §21.6's second dialog has necessarily resolved, so this is a call made
+// once resolveToolScope picks an option, not a constructor argument.
+//
+// allow is a list of bare subcommand names, e.g. []string{"node", "npm",
+// "git"} -- exactly mission.ToolScope.BashAllow's own shape, so a caller
+// (internal/tui, via a ToolScopeGuard-shaped seam) can pass that field
+// straight through with no conversion, the same "the real type already
+// fits" shortcut MissionGuard's own doc comment notes for AddMissionRules/
+// MissionRules. allow == nil (this method's own zero-value default, and
+// what "3. Everything installed" passes -- see resolveToolScope's own
+// comment) clears any prior restriction: bashScopeHardDeny's own check
+// then never fires, matching this field's "nil means no constraint"
+// contract stated on bashScopeAllow above. An empty, non-nil slice
+// ([]string{}) is meaningfully different: it would refuse every bash
+// invocation not covered by safeBashPrefixes' own escape hatch -- no
+// caller in this codebase constructs that today (ProposeTools' own
+// BashAllow can never be empty, see its own doc comment), but the
+// distinction is preserved rather than collapsed, the same way Go's own
+// nil-vs-empty-slice convention already works.
+//
+// Safe to call while another goroutine is inside Authorize, guarded by the
+// same mutex missionDeny/autonomy/session grants already use.
+func (g *Guard) SetBashScope(allow []string) {
+	g.mu.Lock()
+	g.bashScopeAllow = allow
+	g.mu.Unlock()
+}
+
+// BashScope reports the bash scope currently in effect -- nil when no
+// SetBashScope call has narrowed it (or the most recent call passed nil,
+// e.g. "Everything installed"). Mirrors MissionRules' own read-back shape,
+// for a caller wanting to display the scope currently in force rather than
+// only the one last proposed.
+func (g *Guard) BashScope() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.bashScopeAllow...)
 }
 
 // New creates a guard for one application session. yolo changes only ask into
@@ -687,17 +753,23 @@ func (g *Guard) mode(req Request) string {
 }
 
 // hardDeny checks, in order: configured write_deny (any tool with a path
-// argument), configured shell_deny (bash only), then this session's own
-// mission-deny rules (§21.4 layer 4, Step 31) for both bash and fetch.
-// Mission rules are checked last among the three not because they matter
-// less -- they run before mode, before the Readonly gate, before --yolo,
-// and before the reviewer, exactly like write_deny/shell_deny already do,
-// which is what "a lower layer can never widen a higher one" (§21.4)
-// actually requires here -- but because config's own deny lists are a
+// argument), configured shell_deny (bash only), this session's own
+// mission-deny rules (§21.4 layer 4, Step 31) for both bash and fetch, then
+// (bash only) the currently-chosen tool scope's own bash allow-list (§21.6's
+// second dialog, Step 31 part 7). All four run before mode, before the
+// Readonly gate, before --yolo, and before the reviewer -- which is what "a
+// lower layer can never widen a higher one" (§21.4) actually requires here
+// -- but config's own deny lists are checked first because they are a
 // project-wide, human-authored floor that should be readable in isolation
-// from whatever mission happens to be active this task, the same way
-// reading this function top to bottom should not require knowing whether
-// a mission is even in play.
+// from whatever mission or tool scope happens to be active this task, the
+// same way reading this function top to bottom should not require knowing
+// whether a mission is even in play. The tool scope check runs last of the
+// four because, unlike the other three (all deny-shaped: "refuse if this
+// matches"), it is allow-shaped ("refuse unless this matches") -- reading
+// it after everything else that can already refuse a bash call keeps this
+// function's own shape "add reasons a call is refused", never "compute
+// whether it might be allowed", which the first three checks alone already
+// establish and the fourth should not have to break.
 //
 // A sub-agent's *Guard is the very same pointer as its parent's (see
 // internal/app/dispatch.go's newSubAgentRunner doc comment), so a mission
@@ -732,6 +804,11 @@ func (g *Guard) hardDeny(req Request) string {
 	}
 	if reason := g.missionHardDeny(req.Name, input.Command, input.URL); reason != "" {
 		return reason
+	}
+	if req.Name == "bash" {
+		if reason := g.bashScopeHardDeny(input.Command); reason != "" {
+			return reason
+		}
 	}
 	return ""
 }
@@ -772,6 +849,64 @@ func describeMissionValue(name, value string) string {
 		return fmt.Sprintf("url %q", value)
 	}
 	return fmt.Sprintf("command %q", value)
+}
+
+// bashScopeHardDeny refuses command when a tool scope is in effect
+// (g.bashScopeAllow != nil, see that field's own doc comment) and command
+// matches none of it. Command is checked, not merely allowed, in three
+// escape hatches, each with its own reason:
+//
+//  1. safeBashPrefixes -- a scope restricts what a mission may *do*, not
+//     whether it can look around at all. "ls"/"pwd"/"cat"/"git status" are
+//     read-only regardless of which ecosystem a mission is scoped to, and
+//     refusing them would make a narrow bash(node, npm, git) scope refuse
+//     even the trust-building read-only commands §21.3's own defect 1
+//     exists to never prompt for, let alone refuse outright.
+//  2. An empty command (blank string) is let through here rather than
+//     refused, matching bashTier's own "cannot be sure, do not guess"
+//     shape for the identical input -- an empty command reaching this
+//     point already failed to parse as anything actionable, and there is
+//     nothing this check could meaningfully compare against g.bashScopeAllow.
+//  3. hasWordPrefix, the same "cmd is exactly p, or begins with p followed
+//     by a space" matcher bashTier's own Safe/Controlled/Critical
+//     classification already uses -- so "npm install" matches the "npm"
+//     entry the identical way "git status" already matches
+//     safeBashPrefixes, and a scope entry never needs its own separate
+//     pattern language from the tier classifier already governing the
+//     same command.
+//
+// isCompoundShellCommand is deliberately not consulted here the way
+// bashTier's own classification uses it: bashTier disqualifies a compound
+// command from Safe/Controlled because its *net effect* cannot be inferred
+// from its leading word alone, but a tool scope is checked against the
+// *stated* command, not its effect -- "npm install && git push" containing
+// "npm" is not evidence the scope was honoured (the same worked example
+// hardDeny's own containsAfterMeta catches a hidden "git push" inside),
+// so a compound command matching a scope's own leading word is refused all
+// the same as a matching bare command unless the whole thing also matches
+// (a caller wanting a compound command scoped per-segment the way
+// containsAfterMeta does would need bashScopeHardDeny to say so
+// explicitly; this pass keeps the check as simple as bashFamily's own
+// "generalize over flags only, never positional arguments" scope, not a
+// shell parser).
+func (g *Guard) bashScopeHardDeny(command string) string {
+	g.mu.Lock()
+	allow := g.bashScopeAllow
+	g.mu.Unlock()
+	if allow == nil {
+		return ""
+	}
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return ""
+	}
+	if hasWordPrefix(cmd, safeBashPrefixes) {
+		return ""
+	}
+	if hasWordPrefix(cmd, allow) {
+		return ""
+	}
+	return fmt.Sprintf("command %q is outside this mission's tool scope (bash restricted to: %s)", cmd, strings.Join(allow, ", "))
 }
 
 func (g *Guard) hasSessionGrant(key string) bool {

@@ -133,6 +133,142 @@ func TestRenderToolScopeShowsBrowserWarningWhenOffered(t *testing.T) {
 	}
 }
 
+// TestResolveToolScopeAsProposedSetsExactlyTheProposedBashAllow is Step 31
+// part 7's own closing property for row 1: choosing "As proposed" must
+// wire mission.ToolScope.BashAllow into the session's Guard verbatim, via
+// SetBashScope — not merely render it (part 6's own scope, already
+// covered by TestRenderToolScopeShowsProposedBaseAndBashScope).
+func TestResolveToolScopeAsProposedSetsExactlyTheProposedBashAllow(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := mustOpenToolScope(t, newMissionRoot(guard), "fix orbital-dash, no playwright")
+
+	r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !guard.bashScopeSet {
+		t.Fatal("SetBashScope was never called for toolScopeAsProposed")
+	}
+	want := []string{"node", "npm", "git"} // defaultBashAllow, this goal names no ecosystem keyword
+	if !equalStrings(guard.bashScope, want) {
+		t.Fatalf("bashScope = %v, want %v", guard.bashScope, want)
+	}
+}
+
+// TestResolveToolScopeProposedPlusBrowserWidensTheBashAllow covers row 2:
+// choosing it must set a scope that is the proposed BashAllow plus
+// browserBashAllow's own fixed set, not merely the proposed set alone —
+// otherwise the mockup's own "considered and rejected" widen option would
+// resolve identically to row 1, which would make the dialog's second row
+// meaningless.
+func TestResolveToolScopeProposedPlusBrowserWidensTheBashAllow(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := mustOpenToolScope(t, newMissionRoot(guard), "fix orbital-dash, no playwright")
+	r.toolScope = r.toolScope.moveSel(int(toolScopeProposedPlusBrowser))
+
+	r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !guard.bashScopeSet {
+		t.Fatal("SetBashScope was never called for toolScopeProposedPlusBrowser")
+	}
+	for _, want := range []string{"node", "npm", "git", "npx", "playwright"} {
+		if !containsString(guard.bashScope, want) {
+			t.Fatalf("bashScope = %v, missing %q", guard.bashScope, want)
+		}
+	}
+}
+
+// TestResolveToolScopeEverythingClearsTheBashAllow covers row 3: "3.
+// Everything installed" must clear any restriction (SetBashScope(nil)),
+// per the mockup's own "allow them all" reading — proven by an explicit
+// nil check, not merely an empty slice, since bashScopeAllow's own doc
+// comment on guard.go draws that exact distinction.
+func TestResolveToolScopeEverythingClearsTheBashAllow(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := mustOpenToolScope(t, newMissionRoot(guard), "fix orbital-dash, no playwright")
+	r.toolScope = r.toolScope.moveSel(int(toolScopeEverything))
+
+	r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !guard.bashScopeSet {
+		t.Fatal("SetBashScope was never called for toolScopeEverything")
+	}
+	if guard.bashScope != nil {
+		t.Fatalf("bashScope = %v, want nil (Everything installed clears any restriction)", guard.bashScope)
+	}
+}
+
+// TestResolveToolScopePickOneByOneFallsBackToProposed covers row 4: with
+// no free-standing checkbox widget yet, it must resolve to the same scope
+// as "As proposed" (row 1) rather than leaving the session unrestricted or
+// panicking — the same "not invented here half-finished" deferral
+// missionAdjust already applies for §21.6's first dialog.
+func TestResolveToolScopePickOneByOneFallsBackToProposed(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := mustOpenToolScope(t, newMissionRoot(guard), "fix orbital-dash, no playwright")
+	r.toolScope = r.toolScope.moveSel(int(toolScopePickOneByOne))
+
+	r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	want := []string{"node", "npm", "git"}
+	if !equalStrings(guard.bashScope, want) {
+		t.Fatalf("bashScope = %v, want %v (same as As proposed)", guard.bashScope, want)
+	}
+}
+
+// TestResolveToolScopeEscDefaultsToAsProposedScope proves Esc's own
+// documented default (toolScopeDialogDefault = toolScopeAsProposed) is
+// honoured for the Guard wiring too, not just the rendered selection:
+// closing the dialog without deciding must never leave the session wider
+// than what auto itself proposed.
+func TestResolveToolScopeEscDefaultsToAsProposedScope(t *testing.T) {
+	guard := &fakeMissionGuard{}
+	r := mustOpenToolScope(t, newMissionRoot(guard), "fix orbital-dash, no playwright")
+	// Move off row 0 first, so this actually exercises Esc's own default
+	// rather than happening to match whatever was already selected.
+	r.toolScope = r.toolScope.moveSel(int(toolScopeEverything))
+
+	r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEsc})
+
+	want := []string{"node", "npm", "git"}
+	if !equalStrings(guard.bashScope, want) {
+		t.Fatalf("bashScope = %v, want %v (Esc must default to As proposed, not Everything installed)", guard.bashScope, want)
+	}
+}
+
+// TestResolveToolScopeNilGuardDoesNotPanic covers newMissionRoot(nil), the
+// shape every other test in this file already uses: a nil MissionGuard
+// must degrade to "enforces nothing" (no SetBashScope call attempted at
+// all), never panic, mirroring resolveMission's own "if opt == missionAccept
+// && m.missionGuard != nil" nil check.
+func TestResolveToolScopeNilGuardDoesNotPanic(t *testing.T) {
+	r := mustOpenToolScope(t, newMissionRoot(nil), "fix orbital-dash, no playwright")
+	m, _ := r.updateToolScope(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := m.(Root)
+	if got.mode != ModeBusy {
+		t.Fatalf("mode = %v, want ModeBusy even with a nil MissionGuard", got.mode)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRenderToolScopeHidesBrowserWarningWhenGoalAlreadyAffirmsIt(t *testing.T) {
 	// This goal has no recognized constraint, so it never opens ModeMission
 	// at all — this test drives openToolScope directly (the one case where
