@@ -291,12 +291,13 @@ func nearestCue(prefix string) polarity {
 // and dialog already did.
 //
 // This intentionally does not decide *whether* the dialog should open —
-// see ProposeTools' own doc comment for why the other two trigger
-// conditions §21.6 names ("a capability outside current policy", explicit
-// "/plan") have no Go concept to compile against yet, and stay out of
-// scope for this pass. A future caller gates opening the dialog on those
-// conditions plus this type's own data, the same way checkMission alone
-// (not Compile) decides whether ModeMission opens.
+// see ProposeTools' own doc comment for why one of the section's other two
+// trigger conditions, explicit "/plan", still has no Go concept to compile
+// against (the other, "a capability outside current policy", now does:
+// OutsidePolicy, added in Step 31 part 8, below). A future caller gates
+// opening the dialog on those conditions plus this type's own data, the
+// same way checkMission alone (not Compile) decides whether ModeMission
+// opens.
 type ToolScope struct {
 	// Base is every capability proposed regardless of the goal's own
 	// content, in the mockup's own listed order minus bash (see BashAllow
@@ -412,18 +413,21 @@ var browserKeywords = map[string]bool{
 //
 // This is deliberately the compiler alone — see ToolScope's own doc
 // comment for what is intentionally still missing: the dialog itself, and
-// wiring its outcome to a real Guard/tools.Registry restriction. Two of
-// §21.6's three stated trigger conditions for the dialog opening at all —
-// "the mission requests a capability outside current policy" and explicit
-// "/plan" — are also out of scope for this pass: "current policy" would
-// mean comparing against config.Tools/Permissions, and "/plan" is not yet
-// a real slash.Kind (docs/PLAN.md's own Step 32 row), so neither has a Go
-// concept to compile against today. ProposeTools therefore only answers
-// "what would auto propose from this goal's own text", leaving "should
-// the dialog even open" — and the first mockup's own third trigger, "the
-// goal contains a constraint", which checkMission already answers via
-// Compile(text).HasDeny() — to a future caller, the same way this
-// package's own Compile never decided whether ModeMission should open.
+// wiring its outcome to a real Guard/tools.Registry restriction. Of
+// §21.6's three stated trigger conditions for the dialog opening at all,
+// explicit "/plan" is still out of scope for this pass (not yet a real
+// slash.Kind, per docs/PLAN.md's own Step 32 row); "a capability outside
+// current policy" now has a Go concept to compile against — OutsidePolicy,
+// added in Step 31 part 8, below — but is not consulted here, since it
+// answers a different question (whether the dialog should open at all,
+// not what it should propose) the same way HasDeny() answers it for the
+// first mockup without Compile itself calling HasDeny(). ProposeTools
+// therefore only answers "what would auto propose from this goal's own
+// text", leaving "should the dialog even open" — every one of the three
+// triggers, "the goal contains a constraint" (checkMission's own
+// Compile(text).HasDeny()) included — to a future caller, the same way
+// this package's own Compile never decided whether ModeMission should
+// open.
 func ProposeTools(goal string) ToolScope {
 	lower := strings.ToLower(goal)
 	return ToolScope{
@@ -491,4 +495,111 @@ func wantsBrowserOffer(m Mission) bool {
 		}
 	}
 	return true
+}
+
+// Policy is the subset of a project's own configured permissions
+// (config.Permissions, internal/config/schema.go) OutsidePolicy (below)
+// needs to detect §21.6's second dialog-opening trigger: "the mission
+// requests a capability outside current policy". Kept as this package's
+// own small mirror type, not a shared one with config.Permissions, for
+// the identical §6.1 reason Rule mirrors permissions.MissionRule instead
+// of importing it (see Rule's own doc comment): internal/mission never
+// imports internal/config or internal/permissions, and a caller
+// (internal/app, the one package already trusted to bridge config/tui-
+// adjacent types across this seam — see denyRulesOf's own doc comment for
+// the identical bridge already built for MissionRule) converts a real
+// config.Permissions into this shape with a field-by-field copy.
+type Policy struct {
+	// ShellAllowed is config.Permissions.Shell != "deny" -- whether bash
+	// may run at all under this project's own configured policy, a
+	// question entirely independent of any mission or autonomy layer
+	// above it (§21.4's layer 5 sits below layer 4's mission, and layer 4
+	// sits below nothing this package can see, so a project that has
+	// turned bash off entirely makes *any* bash-shaped affirmation
+	// "outside policy" regardless of which technology was named).
+	ShellAllowed bool
+
+	// ShellDeny mirrors config.Permissions.ShellDeny verbatim -- patterns
+	// a bash command may never match regardless of any approval (§19.8).
+	// A goal affirming a technology whose own compiled bash Rule names
+	// something already forbidden here is asking for exactly what layer
+	// 5 already refuses, which is what "outside current policy" means
+	// for this pass: not a new policy concept, but a mission's own stated
+	// intent already colliding with one that exists today.
+	ShellDeny []string
+}
+
+// keywordName strips keywordRules' own doubled-star bracketing
+// ("**playwright**" -> "playwright") from a compiled Rule's own Pattern,
+// so OutsidePolicy can compare what a goal affirms against a project's
+// own free-text ShellDeny patterns by the plain word they both ultimately
+// name, without this package needing to know shell_deny's own glob syntax
+// at all -- permissions.matches' glob engine (internal/permissions/
+// guard.go) lives only in that package, kept out of this one by the
+// identical §6.1 boundary Rule's own doc comment already states. This is
+// a small, literal string trim, not a parser: keywordRules' own patterns
+// are the only Pattern values this function is ever asked to strip, and
+// every one of them is already known, by construction, to be wrapped in
+// exactly this "**word**" shape (see keywordRules' own doc comment on why
+// the doubled-star form was chosen).
+func keywordName(pattern string) string {
+	return strings.Trim(pattern, "*")
+}
+
+// OutsidePolicy reports whether goal affirms (does not negate) a
+// recognized keywordRules technology that collides with policy: either
+// policy.ShellAllowed is false (bash is off project-wide, so any
+// affirmed bash-shaped capability is outside policy by definition), or
+// the technology's own name already appears in one of policy.ShellDeny's
+// patterns (the project has already, separately, forbidden exactly what
+// this goal is now asking auto to use freely).
+//
+// This is §21.6's second stated dialog-opening trigger ("the mission
+// requests a capability outside current policy") — the one condition
+// ProposeTools' own doc comment, and every earlier Step 31 part's own
+// "still missing" list, named as having no Go concept to compile against
+// yet. Policy (above) is that concept: "current policy" means
+// config.Permissions' own Shell mode and ShellDeny list, bridged into
+// Policy by a caller the same way denyRulesOf already bridges
+// permissions.MissionRule.
+//
+// Only affirmed constraints are checked, never negated ones: a goal that
+// already says "no Playwright" has nothing left to flag here — checkMission's
+// own HasDeny() trigger already opens a dialog for it, and this function
+// firing too would mean two dialogs opening in a row for the exact same
+// recognized word, which is worse than either alone (§21.15's own
+// "death by a thousand dialogs" risk, applied to this trigger
+// specifically). A goal Compile does not recognize at all (zero
+// Constraints) can never trigger this either — the identical "no
+// keyword, no dialog" contract every earlier compiler in this package
+// already follows, applied here rather than invented anew.
+//
+// Like Compile and ProposeTools, this is the compiler alone: it answers
+// "does this goal collide with policy", not "which dialog should open,
+// and with what message" — that wiring (a caller checking this alongside
+// checkMission's own HasDeny() check) is a later Step 31 slice, following
+// the identical "compile now, dialog later" order parts 1→2 and 5→6
+// already used for this section's other two triggers.
+func OutsidePolicy(goal string, policy Policy) bool {
+	m := Compile(goal)
+	for _, c := range m.Constraints {
+		if c.Negated {
+			continue
+		}
+		for _, r := range c.Rules {
+			if r.Capability != "bash" {
+				continue
+			}
+			if !policy.ShellAllowed {
+				return true
+			}
+			name := keywordName(r.Pattern)
+			for _, deny := range policy.ShellDeny {
+				if strings.Contains(strings.ToLower(deny), name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
