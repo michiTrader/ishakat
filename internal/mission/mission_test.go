@@ -224,3 +224,78 @@ func TestProposeToolsBrowserOfferedForAnUnrelatedAffirmedKeyword(t *testing.T) {
 		t.Error("BrowserOffered = false, want true (docker is not browser automation)")
 	}
 }
+
+// TestOutsidePolicyTrueWhenShellIsDeniedEntirely covers Policy.ShellAllowed
+// == false: a goal affirming a recognized bash-shaped technology is
+// outside policy regardless of which one it names, because the project
+// has turned bash off entirely.
+func TestOutsidePolicyTrueWhenShellIsDeniedEntirely(t *testing.T) {
+	got := OutsidePolicy("use Playwright if you think it helps", Policy{ShellAllowed: false})
+	if !got {
+		t.Error("OutsidePolicy = false, want true (shell is not allowed at all)")
+	}
+}
+
+// TestOutsidePolicyTrueWhenAffirmedKeywordMatchesShellDeny covers the
+// "current policy" half of the trigger: a goal affirming a technology
+// whose own name already appears in the project's own configured
+// shell_deny list is asking for exactly what layer 5 already refuses.
+func TestOutsidePolicyTrueWhenAffirmedKeywordMatchesShellDeny(t *testing.T) {
+	got := OutsidePolicy("use Playwright if you think it helps", Policy{
+		ShellAllowed: true,
+		ShellDeny:    []string{"**playwright**"},
+	})
+	if !got {
+		t.Error("OutsidePolicy = false, want true (playwright already matches shell_deny)")
+	}
+}
+
+// TestOutsidePolicyFalseWhenNothingCollides is the ordinary case: shell is
+// allowed, nothing in ShellDeny names the affirmed technology, so the
+// goal's own stated intent does not collide with anything configured.
+func TestOutsidePolicyFalseWhenNothingCollides(t *testing.T) {
+	got := OutsidePolicy("use Playwright if you think it helps", Policy{
+		ShellAllowed: true,
+		ShellDeny:    []string{"**rm -rf**"},
+	})
+	if got {
+		t.Error("OutsidePolicy = true, want false (nothing configured collides with playwright)")
+	}
+}
+
+// TestOutsidePolicyFalseForANegatedConstraint covers the "do not double up
+// with checkMission's own dialog" rule: a goal that already denies a
+// keyword has nothing left to flag here, even under a policy that would
+// otherwise flag it, because HasDeny() already opens a dialog for it.
+func TestOutsidePolicyFalseForANegatedConstraint(t *testing.T) {
+	got := OutsidePolicy("fix orbital-dash, no playwright", Policy{ShellAllowed: false})
+	if got {
+		t.Error("OutsidePolicy = true, want false (a negated constraint is checkMission's own trigger, not this one)")
+	}
+}
+
+// TestOutsidePolicyFalseForAPlainGoalWithNoRecognizedKeyword covers the
+// "no keyword, no dialog" contract every earlier compiler in this package
+// already follows: a goal Compile does not recognize at all can never
+// collide with policy, regardless of how restrictive that policy is.
+func TestOutsidePolicyFalseForAPlainGoalWithNoRecognizedKeyword(t *testing.T) {
+	got := OutsidePolicy("why does the game stutter?", Policy{ShellAllowed: false})
+	if got {
+		t.Error("OutsidePolicy = true, want false (no recognized keyword to collide with anything)")
+	}
+}
+
+// TestOutsidePolicyIgnoresUnrelatedShellDenyEntries confirms a ShellDeny
+// list is checked for the affirmed keyword's own name specifically, not
+// treated as "any non-empty ShellDeny means outside policy": a project
+// that already forbids something unrelated (e.g. "rm -rf") must not make
+// every other affirmed technology look like a collision by accident.
+func TestOutsidePolicyIgnoresUnrelatedShellDenyEntries(t *testing.T) {
+	got := OutsidePolicy("use Docker for the build", Policy{
+		ShellAllowed: true,
+		ShellDeny:    []string{"**rm -rf**", "**curl**"},
+	})
+	if got {
+		t.Error("OutsidePolicy = true, want false (docker matches neither configured deny pattern)")
+	}
+}
