@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/engine"
@@ -88,5 +89,50 @@ func TestAgentTurnCmdRunsToolCallsBeforeReturningFinalAnswer(t *testing.T) {
 		if got := history.Messages[i].Role; got != want {
 			t.Errorf("history.Messages[%d].Role = %v, want %v", i, got, want)
 		}
+	}
+}
+
+// TestApplyPhaseWaitSetsFooterPhase is Step 32's own closing test for
+// §21.1's "wait" phase (acceptance narrative item 6): PhaseWaitMsg's
+// handler sets the same FooterState.Phase word startAgentTurn/
+// openToolApprove already set for "exec"/"ask", this time to a rounded
+// snapshot of the wait duration — matching the mockup's "auto·wait 22s"
+// shape (footer.go's "autonomy" case already draws Autonomy+dot+Phase
+// verbatim, so the space here becomes the space in "wait 22s").
+func TestApplyPhaseWaitSetsFooterPhase(t *testing.T) {
+	root := Root{mode: ModeBusy}
+	model, cmd := root.applyPhaseWait(PhaseWaitMsg{Wait: 22 * time.Second})
+	got := model.(Root)
+	if got.footer.Phase != "wait 22s" {
+		t.Fatalf("footer.Phase after applyPhaseWait = %q, want %q", got.footer.Phase, "wait 22s")
+	}
+	if cmd != nil {
+		t.Fatalf("applyPhaseWait returned a non-nil cmd, want nil (fire-and-forget)")
+	}
+}
+
+// TestApplyPhaseWaitRoundsSubSecondWaits mirrors internal/app/agentturn.go's
+// own roundWait test coverage for the millisecond-resolution branch: a
+// sub-second wait must not collapse to the misleading "0s".
+func TestApplyPhaseWaitRoundsSubSecondWaits(t *testing.T) {
+	root := Root{mode: ModeBusy}
+	model, _ := root.applyPhaseWait(PhaseWaitMsg{Wait: 317 * time.Millisecond})
+	got := model.(Root)
+	if got.footer.Phase != "wait 317ms" {
+		t.Fatalf("footer.Phase after applyPhaseWait = %q, want %q", got.footer.Phase, "wait 317ms")
+	}
+}
+
+// TestUpdateDispatchDropsPhaseWaitOutsideModeBusy mirrors
+// TestOpenAskUserSwitchesModeAndStoresDialog's own sibling coverage for
+// ToolApproveRequestMsg/AskUserRequestMsg: a stale PhaseWaitMsg from a turn
+// cancelAgentTurn already ended must not resurrect a footer phase for a
+// mode that is no longer running a turn at all.
+func TestUpdateDispatchDropsPhaseWaitOutsideModeBusy(t *testing.T) {
+	root := Root{mode: ModeChat, footer: FooterState{Autonomy: "auto"}}
+	model, _ := root.updateDispatch(PhaseWaitMsg{Wait: 5 * time.Second})
+	got := model.(Root)
+	if got.footer.Phase != "" {
+		t.Fatalf("footer.Phase after a stale PhaseWaitMsg = %q, want empty (dropped)", got.footer.Phase)
 	}
 }

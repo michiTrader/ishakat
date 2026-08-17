@@ -245,6 +245,50 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 	return m.checkEndOfTurn()
 }
 
+// applyPhaseWait is PhaseWaitMsg's handler: §21.1's "wait" phase, the last
+// of the three named in the acceptance narrative's item 6 ("auto·wait 22s
+// appears; ishakat waits exactly what was asked, then resumes... No retry
+// storm."). Unlike openToolApprove/openAskUser this never changes m.mode —
+// OnWait fires from inside the loop's own retry, still mid-"exec", with no
+// dialog to open and nothing for a human to answer — it only overwrites the
+// same m.footer.Phase word those two already set, this time to a snapshot
+// of how long the loop is about to sleep.
+//
+// There is deliberately no follow-up message that clears this back to
+// "exec" once Wait elapses: OnWait's own contract (engine.AgentOptions'
+// doc comment) is a single call right before the sleep, with no matching
+// "wait ended" signal from the engine to key a second message off. Rather
+// than invent a tea.Tick countdown purely to clear a label — which would
+// mean a timer running for the sleep's own duration, on top of the retry
+// itself, the exact kind of always-on ticker §14 asks this codebase not to
+// add — the phase is left as a static snapshot: the next real phase event
+// (another OnWait call, an ask-tier pause, or the turn simply finishing
+// through finishAgentTurn) is what overwrites or clears it. A stale
+// "wait 22s" lingering for the tail of that same wait is a label slightly
+// behind the clock, not a lie about what the loop is doing — it is still
+// waiting — and finishAgentTurn's own unconditional `m.footer.Phase = ""`
+// guarantees it never survives past the turn that produced it.
+func (m Root) applyPhaseWait(msg PhaseWaitMsg) (tea.Model, tea.Cmd) {
+	m.footer.Phase = "wait " + roundWait(msg.Wait).String()
+	return m, nil
+}
+
+// roundWait renders a retry wait at a granularity a person can read,
+// mirroring internal/app/agentturn.go's own roundWait (the headless path's
+// identical helper) — duplicated rather than shared because internal/tui
+// does not import internal/app (§6.1 draws that boundary the other way
+// around), and formatting one time.Duration is not enough logic to justify
+// a third package just to hold it once. A raw time.Duration prints as
+// "22.317849213s", nine digits of noise the footer's single status line
+// has no room for (§2). Sub-second waits keep millisecond resolution
+// because "0s" would be a lie about why the loop paused.
+func roundWait(d time.Duration) time.Duration {
+	if d < time.Second {
+		return d.Round(time.Millisecond)
+	}
+	return d.Round(time.Second)
+}
+
 // cancelAgentTurn implements §7.4 for a tools-enabled turn: closing m.cancel
 // unblocks both agentTurnCmd's own ctx.Err() checks inside RunAgentTurn and,
 // when a ModeToolApprove dialog happens to be open at the moment, the

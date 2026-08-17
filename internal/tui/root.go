@@ -1208,6 +1208,18 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.openAskUser(msg)
 
+	case PhaseWaitMsg:
+		// Same "outlived its turn" family as ToolApproveRequestMsg/
+		// AskUserRequestMsg above: a stale wait notification from a turn
+		// cancelAgentTurn already ended has no footer left worth updating,
+		// and — unlike those two — there is no dialog state to leave
+		// dangling if it is simply dropped, since OnWait never blocks on a
+		// reply.
+		if m.mode != ModeBusy {
+			return m, nil
+		}
+		return m.applyPhaseWait(msg)
+
 	case loginCodeMsg:
 		// Same "outlived its turn" guard compactDoneMsg's own case
 		// applies: cancelLogin already moved mode back to ModeChat

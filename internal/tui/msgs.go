@@ -118,6 +118,24 @@ type AskUserRequestMsg struct {
 	Reply chan<- ask.Answers
 }
 
+// PhaseWaitMsg is how the OnWait→TUI bridge (internal/app's
+// tuiWaitNotifier) reports that engine.RunAgentTurn's own retry loop is
+// about to sleep out a retryable handshake failure (a 429 with
+// Retry-After) — see engine.AgentOptions.OnWait's own doc comment, which
+// names this exact display ("§21.2's auto·wait 22s") as the intended
+// consumer. Unlike ToolApproveRequestMsg/AskUserRequestMsg it carries no
+// reply channel: OnWait is fire-and-forget — the loop resumes on its own
+// once Wait elapses, there is nothing here for Update to answer, only a
+// status line to update.
+//
+// It is exported for the same reason those two are: the bridge that
+// produces it lives in internal/app, on the far side of the §6.1 import
+// boundary, since only that package is allowed to hold both a
+// *tea.Program and a concrete engine.AgentOptions.OnWait closure.
+type PhaseWaitMsg struct {
+	Wait time.Duration
+}
+
 // agentTurnDoneMsg is agentTurnCmd's result (see agentturn.go/root.go's
 // startEngineTurn tools-enabled branch): engine.RunAgentTurn blocks with no
 // per-token callback, so — like summarizeCmd — it is wrapped in a tea.Cmd
