@@ -36,13 +36,12 @@ type FooterState struct {
 	Autonomy string
 
 	// Phase is §21.1's other axis: transient, loop-owned, one of
-	// "exec"/"ask" today (see agentturn.go's startAgentTurn/
-	// openToolApprove/openAskUser for who sets it). "plan"/"check"/"wait"
-	// are deliberately not produced anywhere yet: §21.14's own Step 31
-	// closing note says explicit `/plan` and the full §21.11 fan-out
-	// display remain unbuilt, and no OnWait→TUI bridge exists yet either
-	// (engine.AgentOptions.OnWait is wired only in the headless path) — so
-	// there is no real signal for any of the three to name honestly yet.
+	// "exec"/"ask"/"wait <duration>" today (see agentturn.go's
+	// startAgentTurn/openToolApprove/openAskUser/applyPhaseWait for who
+	// sets each). "plan"/"check" are deliberately not produced anywhere
+	// yet: §21.14's own Step 31 closing note says explicit `/plan` and the
+	// full §21.11 fan-out display remain unbuilt, so there is no real
+	// plan/exec split in the running loop for either to name honestly.
 	// Inventing one here would be a label with nothing underneath it,
 	// worse than omitting it. Empty is the supported "no turn running"
 	// value (ModeChat, and every test in this package): "autonomy" below

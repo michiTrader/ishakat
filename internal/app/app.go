@@ -168,6 +168,7 @@ func Run(version string, resume bool) int {
 	var agentOpts engine.AgentOptions
 	var reviewer *toolReviewer
 	var asker *tuiAsker
+	var waitNotifier *tuiWaitNotifier
 	// guard is declared outside the block below (unlike reviewer's own
 	// *toolReviewer, which nothing after this needs) because
 	// trustStoreFor's own fileTrustStore.Save bridges §21.4 layer 2's
@@ -214,6 +215,23 @@ func Run(version string, resume bool) int {
 		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker)
 		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, asker)
 		warnp.Warn(os.Stderr, toolsWarn)
+
+		// waitNotifier is Step 32's own closing bridge (§21.1's "wait"
+		// phase, waitphase.go's own doc comment): built now, same two-step
+		// reasoning as reviewer/asker above, and wired onto agentOpts here
+		// rather than inside buildAgentOptions itself for the identical
+		// reason runAgentTurnHeadless sets its own OnWait inline — this is
+		// the layer that owns a *tea.Program to report through, and
+		// buildAgentOptions itself is shared with dispatch.go's own
+		// sub-agent path, which has no *tea.Program of its own to send to.
+		// A dispatched sub-agent's own retries are not covered by this —
+		// its own inner buildAgentOptions call (newSubAgentRunner,
+		// dispatch.go) never sets OnWait, matching the identical gap
+		// runAgentTurnHeadless already leaves for the headless path today;
+		// closing that for both callers at once is separate follow-up work,
+		// not part of wiring the top-level turn's own status line.
+		waitNotifier = newTUIWaitNotifier()
+		agentOpts.OnWait = waitNotifier.OnWait
 	}
 
 	// cfg.Warnings carries one entry per enabled provider missing its
@@ -428,6 +446,14 @@ func Run(version string, resume bool) int {
 	// constructor argument.
 	if asker != nil {
 		asker.SetProgram(p)
+	}
+	// waitNotifier (nil unless cfg.Tools.Enabled) has been waiting since it
+	// was built above for the same thing reviewer/asker were: a running
+	// *tea.Program to send tui.PhaseWaitMsg to. See
+	// internal/app/waitphase.go's own comment for why this has to be a
+	// second step rather than a constructor argument.
+	if waitNotifier != nil {
+		waitNotifier.SetProgram(p)
 	}
 
 	// §4.4/§11's background refresh: only worth doing when the cache
