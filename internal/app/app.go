@@ -255,8 +255,14 @@ func Run(version string, resume bool) int {
 	resumedConv, resumeStore, resumeWarn := ResumeSession(cfg, resume)
 	warnp.Warn(os.Stderr, resumeWarn)
 	var history []convo.Message
+	// restoredMissions is §21.16 decision 3's own resume half: every
+	// MissionEvent the resumed file already carried, in the order they
+	// were recorded. Read here, off the same resumedConv History already
+	// comes from, rather than re-opening the store a second time.
+	var restoredMissions []convo.MissionEvent
 	if resumedConv != nil {
 		history = resumedConv.Messages
+		restoredMissions = resumedConv.Missions
 	}
 
 	// §10, Step 13: the TUI persists its own conversation the same way
@@ -269,14 +275,32 @@ func Run(version string, resume bool) int {
 	// second *convo.Store on the same directory: convo.Store carries no
 	// per-conversation state (§10), so this is purely to avoid two
 	// redundant os.MkdirAll calls, not a correctness requirement.
-	var recorder tui.Recorder
+	// sessRec is kept as its own concrete-typed variable, not just boxed
+	// straight into tui.Recorder, because it also has to be boxed a
+	// second time into tui.MissionRecorder below (§21.16 decision 3) —
+	// the same *sessionRecorder implements both interfaces over the same
+	// *convo.Store/*convo.Conversation pair (session.go's own doc
+	// comment on AppendMission), and a mission resolved before this
+	// turn's own message is recorded must land in the very same file
+	// Recorder itself will go on to create or append to.
+	var sessRec *sessionRecorder
 	var sessionWarn string
 	if resumedConv != nil && resumeStore != nil {
-		recorder = &sessionRecorder{store: resumeStore, conv: resumedConv, model: model, keepLast: cfg.Session.KeepLast}
+		sessRec = &sessionRecorder{store: resumeStore, conv: resumedConv, model: model, keepLast: cfg.Session.KeepLast}
 	} else {
-		recorder, sessionWarn = NewSessionRecorder(cfg, model, nil)
+		var r tui.Recorder
+		r, sessionWarn = NewSessionRecorder(cfg, model, nil)
+		if r != nil {
+			sessRec = r.(*sessionRecorder)
+		}
 	}
 	warnp.Warn(os.Stderr, sessionWarn)
+	var recorder tui.Recorder
+	var missionRecorder tui.MissionRecorder
+	if sessRec != nil {
+		recorder = sessRec
+		missionRecorder = sessRec
+	}
 
 	// §13's third item: /resume's own read side. resumeStore is reused when
 	// this run itself already opened one (--resume, resume_last) — same
@@ -427,7 +451,31 @@ func Run(version string, resume bool) int {
 		// permissions.New above into a mission.Policy, mirroring
 		// missionGuardOrNil's own bridge for the enforcement seam.
 		MissionPolicy: missionPolicyOf(cfg.Tools.Permissions),
+
+		// §21.16 decision 3 (Step 31's own still-open item, closed here):
+		// MissionRecorder is where a live turn's confirmed mission/scope
+		// resolution goes to be remembered (session.go's own
+		// AppendMission), RestoredMissions is what a resumed one already
+		// carried on disk, handed to NewRoot for display. Enforcement of
+		// RestoredMissions against guard itself happens just below,
+		// before tea.NewProgram — "before the first tool call of the
+		// resumed session", per the decision's own text — not inside
+		// NewRoot, because NewRoot has no *permissions.Guard of its own
+		// to replay into, only the already-boxed tui.MissionGuard seam.
+		MissionRecorder:  missionRecorder,
+		RestoredMissions: restoredMissions,
 	})
+
+	// Replay §21.16 decision 3's own restored constraints into the live
+	// Guard now, before tea.NewProgram runs the program that will make
+	// the resumed session's first tool call — "enforced before the first
+	// tool call of the resumed session, not after the model's first
+	// response" is the decision's own second consequence, and this is
+	// the one point in Run that is both after guard exists and strictly
+	// before anything can call a tool through it. See replayMissions'
+	// own doc comment for why AddMissionRules is replayed once per event
+	// but SetBashScope only once, with the last event's value.
+	replayMissions(guard, restoredMissions)
 
 	p := tea.NewProgram(root)
 
@@ -494,6 +542,57 @@ func missionGuardOrNil(g *permissions.Guard) tui.MissionGuard {
 		return nil
 	}
 	return g
+}
+
+// replayMissions restores every MissionEvent a resumed session's own JSONL
+// already carried (§21.16 decision 3) onto the live Guard, before the TUI's
+// own event loop ever starts — see this function's own call site for why
+// that ordering, not merely "at some point during startup", is the actual
+// requirement. g == nil (tools disabled, or a fresh session with nothing to
+// restore) is a no-op, the same degradation missionGuardOrNil's own callers
+// already rely on elsewhere in this file.
+//
+// Rules replay by accumulation, one AddMissionRules call per event, in
+// recorded order — mirroring convo.MissionEvent's own doc comment ("Rules
+// append across replay, mirroring Guard.AddMissionRules' own accumulate
+// behaviour") and, transitively, what a live session already does: each
+// accepted mission in that session called AddMissionRules once, on top of
+// whatever the previous one had already added, never replacing it.
+//
+// BashScope replays by replacement, tracking only the last event seen —
+// mirroring MissionEvent's own doc comment on that field and
+// Guard.SetBashScope's own "replaces, never accumulates" contract: a
+// session's second tool-scope choice narrowing (or widening) the first
+// is exactly what a live SetBashScope call already does turn over turn,
+// so replaying every event's BashScope in order and letting the last one
+// stand reproduces that same end state rather than merging scopes that
+// were never meant to be merged.
+func replayMissions(g *permissions.Guard, events []convo.MissionEvent) {
+	if g == nil || len(events) == 0 {
+		return
+	}
+	var lastScope []string
+	haveScope := false
+	for _, ev := range events {
+		if len(ev.Rules) > 0 {
+			rules := make([]permissions.MissionRule, len(ev.Rules))
+			for i, r := range ev.Rules {
+				rules[i] = permissions.MissionRule{Capability: r.Capability, Pattern: r.Pattern}
+			}
+			g.AddMissionRules(rules)
+		}
+		// BashScope is tracked across every event, including one with a
+		// nil/empty scope (toolScopeEverything's own "invariants still
+		// apply" choice, §21.6) — haveScope distinguishes "the last event
+		// chose Everything" (replay nil) from "no event ever set a scope
+		// at all" (replay nothing, leaving Guard's own zero value, which
+		// already means unrestricted).
+		lastScope = ev.BashScope
+		haveScope = true
+	}
+	if haveScope {
+		g.SetBashScope(lastScope)
+	}
 }
 
 // missionPolicyOf converts a real config.Permissions into a *mission.Policy

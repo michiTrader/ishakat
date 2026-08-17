@@ -62,6 +62,37 @@ func (r *sessionRecorder) Append(m convo.Message) error {
 	return nil
 }
 
+// AppendMission implements tui.MissionRecorder (§21.16 decision 3) — the
+// exact mirror of Append above, for the other event kind. It shares
+// Append's own lazy-creation rule rather than requiring the user's own
+// message to have been recorded first: resolveToolScope (internal/tui's
+// toolscope.go) calls recordMission before submit ever calls recordMessage
+// for the same turn, since the two dialogs (and their resolution) happen
+// while submit itself is still paused, before the user's own message is
+// even added to m.conv. A fresh session's very first turn can therefore
+// reach here with r.conv still nil — titleFrom(ev.Goal) gives it the exact
+// same title the session would have gotten from Append a few lines later
+// this same turn (ev.Goal is the goal text resolveToolScope paused, which
+// is the same text submit's own Append call will see next), so the two
+// lazy-creation paths agree on a title rather than one winning arbitrarily
+// depending on which of the two happens to run first in a given turn.
+func (r *sessionRecorder) AppendMission(ev convo.MissionEvent) error {
+	if r.conv == nil {
+		conv, err := r.store.New(titleFrom(ev.Goal), r.model)
+		if err != nil {
+			return err
+		}
+		r.conv = conv
+	}
+	if err := r.store.AppendMission(r.conv.ID, ev); err != nil {
+		return err
+	}
+	if r.keepLast > 0 {
+		_, _ = r.store.Rotate(r.keepLast)
+	}
+	return nil
+}
+
 // NewSessionRecorder opens (or refuses to open) the session store for a TUI
 // run, honouring [session] save/dir exactly the way headless.go's step 5
 // does. A nil Recorder is the supported "not saving" value — either the

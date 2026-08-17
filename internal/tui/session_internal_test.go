@@ -183,3 +183,45 @@ func TestRecorderFailureIsReportedOnceThenSuppressed(t *testing.T) {
 		t.Error("sessionErr changed after a second, successful Append — it should stay the first failure")
 	}
 }
+
+// fakeMissionRecorder is MissionRecorder's own three-line test double, the
+// same shape fakeRecorder above already follows for the other event kind.
+type fakeMissionRecorder struct {
+	appended []convo.MissionEvent
+}
+
+func (f *fakeMissionRecorder) AppendMission(ev convo.MissionEvent) error {
+	f.appended = append(f.appended, ev)
+	return nil
+}
+
+// TestOptionsMissionRecorderIsWiredIntoRoot is MissionRecorder's own
+// regression test, mirroring TestOptionsRecorderIsWiredIntoRoot above: it
+// goes through NewRoot(Options{...}) rather than assigning the private
+// field directly, so a future refactor that drops Options.MissionRecorder
+// on the floor fails a test instead of silently going unsaved in every
+// real session that resolves a mission.
+func TestOptionsMissionRecorderIsWiredIntoRoot(t *testing.T) {
+	rec := &fakeMissionRecorder{}
+	root := NewRoot(Options{MissionRecorder: rec})
+	if root.missionRecorder == nil {
+		t.Fatal("NewRoot did not wire Options.MissionRecorder into Root.missionRecorder — real mission resolutions go unsaved")
+	}
+
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got, ok := m.(Root)
+	if !ok {
+		t.Fatal("Update did not return a Root")
+	}
+	m, _ = got.resolveToolScope(toolScopeAsProposed)
+	got, ok = m.(Root)
+	if !ok {
+		t.Fatal("resolveToolScope did not return a Root")
+	}
+	_ = got
+
+	if len(rec.appended) != 1 {
+		t.Fatalf("appended = %d mission events via a Root built from NewRoot(Options{MissionRecorder: rec}), want 1", len(rec.appended))
+	}
+}

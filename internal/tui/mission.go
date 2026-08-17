@@ -29,6 +29,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/mission"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 )
@@ -189,14 +190,27 @@ func (m Root) resolveMission(opt missionOption) (tea.Model, tea.Cmd) {
 	text := m.missionText
 	m.mission = missionDialog{}
 	m.mode = ModeChat
+	m.missionAppliedRules = nil
 
-	if opt == missionAccept && m.missionGuard != nil {
-		m.missionGuard.AddMissionRules(denyRulesOf(compiled))
+	if opt == missionAccept {
+		rules := denyRulesOf(compiled)
+		if m.missionGuard != nil {
+			m.missionGuard.AddMissionRules(rules)
+		}
+		// Stashed regardless of whether missionGuard is wired, mirroring
+		// missionRulesOr's own "the dialog still closes the same way
+		// whether or not there is anywhere to enforce it" shape: what
+		// resolveToolScope persists is what the human just accepted, not
+		// only what a live Guard happened to be present to receive.
+		m.missionAppliedRules = convoRulesOf(rules)
 	}
 	// missionAdjust and missionSoft both apply no rule at all for this
 	// pass — see missionAdjust's and missionSoft's own doc comments for
 	// why that is each one's correct behaviour today, not a shortcut
-	// shared by accident.
+	// shared by accident. missionAppliedRules stays nil for both, so the
+	// combined MissionEvent resolveToolScope eventually records carries
+	// no rules for either — persisting a rule the human explicitly did
+	// not accept would misrepresent what --resume must later restore.
 
 	return m.openToolScope(text), nil
 }
@@ -242,6 +256,26 @@ func denyRulesOf(mn mission.Mission) []permissions.MissionRule {
 			}
 			out = append(out, permissions.MissionRule{Capability: r.Capability, Pattern: r.Pattern})
 		}
+	}
+	return out
+}
+
+// convoRulesOf converts denyRulesOf's own permissions.MissionRule output
+// into convo.MissionRule field-by-field — the same "small mirror type,
+// converted by a trusted bridge" shape denyRulesOf itself already draws
+// between mission.Rule and permissions.MissionRule, just one hop further:
+// this package already imports both permissions and convo (see this
+// file's own package comment for why importing both is not a new §6.1
+// boundary), so it is the natural place for this conversion to live
+// rather than inventing a fourth package neither convo nor permissions
+// would ever import either.
+func convoRulesOf(rules []permissions.MissionRule) []convo.MissionRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]convo.MissionRule, len(rules))
+	for i, r := range rules {
+		out[i] = convo.MissionRule{Capability: r.Capability, Pattern: r.Pattern}
 	}
 	return out
 }
