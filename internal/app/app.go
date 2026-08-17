@@ -356,6 +356,15 @@ func Run(version string, resume bool) int {
 		// toolsLister's own doc comment.
 		ToolsLister: NewToolsListerWithEvolve(cfg.Tools.Dir, cfg.Tools.Enabled, cfg.Tools.Egress.Allow, cfg.Tools.Egress.AllowAll, evolveThresholds(cfg.Tools, cfg.Tools.Evolve)),
 
+		// PermissionsLister is /permissions' own read side (§13, Step 32)
+		// — the same guard already bound into agentOpts.Runner above (nil
+		// when cfg.Tools.Enabled is false, in which case
+		// NewPermissionsLister itself degrades to nil, matching every
+		// other Guard-backed seam's own "no live Guard, no live view"
+		// rule) plus the same cfg.Tools.Permissions already threaded
+		// through permissions.New elsewhere in this function.
+		PermissionsLister: NewPermissionsLister(guard, cfg.Tools.Permissions),
+
 		ToolsEnabled: cfg.Tools.Enabled,
 		AgentOptions: agentOpts,
 
