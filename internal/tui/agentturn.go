@@ -76,6 +76,14 @@ func agentTurnCmd(ctx context.Context, eng *engine.Engine, req engine.Request, o
 func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	m.mode = ModeBusy
 	m.live.start(m.footer.Model)
+	// §21.1's "exec" phase: this turn is now running the loop's ordinary
+	// tool-call/answer cycle with no dialog open. openToolApprove/
+	// openAskUser overwrite this to "ask" the moment either pauses on a
+	// human; resolveToolApproveWith/resolveAskUserWith set it back to
+	// "exec" on return, and finishAgentTurn clears it once the turn itself
+	// ends. See FooterState.Phase's own doc comment for why "plan"/
+	// "check"/"wait" are not produced here.
+	m.footer.Phase = "exec"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -118,6 +126,9 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 func (m Root) openToolApprove(msg ToolApproveRequestMsg) (tea.Model, tea.Cmd) {
 	m.toolApprove = newToolApproveDialog(msg.Req, msg.Reply)
 	m.mode = ModeToolApprove
+	// §21.1's "ask" phase: the loop is paused on a human decision, not
+	// executing — see FooterState.Phase's own doc comment.
+	m.footer.Phase = "ask"
 	return m, nil
 }
 
@@ -131,6 +142,8 @@ func (m Root) openToolApprove(msg ToolApproveRequestMsg) (tea.Model, tea.Cmd) {
 func (m Root) openAskUser(msg AskUserRequestMsg) (tea.Model, tea.Cmd) {
 	m.askUser = newAskUserDialog(msg.Form, msg.Reply)
 	m.mode = ModeAskUser
+	// §21.1's "ask" phase: same reasoning as openToolApprove above.
+	m.footer.Phase = "ask"
 	return m, nil
 }
 
@@ -224,6 +237,10 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 	m.live = liveTurn{}
 	m.mode = ModeChat
 	m.animOffset = 0
+	// The turn is over: no phase to report until the next one starts —
+	// see FooterState.Phase's own doc comment on empty being "no turn
+	// running".
+	m.footer.Phase = ""
 
 	return m.checkEndOfTurn()
 }
@@ -249,5 +266,12 @@ func (m Root) cancelAgentTurn() (tea.Model, tea.Cmd) {
 		m.cancel()
 	}
 	m.mode = ModeBusy
+	// Still "exec" here, not cleared: the turn is not over yet (it ends
+	// normally through finishAgentTurn/agentTurnDoneMsg, per this
+	// function's own doc comment above), only whichever dialog was open
+	// closes — mirroring resolveToolApproveWith/resolveAskUserWith's own
+	// "back to exec" transition rather than agentTurnDoneMsg's own "turn
+	// over, clear it" one.
+	m.footer.Phase = "exec"
 	return m, nil
 }

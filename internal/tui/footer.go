@@ -31,12 +31,25 @@ type FooterState struct {
 	// empty string.
 	//
 	// §21.1's full mockup pairs this with a transient phase word
-	// ("auto·exec", "auto·wait 22s") on the same line — that half is
-	// Step 32's own scope (the phase concept does not exist in code yet,
-	// only autonomy does after Step 30), so this field carries the
-	// autonomy word alone for now; a future phase field joins it with the
-	// same "·" separator once RunAgentTurn has something to report.
+	// ("auto·exec", "auto·wait 22s") on the same line — see Phase below,
+	// Step 32's own closing addition.
 	Autonomy string
+
+	// Phase is §21.1's other axis: transient, loop-owned, one of
+	// "exec"/"ask" today (see agentturn.go's startAgentTurn/
+	// openToolApprove/openAskUser for who sets it). "plan"/"check"/"wait"
+	// are deliberately not produced anywhere yet: §21.14's own Step 31
+	// closing note says explicit `/plan` and the full §21.11 fan-out
+	// display remain unbuilt, and no OnWait→TUI bridge exists yet either
+	// (engine.AgentOptions.OnWait is wired only in the headless path) — so
+	// there is no real signal for any of the three to name honestly yet.
+	// Inventing one here would be a label with nothing underneath it,
+	// worse than omitting it. Empty is the supported "no turn running"
+	// value (ModeChat, and every test in this package): "autonomy" below
+	// draws the bare Autonomy word with no trailing dot when Phase is
+	// empty, the same "empty is invisible" rule Autonomy itself follows
+	// for "not wired".
+	Phase string
 }
 
 // footerItemOrder son las claves válidas de ui.footer.items, en el mismo
@@ -87,7 +100,10 @@ func renderItems(g glyphs, st FooterState, items []string) []string {
 				parts = append(parts, g.modelMark+" "+st.Model)
 			}
 		case "autonomy":
-			if st.Autonomy != "" {
+			switch {
+			case st.Autonomy != "" && st.Phase != "":
+				parts = append(parts, st.Autonomy+g.dot+st.Phase)
+			case st.Autonomy != "":
 				parts = append(parts, st.Autonomy)
 			}
 		case "context":
