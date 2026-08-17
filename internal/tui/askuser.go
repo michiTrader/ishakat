@@ -210,6 +210,9 @@ func (m Root) resolveAskUserWith(answers ask.Answers) (tea.Model, tea.Cmd) {
 	}
 	m.askUser = askUserDialog{}
 	m.mode = ModeBusy
+	// Back to §21.1's "exec" phase: same reasoning as
+	// resolveToolApproveWith's own comment.
+	m.footer.Phase = "exec"
 	return m, nil
 }
 

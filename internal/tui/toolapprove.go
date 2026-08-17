@@ -166,6 +166,9 @@ func (m Root) resolveToolApproveWith(decision permissions.Decision) (tea.Model, 
 	}
 	m.toolApprove = toolApproveDialog{}
 	m.mode = ModeBusy
+	// Back to §21.1's "exec" phase: the pause is over, the loop resumes
+	// its ordinary cycle — see FooterState.Phase's own doc comment.
+	m.footer.Phase = "exec"
 	return m, nil
 }
 

@@ -82,14 +82,44 @@ func TestRenderFooterSinItemsUsaOrdenPorDefecto(t *testing.T) {
 // TestRenderFooterDrawsAutonomy is Step 30's own closing-adjacent test for
 // the status-line half of §21.4 layer 3: the autonomy word appears in the
 // default item order, right after the model, matching §21.1's own
-// "auto·exec" mockup's left-of-the-dot half (the "·exec" phase half is
-// Step 32's scope, not drawn here since it does not exist in code yet).
+// "auto·exec" mockup's left-of-the-dot half with no phase set (see
+// TestRenderFooterDrawsAutonomyPhase below for the whole mockup drawn with
+// both halves, Step 32's own addition).
 func TestRenderFooterDrawsAutonomy(t *testing.T) {
 	lay := tui.NewLayout(120, 40, 0, false, false)
 	st := tui.FooterState{Model: "sonnet-4-5", Autonomy: "auto"}
 	line := tui.RenderFooter(lay, st, nil)
 	if !strings.Contains(line, "auto") {
 		t.Errorf("RenderFooter() = %q, esperaba que contuviera la autonomía %q", line, "auto")
+	}
+}
+
+// TestRenderFooterDrawsAutonomyPhase is Step 32's own closing test for the
+// status-line's right-of-the-dot half: §21.1's "auto·exec" mockup drawn
+// whole, autonomy and phase joined by the same "·" glyph every other
+// footer separator uses, once FooterState.Phase is set alongside Autonomy.
+func TestRenderFooterDrawsAutonomyPhase(t *testing.T) {
+	lay := tui.NewLayout(120, 40, 0, false, false)
+	st := tui.FooterState{Model: "sonnet-4-5", Autonomy: "auto", Phase: "exec"}
+	line := tui.RenderFooter(lay, st, nil)
+	if !strings.Contains(line, "auto\u00b7exec") {
+		t.Errorf("RenderFooter() = %q, esperaba que contuviera %q", line, "auto\u00b7exec")
+	}
+}
+
+// TestRenderFooterOmitePhaseVacia is Phase's own "no turn running" default
+// (empty, like Autonomy's "not wired" default above) drawing the bare
+// autonomy word with no trailing dot — the mockup never shows "auto·" with
+// nothing after it.
+func TestRenderFooterOmitePhaseVacia(t *testing.T) {
+	lay := tui.NewLayout(120, 40, 0, false, false)
+	st := tui.FooterState{Model: "sonnet-4-5", Autonomy: "auto"}
+	line := tui.RenderFooter(lay, st, nil)
+	if strings.Contains(line, "\u00b7") {
+		t.Errorf("RenderFooter() = %q, expected no dot separator with an empty phase", line)
+	}
+	if !strings.Contains(line, "auto") {
+		t.Errorf("RenderFooter() = %q, expected the bare autonomy word", line)
 	}
 }
 
