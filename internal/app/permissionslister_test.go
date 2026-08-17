@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/MichiTrader/ishakat/internal/config"
@@ -58,6 +60,52 @@ func TestPermissionsListerSnapshotReflectsGuardAndConfig(t *testing.T) {
 	if len(snap.WriteDeny) != 1 || snap.WriteDeny[0] != "~/.ssh/**" {
 		t.Errorf("WriteDeny = %v, want [~/.ssh/**]", snap.WriteDeny)
 	}
+	if len(snap.RecentDenials) != 0 {
+		t.Errorf("RecentDenials = %+v, want empty when nothing has been refused yet", snap.RecentDenials)
+	}
+}
+
+// TestPermissionsListerSnapshotReflectsRecentDenials confirms Snapshot's
+// own conversion of Guard.RecentDenials() -- []permissions.DeniedEntry --
+// into []tui.PermissionsDenial, field-by-field including the string form
+// of Tier (tierString), the one field with no matching name on either
+// side.
+func TestPermissionsListerSnapshotReflectsRecentDenials(t *testing.T) {
+	cfgPerms := config.Permissions{Read: "allow", Write: "ask", Shell: "ask"}
+	g := permissions.New(cfgPerms, false, &denyingReviewer{})
+	if err := g.Authorize(context.Background(), "write_file", json.RawMessage(`{"path":"x","content":"y"}`)); err == nil {
+		t.Fatalf("Authorize() error = nil, want a denial to seed RecentDenials")
+	}
+
+	l := NewPermissionsLister(g, cfgPerms)
+	snap := l.Snapshot()
+
+	if len(snap.RecentDenials) != 1 {
+		t.Fatalf("RecentDenials = %+v, want one entry", snap.RecentDenials)
+	}
+	got := snap.RecentDenials[0]
+	if got.Tool != "write_file" {
+		t.Errorf("Tool = %q, want %q", got.Tool, "write_file")
+	}
+	if got.Tier != "sensitive" {
+		t.Errorf("Tier = %q, want %q", got.Tier, "sensitive")
+	}
+	if got.Reason != "user declined write_file" {
+		t.Errorf("Reason = %q, want %q", got.Reason, "user declined write_file")
+	}
+	if got.When.IsZero() {
+		t.Error("When is zero, want a real timestamp")
+	}
+}
+
+// denyingReviewer always declines -- a minimal permissions.Reviewer test
+// double for seeding a denial without depending on any exported test
+// helper from internal/permissions (that package's own recordingReviewer
+// is unexported to it).
+type denyingReviewer struct{}
+
+func (denyingReviewer) Review(context.Context, permissions.Request) (permissions.Decision, error) {
+	return permissions.Decision{Allow: false}, nil
 }
 
 func TestPermissionsListerSnapshotWithNoMissionOrScopeIsEmptyNotNilProof(t *testing.T) {

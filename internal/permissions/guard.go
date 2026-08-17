@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MichiTrader/ishakat/internal/config"
 )
@@ -242,8 +243,98 @@ type Guard struct {
 	// time it changes.
 	bashScopeAllow []string
 
+	// deniedHistory is §21.13's own acceptance-narrative item 10 ("a
+	// recently-denied list"), the one piece of that item's four this
+	// package did not already have a field for when the read-only
+	// /permissions slice landed (Step 32 part 5's own doc comment on
+	// permissions.go names this as the one gap left). Appended to by
+	// recordDenial, called from every one of Authorize's denial/refusal
+	// return points (see that method's own doc comment for exactly
+	// which); trimmed to deniedHistoryLimit entries, oldest first
+	// dropped, so a long session cannot grow this without bound the way
+	// hardDeny's own config-driven lists never need to (those are fixed
+	// at construction; this one grows for the life of a Guard). Read
+	// with the mutex held, the same as missionDeny/bashScopeAllow/
+	// session, since RecentDenials (a future /permissions render) can
+	// run concurrently with an in-flight Authorize call the same way
+	// every other read-back method here already can.
+	deniedHistory []DeniedEntry
+
+	// now stands in for time.Now in tests wanting a fixed clock for
+	// DeniedEntry.When -- nil (every real caller, via New) means the
+	// real wall clock. The same injectable-clock shape
+	// tools.DeclarativeTool.Now and internal/app's own
+	// ledgerObservingRunner already use elsewhere in this codebase, so a
+	// test can assert an exact timestamp instead of merely "some time
+	// close to now".
+	now func() time.Time
+
 	mu      sync.Mutex
 	session map[string]struct{}
+}
+
+// deniedHistoryLimit bounds deniedHistory -- keeping only the most
+// recently denied deniedHistoryLimit requests. A "recently-denied" display
+// is meant to answer "what has this session refused lately", not to be a
+// full audit log (internal/evolve's own ledger already exists for
+// long-lived, persisted history; this is deliberately neither persisted
+// nor unbounded -- see deniedHistory's own doc comment).
+const deniedHistoryLimit = 20
+
+// DeniedEntry is one recorded refusal -- §21.13's own "recently-denied
+// list" acceptance-narrative item, made concrete. Tool and Reason mirror
+// the exact strings a model or a human would already see (Reason is the
+// same text refusal()/hardDeny's own fmt.Errorf calls already produce,
+// with the "tool permission denied: " prefix trimmed, since a human
+// reading a denial *list* already knows every row on it was a denial —
+// repeating that prefix on every line would be noise ToolAuditEntry's own
+// fields do not carry either). Tier is included because a human auditing
+// "what did this session refuse" cares whether a denial was a Sensitive
+// write or a Critical push, not only the tool name. When is recorded with
+// g.now() (real wall clock unless a test overrides it), the same
+// injectable-clock shape ledgerObservingRunner already established.
+type DeniedEntry struct {
+	Tool   string
+	Reason string
+	Tier   Tier
+	When   time.Time
+}
+
+// recordDenial appends entry to g.deniedHistory, trimming the oldest entry
+// off the front once deniedHistoryLimit is exceeded. Called from every one
+// of Authorize's own denial/refusal return points (see that method's own
+// doc comment for the full list) -- deliberately not centralized inside
+// refusal() alone, since two of those points (hardDeny's reason, and
+// mode == "deny") return a plain fmt.Errorf and never call refusal() at
+// all (see refusal's own doc comment on why those stay "data", not
+// "turn-ending" -- a distinction this history does not care about: a
+// human auditing what was refused wants every refusal, regardless of
+// which of the two kinds it was).
+func (g *Guard) recordDenial(tool, reason string, tier Tier) {
+	now := g.now
+	if now == nil {
+		now = time.Now
+	}
+	entry := DeniedEntry{Tool: tool, Reason: reason, Tier: tier, When: now()}
+	g.mu.Lock()
+	g.deniedHistory = append(g.deniedHistory, entry)
+	if len(g.deniedHistory) > deniedHistoryLimit {
+		g.deniedHistory = g.deniedHistory[len(g.deniedHistory)-deniedHistoryLimit:]
+	}
+	g.mu.Unlock()
+}
+
+// RecentDenials reports the requests this Guard has refused, oldest first,
+// capped at deniedHistoryLimit -- used by a caller (internal/app's own
+// permissionsLister) wanting to display "what has this session refused
+// lately" the way §21.13's own acceptance-narrative item 10 names.
+// Mirrors MissionRules'/BashScope's own defensive-copy-on-read shape, so a
+// caller mutating the returned slice can never corrupt this Guard's own
+// state.
+func (g *Guard) RecentDenials() []DeniedEntry {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]DeniedEntry(nil), g.deniedHistory...)
 }
 
 // MissionRule is one Guard-enforceable constraint compiled from a goal's
@@ -459,18 +550,23 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	args := clone(arguments)
 	req := Request{Name: name, Arguments: args, Tier: g.tierFor(name, args)}
 	if reason := g.hardDeny(req); reason != "" {
+		g.recordDenial(req.Name, reason, req.Tier)
 		return fmt.Errorf("%w: %s", ErrDenied, reason)
 	}
 
 	mode := g.mode(req)
 	if mode == "deny" {
-		return fmt.Errorf("%w: %s is disabled by configuration", ErrDenied, req.Name)
+		reason := req.Name + " is disabled by configuration"
+		g.recordDenial(req.Name, reason, req.Tier)
+		return fmt.Errorf("%w: %s", ErrDenied, reason)
 	}
 
 	autonomy := g.Autonomy()
 	if autonomy == Readonly {
 		if req.Tier == Sensitive || req.Tier == Critical {
-			return refusal("%s is refused under read-only autonomy", req.Name)
+			reason := req.Name + " is refused under read-only autonomy"
+			g.recordDenial(req.Name, reason, req.Tier)
+			return refusal("%s", reason)
 		}
 		if req.Tier == Safe {
 			return nil
@@ -500,15 +596,21 @@ func (g *Guard) Authorize(ctx context.Context, name string, arguments json.RawMe
 	// no. Retrying a variant against any of them cannot succeed, so returning
 	// them as data would buy nothing and cost a provider request each time.
 	if g.reviewer == nil {
-		return refusal("%s requires interactive approval, and no reviewer is available", req.Name)
+		reason := req.Name + " requires interactive approval, and no reviewer is available"
+		g.recordDenial(req.Name, reason, req.Tier)
+		return refusal("%s", reason)
 	}
 
 	decision, err := g.reviewer.Review(ctx, req)
 	if err != nil {
-		return refusal("approval failed: %v", err)
+		reason := fmt.Sprintf("approval failed: %v", err)
+		g.recordDenial(req.Name, reason, req.Tier)
+		return refusal("%s", reason)
 	}
 	if !decision.Allow {
-		return refusal("user declined %s", req.Name)
+		reason := "user declined " + req.Name
+		g.recordDenial(req.Name, reason, req.Tier)
+		return refusal("%s", reason)
 	}
 	if decision.AllowSession && req.Tier == Sensitive && g.permissions.AllowSession {
 		g.mu.Lock()

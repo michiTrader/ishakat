@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -87,6 +88,9 @@ func TestSlashPermissionsWithEmptySnapshotShowsDefaults(t *testing.T) {
 			t.Errorf("notice missing %q, got:\n%s", want, text)
 		}
 	}
+	if !strings.Contains(text, "(nothing refused this session)") {
+		t.Errorf("notice missing empty recently-denied placeholder, got:\n%s", text)
+	}
 }
 
 func TestSlashPermissionsWithPopulatedSnapshotListsRulesAndInvariants(t *testing.T) {
@@ -102,6 +106,9 @@ func TestSlashPermissionsWithPopulatedSnapshotListsRulesAndInvariants(t *testing
 		BashScope: []string{"git", "npm"},
 		ShellDeny: []string{"rm -rf /", "mkfs*"},
 		WriteDeny: []string{"~/.ssh/**", ".env"},
+		RecentDenials: []PermissionsDenial{
+			{Tool: "bash", Reason: "user declined bash", Tier: "sensitive", When: time.Now()},
+		},
 	}}
 	root := withPermissionsLister(newHeadlessRoot(), pl)
 
@@ -121,6 +128,7 @@ func TestSlashPermissionsWithPopulatedSnapshotListsRulesAndInvariants(t *testing
 		"bash scope: git, npm",
 		"shell_deny  rm -rf /, mkfs*",
 		"write_deny  ~/.ssh/**, .env",
+		"user declined bash",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("notice missing %q, got:\n%s", want, text)
