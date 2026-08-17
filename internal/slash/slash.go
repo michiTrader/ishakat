@@ -134,10 +134,21 @@ const (
 	// chosen bash scope) — layer 2 (trust) stays /trust's own concern,
 	// not this command's. "autonomy <level>" (level one of auto/agile/
 	// readonly) applies and persists a new layer-3 autonomy exactly as
-	// /trust's own dialog does. A recently-denied list is still a later
-	// increment, named as still open in permissions.go's own doc comment
-	// rather than silently assumed to already work.
+	// /trust's own dialog does. A recently-denied list is a completed
+	// increment (Step 32 part 7, PermissionsSnapshot.RecentDenials).
 	KindPermissions
+	// KindTrust implements /trust (§13, §21.4 layer 2's own row: "review
+	// or change the project's trust decision"). Step 30 shipped the
+	// dialog itself (trust.go's ModeTrust) and NewRoot's own one-time
+	// automatic opening of it on a project's first run with no saved
+	// decision — but, before this Kind existed, there was no way to
+	// deliberately revisit that choice on a *later* run without deleting
+	// trust.json by hand outside the program entirely. No argument
+	// reopens the identical ModeTrust overlay a first run would have
+	// shown (same trustOptions, same Esc-defaults-to-agile rule, same
+	// git line), over Root's own already-detected git facts rather than
+	// re-probing the filesystem a second time.
+	KindTrust
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -192,6 +203,7 @@ var Commands = []Command{
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
 	{Name: "permissions", Describe: "autonomia y reglas", Kind: KindPermissions},
+	{Name: "trust", Describe: "revisar confianza", Kind: KindTrust},
 	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }

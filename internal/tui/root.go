@@ -556,6 +556,19 @@ type Root struct {
 	// only while mode == ModeTrust.
 	trust trustDialog
 
+	// gitInGit, gitClean and gitBranch are Options.GitInGit/GitClean/
+	// GitBranch's own persistent copies, kept on Root (unlike the
+	// pre-/trust-command era, where they only ever lived transiently
+	// inside NewRoot's own local variables long enough to build the
+	// first-run trust dialog once, at construction) so that a later
+	// /trust command (trustcmd.go, Step 30's own second slice) can
+	// reopen the identical dialog with the identical git line — the
+	// same "compute once at startup, reuse for the life of the
+	// session" reasoning cwd itself already follows two fields above.
+	gitInGit  bool
+	gitClean  bool
+	gitBranch string
+
 	// trustStore persists §21.4 layer 2's own decision (trust.go's own
 	// doc comment on the §6.1 seam this draws — the same one ThemeStore
 	// already draws for /theme's write). nil is a supported value: the
@@ -998,6 +1011,9 @@ func NewRoot(o Options) Root {
 		themesDir:       o.ThemesDir,
 		themeStore:      o.ThemeStore,
 		trustStore:      o.TrustStore,
+		gitInGit:        o.GitInGit,
+		gitClean:        o.GitClean,
+		gitBranch:       o.GitBranch,
 		missionGuard:    o.MissionGuard,
 		missionPolicy:   o.MissionPolicy,
 		missionRecorder: o.MissionRecorder,
