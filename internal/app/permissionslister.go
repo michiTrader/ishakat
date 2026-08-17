@@ -59,15 +59,41 @@ func (l permissionsLister) Snapshot() tui.PermissionsSnapshot {
 	for i, r := range rules {
 		out[i] = tui.PermissionsMissionRule{Capability: r.Capability, Pattern: r.Pattern}
 	}
+	denials := l.guard.RecentDenials()
+	deniedOut := make([]tui.PermissionsDenial, len(denials))
+	for i, d := range denials {
+		deniedOut[i] = tui.PermissionsDenial{Tool: d.Tool, Reason: d.Reason, Tier: tierString(d.Tier), When: d.When}
+	}
 	return tui.PermissionsSnapshot{
-		Autonomy:     l.guard.Autonomy().String(),
-		Read:         l.cfgPerms.Read,
-		Write:        l.cfgPerms.Write,
-		Shell:        l.cfgPerms.Shell,
-		AllowSession: l.cfgPerms.AllowSession,
-		MissionRules: out,
-		BashScope:    l.guard.BashScope(),
-		ShellDeny:    l.cfgPerms.ShellDeny,
-		WriteDeny:    l.cfgPerms.WriteDeny,
+		Autonomy:      l.guard.Autonomy().String(),
+		Read:          l.cfgPerms.Read,
+		Write:         l.cfgPerms.Write,
+		Shell:         l.cfgPerms.Shell,
+		AllowSession:  l.cfgPerms.AllowSession,
+		MissionRules:  out,
+		BashScope:     l.guard.BashScope(),
+		ShellDeny:     l.cfgPerms.ShellDeny,
+		WriteDeny:     l.cfgPerms.WriteDeny,
+		RecentDenials: deniedOut,
+	}
+}
+
+// tierString names a permissions.Tier in plain English for
+// tui.PermissionsDenial's own Tier field -- a short identifier
+// ("safe"/"controlled"/"sensitive"/"critical"), not toolapprove.go's own
+// Spanish dialog prose (tierLabel), since a /permissions list is a plain
+// audit view, not the approval dialog that copy was written for.
+func tierString(t permissions.Tier) string {
+	switch t {
+	case permissions.Safe:
+		return "safe"
+	case permissions.Controlled:
+		return "controlled"
+	case permissions.Sensitive:
+		return "sensitive"
+	case permissions.Critical:
+		return "critical"
+	default:
+		return "unknown"
 	}
 }

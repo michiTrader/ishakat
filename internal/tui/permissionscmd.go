@@ -3,10 +3,10 @@
 // read side landed first (see permissions.go's own package comment); this
 // file now also carries the write half decision 4 names — "the whole
 // interface for reading and changing autonomy" — as "/permissions autonomy
-// <level>". A recently-denied list is still deliberately left for a later
-// increment: no Guard field tracks denial history yet, and that is new
-// Guard-side state this pass does not invent (permissions.go's own doc
-// comment already gives this same reasoning for the read side).
+// <level>". The bare-command render now also carries §21.13's own
+// acceptance-narrative item 10's "recently-denied list" (Step 32 part 7):
+// permissions.Guard tracks a bounded denial history, and
+// PermissionsSnapshot.RecentDenials (permissions.go) mirrors it.
 //
 // The write half deliberately mirrors resolveTrust (trust.go) rather than
 // switchTheme (theme.go): /trust's own three-way choice (auto/agile/
@@ -30,6 +30,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -96,7 +97,37 @@ func (m Root) runPermissionsCommand(args string) (tea.Model, tea.Cmd) {
 	b.WriteString("\n  rm -rf /, curl|sh, git push --force and a sub-agent")
 	b.WriteString("\n  requesting a capability its parent lacks are always refused")
 
+	fmt.Fprintf(&b, "\n\n[recently denied]")
+	if len(snap.RecentDenials) == 0 {
+		b.WriteString("\n  (nothing refused this session)")
+	} else {
+		for _, d := range snap.RecentDenials {
+			fmt.Fprintf(&b, "\n  %s  %-10s %s  %s", permissionsDenialAge(d.When), d.Tool, d.Tier, d.Reason)
+		}
+	}
+
 	return m.slashNotice(b.String())
+}
+
+// permissionsDenialAge renders when in the same short "3 days"/"5 hours"/
+// "12 minutes"/"moments" bucketing resumemenu.go's own resumeAge already
+// uses -- duplicated here rather than exported and imported (that helper
+// is unexported to resumemenu.go, and this file's own denial list is the
+// only other reader in this package, so duplicating a three-line time
+// bucketer is cheaper than widening resumeAge's own surface for one
+// caller).
+func permissionsDenialAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "moments"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d hours", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%d days", int(d/(24*time.Hour)))
+	}
 }
 
 // permissionsAutonomyLevels is the write half's own vocabulary --

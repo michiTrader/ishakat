@@ -36,7 +36,16 @@
 // chosen through ModeToolScope, or (once the write half lands) a /permissions
 // autonomy change itself, can all happen between one /permissions call and
 // the next, and a cached snapshot from startup would silently go stale.
+//
+// RecentDenials (added Step 32 part 7) closes the one gap this file's own
+// doc comment above named openly: permissions.Guard now tracks a bounded
+// denial history (Guard.RecentDenials/DeniedEntry, internal/permissions/
+// guard.go), and PermissionsSnapshot carries a small presentation mirror
+// of it below, the same "duplicate rather than import" choice
+// PermissionsMissionRule already makes for permissions.MissionRule.
 package tui
+
+import "time"
 
 // PermissionsSnapshot is what /permissions renders: a live read of every
 // layer §21.4's own table names except layer 2 (Trust — that is /trust's
@@ -84,6 +93,26 @@ type PermissionsSnapshot struct {
 	// wrote them.
 	ShellDeny []string
 	WriteDeny []string
+
+	// RecentDenials is Guard.RecentDenials()'s own return value, §21.13's
+	// acceptance-narrative item 10's own "recently-denied list" — the one
+	// piece of that item this snapshot did not carry when the read-only
+	// slice first landed (this file's own doc comment named that gap
+	// openly rather than silently skipping it). Oldest first, capped at
+	// permissions.Guard's own bounded history size; empty for a session
+	// that has refused nothing yet, the overwhelmingly common case.
+	RecentDenials []PermissionsDenial
+}
+
+// PermissionsDenial mirrors permissions.DeniedEntry's own four fields
+// without this package importing that type directly — the identical
+// "duplicate a small, presentation-free shape rather than import it"
+// choice PermissionsMissionRule already makes for permissions.MissionRule.
+type PermissionsDenial struct {
+	Tool   string
+	Reason string
+	Tier   string
+	When   time.Time
 }
 
 // PermissionsMissionRule mirrors permissions.MissionRule's own two fields
