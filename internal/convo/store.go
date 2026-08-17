@@ -33,16 +33,20 @@ type Header struct {
 	Path string `json:"-"`
 }
 
-// record es una línea del JSONL. Cabecera o mensaje, nunca los dos.
+// record es una línea del JSONL. Cabecera, mensaje o misión, nunca más de
+// uno de los tres (§21.16 decisión 3: la misión es "a new event kind, not a
+// sidecar file").
 type record struct {
-	Type    string   `json:"type"`
-	Header  *Header  `json:"header,omitempty"`
-	Message *Message `json:"message,omitempty"`
+	Type    string        `json:"type"`
+	Header  *Header       `json:"header,omitempty"`
+	Message *Message      `json:"message,omitempty"`
+	Mission *MissionEvent `json:"mission,omitempty"`
 }
 
 const (
 	recHeader  = "header"
 	recMessage = "message"
+	recMission = "mission"
 )
 
 // ErrNotFound se devuelve cuando el id de sesión no existe en el directorio.
@@ -154,6 +158,38 @@ func (s *Store) Append(id string, m Message) error {
 	return nil
 }
 
+// AppendMission anexa una resolución de misión/alcance de herramientas ya
+// confirmada (§21.16 decisión 3) al archivo de la sesión. Mismo patrón que
+// Append: una sola escritura por línea, para que un proceso muerto a mitad
+// pierda como máximo esa línea.
+func (s *Store) AppendMission(id string, ev MissionEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if ev.Ts.IsZero() {
+		ev.Ts = time.Now()
+	}
+	p := s.path(id)
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrNotFound, id)
+		}
+		return fmt.Errorf("convo: no se pudo abrir %s: %w", p, err)
+	}
+	defer f.Close()
+
+	line, err := json.Marshal(record{Type: recMission, Mission: &ev})
+	if err != nil {
+		return fmt.Errorf("convo: error serializando misión: %w", err)
+	}
+	line = append(line, '\n')
+	if _, err := f.Write(line); err != nil {
+		return fmt.Errorf("convo: error anexando misión: %w", err)
+	}
+	return nil
+}
+
 // Load lee la sesión completa.
 //
 // Tolerancia a truncamiento: si la última línea quedó a medias (proceso muerto
@@ -218,6 +254,10 @@ func (s *Store) load(id string) (*Conversation, error) {
 				if rec.Message.Ts.After(c.UpdatedAt) {
 					c.UpdatedAt = rec.Message.Ts
 				}
+			}
+		case recMission:
+			if rec.Mission != nil {
+				c.Missions = append(c.Missions, *rec.Mission)
 			}
 		default:
 			c.Corrupt++
@@ -331,6 +371,12 @@ func (s *Store) rewrite(c *Conversation) error {
 		if err := enc.Encode(record{Type: recMessage, Message: &c.Messages[i]}); err != nil {
 			tmp.Close()
 			return fmt.Errorf("convo: error reescribiendo mensaje %d: %w", i, err)
+		}
+	}
+	for i := range c.Missions {
+		if err := enc.Encode(record{Type: recMission, Mission: &c.Missions[i]}); err != nil {
+			tmp.Close()
+			return fmt.Errorf("convo: error reescribiendo misión %d: %w", i, err)
 		}
 	}
 	if err := w.Flush(); err != nil {

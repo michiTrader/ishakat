@@ -64,6 +64,51 @@ func (m Root) recordMessage(msg convo.Message) Root {
 	return m
 }
 
+// MissionRecorder is where a confirmed §21.6 mission/tool-scope resolution
+// goes to be remembered — the exact mirror of Recorder above, for §21.16
+// decision 3's own "new event kind, not a sidecar file" requirement: a
+// separate, optional interface rather than a second method on Recorder,
+// following the same one-capability-per-interface shape SessionLister,
+// TrustStore, EvolveStore, ToolsLister and PermissionsLister already all
+// draw for their own concerns, even though internal/app's own
+// sessionRecorder implements this one and Recorder together over the same
+// *convo.Store. Kept separate here too, rather than folded into Recorder,
+// so a caller that only ever needs to persist messages (every test in this
+// package predating Step 31, and any future Recorder implementation with
+// no mission concept to speak of) is never forced to grow a method it has
+// nothing to do with.
+//
+// nil (every test in this package that never wires Options.MissionRecorder,
+// and a real caller with [session] save = false) is a supported value —
+// the identical "nothing wired, nothing happens" degradation Recorder's
+// own nil case already documents, applied here to the write side of §21.6's
+// two dialogs instead of to an ordinary turn.
+type MissionRecorder interface {
+	// AppendMission persists one completed mission/tool-scope resolution.
+	// An error means this record was not saved; the caller (recordMission,
+	// below) is expected to keep going either way, mirroring Recorder's
+	// own Append contract exactly.
+	AppendMission(ev convo.MissionEvent) error
+}
+
+// recordMission persists one completed §21.6 mission/tool-scope
+// resolution, if there is anywhere to persist it to, reusing the exact
+// same one-shot failure-reporting shape recordMessage already establishes
+// (sessionWarned/sessionErr): a persistence failure here must never cost
+// the user their turn any more than a message-persistence failure does,
+// and a full disk must not bury the transcript under one notice per
+// resolved mission on top of one per message.
+func (m Root) recordMission(ev convo.MissionEvent) Root {
+	if m.missionRecorder == nil {
+		return m // [session] save = false, or the store never opened.
+	}
+	if err := m.missionRecorder.AppendMission(ev); err != nil && !m.sessionWarned {
+		m.sessionWarned = true
+		m.sessionErr = err
+	}
+	return m
+}
+
 // SessionSummary is one entry of the §13 /resume menu: everything the row
 // needs to draw itself, deliberately shaped like convo.Header rather than
 // aliasing it. This package does not import the on-disk record type any

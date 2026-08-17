@@ -8,7 +8,13 @@
 // session but never actually wired in.
 package tui
 
-import "github.com/MichiTrader/ishakat/internal/convo"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/MichiTrader/ishakat/internal/convo"
+)
 
 // historyToTranscript turns a previously saved conversation's messages into
 // the transcriptEntry rows renderTranscriptLine already knows how to draw.
@@ -57,4 +63,63 @@ func historyToTranscript(history []convo.Message) []transcriptEntry {
 		entries = append(entries, transcriptEntry{role: role, name: name, text: text, ts: m.Ts})
 	}
 	return entries
+}
+
+// restoredMissionsNotice turns Options.RestoredMissions into the one
+// transcript entry §21.16 decision 3's own first consequence requires: "on
+// resume, the restored constraints are displayed, not merely reloaded".
+// Returns nil for the overwhelmingly common case, a resumed session (or a
+// fresh one) that never recorded a MissionEvent at all — mirroring
+// historyToTranscript's own "nothing to show" degradation for an empty
+// history, rather than appending an empty notice nobody asked for.
+//
+// One notice for the whole session, not one per event: what a human
+// re-opening a session needs to see is the constraints now in effect, the
+// same "the restored constraints are displayed" wording the decision uses
+// (singular final state, not a replay of every intermediate step) — the
+// full per-event replay onto the live Guard still happens exactly as
+// recorded (internal/app's own replayMissions), this is purely the
+// display half. Rules accumulate across every event (mirroring
+// MissionEvent's own doc comment and replayMissions' own accumulation),
+// deduplicated the same way missionConstraintLine already deduplicates a
+// live session's repeated rule; BashScope takes only the last event's
+// value, mirroring replayMissions' own "replaces, never accumulates" rule
+// for that field.
+func restoredMissionsNotice(g glyphs, events []convo.MissionEvent) *transcriptEntry {
+	if len(events) == 0 {
+		return nil
+	}
+	seen := make(map[convo.MissionRule]bool)
+	var parts []string
+	var lastScope []string
+	haveScope := false
+	for _, ev := range events {
+		for _, r := range ev.Rules {
+			if seen[r] {
+				continue
+			}
+			seen[r] = true
+			parts = append(parts, "no "+r.Capability+"("+r.Pattern+")")
+		}
+		lastScope = ev.BashScope
+		haveScope = true
+	}
+	if len(parts) == 0 && !haveScope {
+		return nil
+	}
+
+	var b strings.Builder
+	b.WriteString(g.warnMark + " restored mission constraints from this session:")
+	if len(parts) > 0 {
+		b.WriteString("\n  " + strings.Join(parts, " · "))
+	}
+	if haveScope {
+		if len(lastScope) > 0 {
+			fmt.Fprintf(&b, "\n  bash(%s)", strings.Join(lastScope, ", "))
+		} else {
+			b.WriteString("\n  bash: no subcommand restriction")
+		}
+	}
+
+	return &transcriptEntry{role: "assistant", name: "ishakat", text: b.String(), ts: time.Now()}
 }

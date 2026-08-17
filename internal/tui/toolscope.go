@@ -42,6 +42,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/mission"
 )
 
@@ -253,33 +254,61 @@ var browserBashAllow = []string{"npx", "playwright", "puppeteer", "selenium"}
 func (m Root) resolveToolScope(opt toolScopeOption) (tea.Model, tea.Cmd) {
 	text := m.missionText
 	scope := m.toolScope.s
+	rules := m.missionAppliedRules
 	m.toolScope = toolScopeDialog{}
 	m.missionText = ""
+	m.missionAppliedRules = nil
 	m.mode = ModeChat
 
-	if m.missionGuard != nil {
-		switch opt {
-		case toolScopeAsProposed:
-			m.missionGuard.SetBashScope(scope.BashAllow)
-		case toolScopeProposedPlusBrowser:
-			m.missionGuard.SetBashScope(append(append([]string(nil), scope.BashAllow...), browserBashAllow...))
-		case toolScopeEverything:
-			// "invariants still apply" (§21.6's own mockup line) — nil
-			// clears any bash-subcommand restriction, but AddMissionRules'
-			// own deny rules (checked first inside hardDeny, see that
-			// method's own doc comment) are never touched by this call,
-			// so a stated "no Playwright" constraint still refuses it even
-			// under "Everything installed".
-			m.missionGuard.SetBashScope(nil)
-		case toolScopePickOneByOne:
-			// No free-standing checkbox widget yet (see this option's own
-			// doc comment on toolScopeOption) — resolves to the same
-			// scope as toolScopeAsProposed for now, the identical "not
-			// invented here half-finished" deferral missionAdjust already
-			// applies for §21.6's first dialog.
-			m.missionGuard.SetBashScope(scope.BashAllow)
-		}
+	// bashScope is computed once, outside the "is there a live Guard"
+	// check below, because it is also exactly what the persisted
+	// MissionEvent's own BashScope must carry (§21.16 decision 3) —
+	// recomputing it a second way for persistence than for enforcement
+	// would risk the two silently drifting apart.
+	var bashScope []string
+	switch opt {
+	case toolScopeAsProposed:
+		bashScope = scope.BashAllow
+	case toolScopeProposedPlusBrowser:
+		bashScope = append(append([]string(nil), scope.BashAllow...), browserBashAllow...)
+	case toolScopeEverything:
+		// "invariants still apply" (§21.6's own mockup line) — nil
+		// clears any bash-subcommand restriction, but AddMissionRules'
+		// own deny rules (checked first inside hardDeny, see that
+		// method's own doc comment) are never touched by this call,
+		// so a stated "no Playwright" constraint still refuses it even
+		// under "Everything installed".
+		bashScope = nil
+	case toolScopePickOneByOne:
+		// No free-standing checkbox widget yet (see this option's own
+		// doc comment on toolScopeOption) — resolves to the same
+		// scope as toolScopeAsProposed for now, the identical "not
+		// invented here half-finished" deferral missionAdjust already
+		// applies for §21.6's first dialog.
+		bashScope = scope.BashAllow
 	}
+
+	if m.missionGuard != nil {
+		m.missionGuard.SetBashScope(bashScope)
+	}
+
+	// One combined MissionEvent per interaction, recorded here rather
+	// than split across resolveMission and this function — this is
+	// always the last of the two dialogs to close (see this file's own
+	// package comment on both of §21.6's triggers), so it is the one
+	// place that has both halves in hand: rules from resolveMission's
+	// own tail (nil when this interaction never went through ModeMission
+	// at all, e.g. checkToolPolicy's own direct trigger, or when it did
+	// but missionAdjust/missionSoft applied nothing), and bashScope
+	// computed just above. Recording two separate events instead would
+	// mean a resumed session replaying an orphaned Rules-only event with
+	// no scope, or an orphaned scope-only event with no rules — neither
+	// half is meaningful alone.
+	m = m.recordMission(convo.MissionEvent{
+		Goal:      text,
+		Rules:     rules,
+		BashScope: bashScope,
+	})
 
 	return m.submit(text)
 }

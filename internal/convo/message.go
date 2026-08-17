@@ -349,6 +349,14 @@ type Conversation struct {
 	Header
 	Messages []Message `json:"messages,omitempty"`
 
+	// Missions es cada MissionEvent grabado para esta sesión, en el orden
+	// en que se anexaron (§21.16 decisión 3) -- lo rellena Load a partir de
+	// las líneas recMission del propio JSONL, igual que Messages se rellena
+	// a partir de las recMessage. Vacío en el caso, con enorme diferencia
+	// más común, de una sesión cuyo objetivo nunca llevó una restricción
+	// reconocida.
+	Missions []MissionEvent `json:"-"`
+
 	// Corrupt cuenta las líneas que el almacén no pudo interpretar al cargar.
 	// Se reporta en /debug en vez de abortar la carga.
 	Corrupt int `json:"-"`

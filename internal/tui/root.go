@@ -437,6 +437,12 @@ type Root struct {
 	// already follow.
 	recorder Recorder
 
+	// missionRecorder persists a confirmed §21.6 mission/tool-scope
+	// resolution (§21.16 decision 3, session.go's own MissionRecorder
+	// doc comment) — the exact mirror of recorder above for that other
+	// event kind. nil is the identical supported "do not save" value.
+	missionRecorder MissionRecorder
+
 	// sessionWarned and sessionErr carry the first (and only) persistence
 	// failure to the next render. A full disk fails on every message, so
 	// warning per message would bury the transcript under identical
@@ -607,6 +613,22 @@ type Root struct {
 	// resolveMission's own tail is its only caller (see ModeToolScope's
 	// own doc comment below).
 	toolScope toolScopeDialog
+
+	// missionAppliedRules carries, from resolveMission's tail to
+	// resolveToolScope's own tail, exactly the rules missionAccept just
+	// applied via MissionGuard.AddMissionRules — in convo.MissionRule
+	// shape, since that is what the combined event resolveToolScope
+	// persists (§21.16 decision 3) is made of. nil in every other case:
+	// missionAdjust and missionSoft apply no rule (see their own doc
+	// comments in mission.go), and a goal that reaches ModeToolScope via
+	// checkToolPolicy's own direct trigger (toolscope.go) never went
+	// through resolveMission at all, so there is nothing to carry.
+	// resolveToolScope reads this once and always resets it to nil
+	// before returning, the same "read once, then clear" shape
+	// missionText itself already follows between the two dialogs, so a
+	// later, unrelated mission accepted in the very next turn can never
+	// see a stale value left over from this one.
+	missionAppliedRules []convo.MissionRule
 }
 
 // Options son los parámetros de arranque que cmd/ishakat pasa al construir
@@ -885,6 +907,25 @@ type Options struct {
 	// permissions.New elsewhere in that package, mirroring how
 	// MissionGuard (above) bridges *permissions.Guard.
 	MissionPolicy *mission.Policy
+
+	// MissionRecorder is §21.16 decision 3's own persistence seam — see
+	// Root.missionRecorder's own comment and session.go's own
+	// MissionRecorder doc comment for why this is a separate interface
+	// from Recorder above, even though internal/app is expected to
+	// implement both over the same *convo.Store/*convo.Conversation pair
+	// Recorder already uses. nil is the supported "do not save" value.
+	MissionRecorder MissionRecorder
+
+	// RestoredMissions is every MissionEvent a resumed conversation
+	// already carried on disk (§21.16 decision 3) — internal/app reads
+	// this straight off resumedConv.Missions (convo.Store.Load's own
+	// field) and hands it here unmodified, the same "the caller has
+	// already read it off disk" rule History's own doc comment states for
+	// messages. Empty for a fresh session, or a resumed one whose goal
+	// never carried a recognized constraint — see NewRoot's own comment
+	// on why this replays through the exact same code path a live
+	// mission resolution already uses, rather than a second, parallel one.
+	RestoredMissions []convo.MissionEvent
 }
 
 // NewRoot construye el modelo inicial.
@@ -949,35 +990,36 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:       o.Version,
-		cwd:           o.CWD,
-		mode:          startMode,
-		lay:           lay,
-		styles:        styles,
-		themesDir:     o.ThemesDir,
-		themeStore:    o.ThemeStore,
-		trustStore:    o.TrustStore,
-		missionGuard:  o.MissionGuard,
-		missionPolicy: o.MissionPolicy,
-		input:         NewInput(lay.InputPrefix()),
-		fps:           fps,
-		cfg:           o.Cfg,
-		cfgBanner:     o.Cfg == nil || o.Cfg.UI.Banner,
-		cfgSyntax:     o.Cfg == nil || o.Cfg.UI.Syntax,
-		cfgMarkdown:   o.Cfg == nil || o.Cfg.UI.Markdown,
-		animMode:      anim.Mode,
-		cap:           o.Cap,
-		eng:           engineOr(o.Engine),
-		engineFor:     o.EngineFor,
-		loginFor:      o.LoginFor,
-		model:         model,
-		system:        o.System,
-		commands:      slash.Default(),
-		cat:           o.Catalog,
-		skills:        o.Skills,
-		alias:         o.Alias,
-		preferFree:    o.PreferFree,
-		favorites:     o.Favorites,
+		version:         o.Version,
+		cwd:             o.CWD,
+		mode:            startMode,
+		lay:             lay,
+		styles:          styles,
+		themesDir:       o.ThemesDir,
+		themeStore:      o.ThemeStore,
+		trustStore:      o.TrustStore,
+		missionGuard:    o.MissionGuard,
+		missionPolicy:   o.MissionPolicy,
+		missionRecorder: o.MissionRecorder,
+		input:           NewInput(lay.InputPrefix()),
+		fps:             fps,
+		cfg:             o.Cfg,
+		cfgBanner:       o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:       o.Cfg == nil || o.Cfg.UI.Syntax,
+		cfgMarkdown:     o.Cfg == nil || o.Cfg.UI.Markdown,
+		animMode:        anim.Mode,
+		cap:             o.Cap,
+		eng:             engineOr(o.Engine),
+		engineFor:       o.EngineFor,
+		loginFor:        o.LoginFor,
+		model:           model,
+		system:          o.System,
+		commands:        slash.Default(),
+		cat:             o.Catalog,
+		skills:          o.Skills,
+		alias:           o.Alias,
+		preferFree:      o.PreferFree,
+		favorites:       o.Favorites,
 
 		compactEng:           o.CompactEngine,
 		compactModel:         o.CompactModel,
@@ -1048,6 +1090,15 @@ func NewRoot(o Options) Root {
 		transcript: historyToTranscript(o.History),
 	}
 	r.conv.Messages = o.History
+	// RestoredMissions (§21.16 decision 3) gets its own notice appended
+	// after History's own entries — a resumed session's constraints are
+	// shown as the last thing in the reopened transcript, the same
+	// position a live mission's own dialogs would have left a fresh
+	// notice in had they just resolved, not spliced in among old
+	// messages by timestamp.
+	if notice := restoredMissionsNotice(lay.glyphs(), o.RestoredMissions); notice != nil {
+		r.transcript = append(r.transcript, *notice)
+	}
 	if o.Cfg != nil {
 		r.keys = NewMap(o.Cfg.Keys)
 		r.footerItems = o.Cfg.UI.Footer.Items
