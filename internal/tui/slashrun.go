@@ -131,7 +131,7 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 	case slash.KindTools:
 		return m.runToolsCommand(args)
 	case slash.KindPermissions:
-		return m.runPermissionsCommand()
+		return m.runPermissionsCommand(args)
 	default:
 		return m.slashNotice(m.lay.glyphs().warnMark + " " + unimplementedNotice(cmd))
 	}

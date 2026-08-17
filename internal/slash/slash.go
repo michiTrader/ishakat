@@ -127,15 +127,16 @@ const (
 	// separate, larger increment, deliberately not folded into this one.
 	KindTools
 	// KindPermissions implements /permissions (§13, §21.14's own Step 32
-	// closing criterion: "/permissions lists rules and invariants"): a
-	// read-only listing of §21.4's layers 1 (invariants), 3 (autonomy), 4
-	// (mission) and 5 (the currently chosen bash scope) — layer 2 (trust)
-	// stays /trust's own concern, not this command's. No argument is the
-	// only form this first slice recognizes; changing autonomy through
-	// this same command (§21.16 decision 4: "/permissions is the whole
-	// interface for reading and changing autonomy") is a later increment,
-	// named as still open in permissions.go's own doc comment rather than
-	// silently assumed to already work.
+	// closing criterion: "/permissions lists rules and invariants";
+	// §21.16 decision 4: "/permissions is the whole interface for
+	// reading and changing autonomy"). No argument lists §21.4's layers
+	// 1 (invariants), 3 (autonomy), 4 (mission) and 5 (the currently
+	// chosen bash scope) — layer 2 (trust) stays /trust's own concern,
+	// not this command's. "autonomy <level>" (level one of auto/agile/
+	// readonly) applies and persists a new layer-3 autonomy exactly as
+	// /trust's own dialog does. A recently-denied list is still a later
+	// increment, named as still open in permissions.go's own doc comment
+	// rather than silently assumed to already work.
 	KindPermissions
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
