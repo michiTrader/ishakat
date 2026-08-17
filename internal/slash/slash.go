@@ -126,6 +126,17 @@ const (
 	// create`, `/tools edit`, `/tools delete`, `/tools revive` rows) are a
 	// separate, larger increment, deliberately not folded into this one.
 	KindTools
+	// KindPermissions implements /permissions (§13, §21.14's own Step 32
+	// closing criterion: "/permissions lists rules and invariants"): a
+	// read-only listing of §21.4's layers 1 (invariants), 3 (autonomy), 4
+	// (mission) and 5 (the currently chosen bash scope) — layer 2 (trust)
+	// stays /trust's own concern, not this command's. No argument is the
+	// only form this first slice recognizes; changing autonomy through
+	// this same command (§21.16 decision 4: "/permissions is the whole
+	// interface for reading and changing autonomy") is a later increment,
+	// named as still open in permissions.go's own doc comment rather than
+	// silently assumed to already work.
+	KindPermissions
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -179,6 +190,7 @@ var Commands = []Command{
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
+	{Name: "permissions", Describe: "autonomia y reglas", Kind: KindPermissions},
 	{Name: "login", ArgHint: "[prov]", Describe: "autenticar via OAuth", Kind: KindLogin},
 	{Name: "exit", Aliases: []string{"quit"}, Describe: "salir", Kind: KindExit},
 }

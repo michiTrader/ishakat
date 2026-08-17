@@ -460,6 +460,15 @@ type Root struct {
 	// Recorder/SessionLister already establish for their own concern.
 	toolsLister ToolsLister
 
+	// permissionsLister is /permissions' own read side (§13, Step 32,
+	// permissions.go's own doc comment on why this is an interface rather
+	// than a direct internal/permissions import). nil means "no live
+	// policy to show" — tools disabled (buildAgentOptions never builds a
+	// *permissions.Guard then), or any test in this package, neither of
+	// which set it — the same nil-is-safe convention toolsLister above
+	// already establishes for its own concern.
+	permissionsLister PermissionsLister
+
 	// resume is the §13 /resume overlay's own state, live only while
 	// mode == ModeResume.
 	resume resumeMenu
@@ -770,6 +779,15 @@ type Options struct {
 	// never imports it directly) and why nil is a supported value.
 	ToolsLister ToolsLister
 
+	// PermissionsLister is /permissions' own read side (§13, Step 32) —
+	// see Root.permissionsLister's own comment for the §6.1 boundary this
+	// crosses (internal/permissions is a fine import for this package
+	// already, via MissionGuard/toolapprove.go's own Request/Decision/
+	// Tier vocabulary, but a *permissions.Guard itself still carries a
+	// mutex and a config.Permissions this package has no business
+	// constructing on its own) and why nil is a supported value.
+	PermissionsLister PermissionsLister
+
 	// ToolsEnabled mirrors [tools].enabled (config.Tools.Enabled). false —
 	// the zero value, and every caller before Step 16 — keeps
 	// startEngineTurn on the exact plain-streaming path it always took;
@@ -992,6 +1010,13 @@ func NewRoot(o Options) Root {
 		// TestOptionsSessionListerIsWiredIntoRoot already established for
 		// sessionLister above.
 		toolsLister: o.ToolsLister,
+
+		// permissionsLister is /permissions' own read side (§13, Step 32)
+		// — see TestOptionsPermissionsListerIsWiredIntoRoot for the
+		// regression test this line exists to satisfy, the same shape
+		// TestOptionsToolsListerIsWiredIntoRoot already established just
+		// above.
+		permissionsLister: o.PermissionsLister,
 
 		// toolsEnabled/agentOpts are Step 16's fork in startEngineTurn
 		// (root.go) — see Options.ToolsEnabled's own comment for why a
