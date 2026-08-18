@@ -40,7 +40,7 @@ func GlyphSample(set theme.GlyphSet) []string {
 			g.barLead+strings.Repeat(g.barFull, 6), strings.Repeat(g.barEmpty, 4)),
 		fmt.Sprintf("rule    %s   scroll  %s   spinner  %s",
 			strings.Repeat(g.rule, 8), g.scrollHint, string(g.spinner)),
-		fmt.Sprintf("error   %s", g.warnMark),
+		fmt.Sprintf("error   %s   fold  %s", g.warnMark, g.foldMark),
 	)
 	return out
 }

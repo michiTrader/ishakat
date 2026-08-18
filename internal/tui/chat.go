@@ -115,23 +115,28 @@ func (t liveTurn) elapsed() time.Duration {
 // any ``` fence it finds and, when highlightCode is true, colours the code
 // inside it with Chroma. Prose outside a fence — bold, headers, links,
 // lists — goes through Glamour (markdown.go) when renderProse is true.
-func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse bool) string {
+//
+// folded (§17 2026-08-18, part 2) is passed straight through to
+// renderMessageBody: every fenced block in this one message collapses to its
+// one-line summary when true. See tui.Map.ToggleFold's own comment for why
+// this is a whole-message flag rather than a per-block one.
+func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse, folded bool) string {
 	marker := g.userMark
 	if role == "assistant" {
 		marker = g.assistantMark
 	}
 	header := fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04"))
-	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse)
+	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
 }
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
 // (§9.3) y, si está en curso, la línea de animación con tiempo/tokens.
-func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode, renderProse bool) string {
+func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode, renderProse, folded bool) string {
 	if !t.active {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode, renderProse))
+	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode, renderProse, folded))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokenCount()))
 	b.WriteString(plainCancelHint)
@@ -158,6 +163,13 @@ func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush 
 // The trailing "\n" is not tea.Println's own line break (it supplies that):
 // it is the blank separator line the old inline loop in head() used to leave
 // between bubbles, kept here so scrollback looks the same as it always did.
-func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode, renderProse bool) tea.Cmd {
-	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode, renderProse) + "\n")
+//
+// folded is whatever Root.foldCode held at the moment this entry left the
+// live-managed region — real terminal scrollback (§7.5, this function's own
+// comment above) cannot be redrawn afterwards, so a block committed here
+// keeps whichever fold state it had at eviction time for good. That is a
+// real, documented limitation, not an oversight: ctrl+r only ever reaches
+// the last keepInline entries still redrawn by head() (root.go).
+func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode, renderProse, folded bool) tea.Cmd {
+	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode, renderProse, folded) + "\n")
 }

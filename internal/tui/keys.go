@@ -18,6 +18,17 @@ type Map struct {
 	HistoryPrev string
 	HistoryNext string
 	CopyLast    string
+
+	// ToggleFold folds/unfolds the fenced code block closest to the cursor
+	// (codeblock.go, §17 2026-08-18 "code blocks fill the terminal" entry).
+	// It is deliberately not ctrl+o: that chord is already reserved for
+	// ModelCycle ("cycle favorites", §4/§9.7 — documented and configurable
+	// since Step 10, even though no key handler implements it yet), and
+	// claiming it here would collide with that still-pending feature the
+	// moment someone finishes it. ctrl+r was free across every file this
+	// package's own default keymap, defaults.toml and bubbles/v2's textarea
+	// bindings all touch (see this constant's own test).
+	ToggleFold string
 }
 
 // defaultMap es la red de seguridad si la configuración llega con teclas
@@ -34,6 +45,7 @@ var defaultMap = Map{
 	HistoryPrev: "up",
 	HistoryNext: "down",
 	CopyLast:    "ctrl+y",
+	ToggleFold:  "ctrl+r",
 }
 
 // NewMap construye el keymap desde la configuración cargada, rellenando con
@@ -51,6 +63,7 @@ func NewMap(k config.Keys) Map {
 		HistoryPrev: or(k.HistoryPrev, defaultMap.HistoryPrev),
 		HistoryNext: or(k.HistoryNext, defaultMap.HistoryNext),
 		CopyLast:    or(k.CopyLast, defaultMap.CopyLast),
+		ToggleFold:  or(k.ToggleFold, defaultMap.ToggleFold),
 	}
 	return m
 }

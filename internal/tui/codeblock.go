@@ -17,6 +17,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -93,7 +94,15 @@ func splitCodeSegments(text string) []codeSegment {
 // byte-identical output to the plain wrapText(text, width) call it
 // replaces; the branches below only do anything different once a fence
 // actually appears, or renderProse is enabled.
-func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, highlightCode, renderProse bool) string {
+//
+// folded is §17's 2026-08-18 "code blocks fill the terminal" fix (part 2):
+// with it true, every fenced block found here collapses to renderCodeBlock's
+// one-line summary instead of its full body. It is a single flag for the
+// whole message rather than a per-block one — see tui.Map.ToggleFold's own
+// comment for why the toggle itself (ctrl+r, Root.foldCode) applies to every
+// code block still in the live-managed region at once, not to one block
+// picked out individually.
+func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, highlightCode, renderProse, folded bool) string {
 	segs := splitCodeSegments(text)
 	if len(segs) == 0 {
 		if renderProse {
@@ -107,7 +116,7 @@ func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, hi
 			continue
 		}
 		if seg.isCode {
-			parts = append(parts, renderCodeBlock(styles, g, seg.lang, seg.text, width, highlightCode))
+			parts = append(parts, renderCodeBlock(styles, g, seg.lang, seg.text, width, highlightCode, folded))
 		} else if renderProse {
 			parts = append(parts, renderMarkdown(styles, seg.text, width))
 		} else {
@@ -129,11 +138,21 @@ func renderMessageBody(styles theme.Styles, g glyphs, text string, width int, hi
 // of the code — exactly the shape §9.3's own example draws ("│ sql" as its
 // own row above the query) — rendered dim rather than highlighted, since it
 // is metadata about the block and not code inside it.
-func renderCodeBlock(styles theme.Styles, g glyphs, lang, code string, width int, highlightCode bool) string {
+//
+// folded true skips all of the above and draws a single dim summary line
+// instead — rail, foldMark, the line count and the language when one was
+// named — the fix for the real-session report that pasted code "fills the
+// terminal" with nothing to collapse it, the same way other CLI agents fold
+// long tool/code output behind a one-line toggle.
+func renderCodeBlock(styles theme.Styles, g glyphs, lang, code string, width int, highlightCode, folded bool) string {
 	rail := styles.Border.Render(g.barLead) + " "
 	inner := width - lipgloss.Width(rail)
 	if inner < 1 {
 		inner = 1
+	}
+
+	if folded {
+		return rail + wrapText(styles.Dim.Render(foldSummary(g, lang, code)), inner)
 	}
 
 	var out []string
@@ -153,6 +172,22 @@ func renderCodeBlock(styles theme.Styles, g glyphs, lang, code string, width int
 		out = append(out, rail+ln)
 	}
 	return strings.Join(out, "\n")
+}
+
+// foldSummary is the plain (unstyled) text of a folded code block's single
+// line — split out from renderCodeBlock so the "N lines" pluralisation and
+// the "lang, " prefix rule have one place to be tested without also
+// exercising the styling/rail machinery around them.
+func foldSummary(g glyphs, lang, code string) string {
+	n := strings.Count(code, "\n") + 1
+	unit := "line"
+	if n != 1 {
+		unit = "lines"
+	}
+	if lang != "" {
+		return fmt.Sprintf("%s %s, %d %s", g.foldMark, lang, n, unit)
+	}
+	return fmt.Sprintf("%s %d %s", g.foldMark, n, unit)
 }
 
 // highlightSource tokenises code with Chroma's lexer for lang and colours
