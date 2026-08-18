@@ -202,6 +202,54 @@ func TestSystemPromptSkipsSkillsWhenToolsDisabled(t *testing.T) {
 	}
 }
 
+// TestSystemPromptAppendsToolUsagePolicyWhenToolsEnabled pins the fix for a
+// reported real-session failure: with tools enabled and reachable, the model
+// still answered a "create a file" request by pasting the whole file as a
+// fenced code block and telling the human to save it themselves, instead of
+// calling write_file/edit_file directly. There was no rule anywhere in the
+// system prompt telling the model to prefer the tool over prose, so this
+// pins that the policy text actually lands in the resolved prompt whenever
+// tools are on — the same gate the skills summary already uses.
+func TestSystemPromptAppendsToolUsagePolicyWhenToolsEnabled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	cfg := &config.Config{
+		App:   config.App{SystemPrompt: "You are ishakat."},
+		Tools: config.Tools{Enabled: true},
+	}
+	system, warn := SystemPrompt(cfg)
+
+	if warn != "" {
+		t.Errorf("warn = %q, want empty", warn)
+	}
+	if !strings.Contains(system, "write_file/edit_file") {
+		t.Errorf("system = %q, want it to contain the tool-usage policy", system)
+	}
+	if !strings.HasPrefix(system, "You are ishakat.") {
+		t.Errorf("system = %q, want the base prompt to stay first", system)
+	}
+}
+
+// TestSystemPromptSkipsToolUsagePolicyWhenToolsDisabled mirrors
+// TestSystemPromptSkipsSkillsWhenToolsDisabled: a policy about calling tools
+// is meaningless — and would be actively confusing — to a model that was
+// never given any tools to call in the first place.
+func TestSystemPromptSkipsToolUsagePolicyWhenToolsDisabled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	cfg := &config.Config{
+		App:   config.App{SystemPrompt: "base"},
+		Tools: config.Tools{Enabled: false},
+	}
+	system, _ := SystemPrompt(cfg)
+
+	if system != "base" {
+		t.Errorf("system = %q, want unchanged %q (tools disabled)", system, "base")
+	}
+}
+
 // TestDiscoverSkillsMirrorsSystemPromptsGate is /skills' own wiring test
 // (Step 19): tui.Options.Skills (app.go) has to see the exact same skills
 // SystemPrompt already folded into the prompt, or /skills could list a
