@@ -72,6 +72,7 @@ theme_picker = "ctrl+t"
 history_prev = "up"
 history_next = "down"
 copy_last = "ctrl+y"
+toggle_fold = "ctrl+r"
 
 [catalog]
 sources = ["provider", "modelsdev", "config"]

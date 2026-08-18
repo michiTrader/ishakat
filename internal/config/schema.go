@@ -113,6 +113,10 @@ type Keys struct {
 	HistoryPrev string `toml:"history_prev"`
 	HistoryNext string `toml:"history_next"`
 	CopyLast    string `toml:"copy_last"`
+	// ToggleFold folds/unfolds the fenced code block closest to the cursor.
+	// See tui.Map.ToggleFold's own comment for why the default is ctrl+r
+	// rather than ctrl+o.
+	ToggleFold string `toml:"toggle_fold"`
 }
 
 type Catalog struct {

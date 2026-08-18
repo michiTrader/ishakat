@@ -31,3 +31,25 @@ func TestNewMapRellenaCamposVaciosConDefault(t *testing.T) {
 		t.Errorf("Quit default = %q, want %q", m.Quit, "ctrl+c")
 	}
 }
+
+// TestNewMapToggleFoldDefaultsToCtrlR pins the keybinding chosen for
+// codeblock folding (§17 2026-08-18 "code blocks fill the terminal" entry):
+// ctrl+r, not ctrl+o, since ctrl+o is already reserved for ModelCycle (see
+// tui.Map.ToggleFold's own doc comment for why reusing it would collide with
+// that still-pending feature).
+func TestNewMapToggleFoldDefaultsToCtrlR(t *testing.T) {
+	m := tui.NewMap(config.Keys{})
+	if m.ToggleFold != "ctrl+r" {
+		t.Errorf("ToggleFold default = %q, want %q", m.ToggleFold, "ctrl+r")
+	}
+}
+
+// TestNewMapToggleFoldRespectsConfiguration is ToggleFold's own counterpart
+// to TestNewMapRespetaConfiguracion above: a configured value must survive
+// unchanged, not be silently replaced by the default.
+func TestNewMapToggleFoldRespectsConfiguration(t *testing.T) {
+	m := tui.NewMap(config.Keys{ToggleFold: "ctrl+g"})
+	if m.ToggleFold != "ctrl+g" {
+		t.Errorf("ToggleFold = %q, want the configured %q", m.ToggleFold, "ctrl+g")
+	}
+}

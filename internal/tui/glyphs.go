@@ -59,6 +59,14 @@ type glyphs struct {
 
 	// warnMark prefixes an error that belongs to a completed turn.
 	warnMark string
+
+	// foldMark prefixes a folded code block's one-line summary (codeblock.go,
+	// §17 2026-08-18 "code blocks fill the terminal" entry). It used to be
+	// "▸" (U+25B8, not in WGL4); this repertoire's own picker.go already
+	// found the same triangle missing and settled on "v"/">" for its own
+	// collapse/expand toggle — foldMark follows that precedent rather than
+	// inventing a third glyph for the same idea.
+	foldMark string
 }
 
 var unicodeGlyphs = glyphs{
@@ -76,6 +84,7 @@ var unicodeGlyphs = glyphs{
 	scrollHint:    "↑↓",
 	spinner:       []rune("░▒▓█▓▒░▒▓"),
 	warnMark:      "⚠",
+	foldMark:      "▸",
 }
 
 var asciiGlyphs = glyphs{
@@ -93,6 +102,7 @@ var asciiGlyphs = glyphs{
 	scrollHint:    "up/down",
 	spinner:       []rune(".:-=+=-:."),
 	warnMark:      "!",
+	foldMark:      ">",
 }
 
 // glyphsFor returns the table for a set. Every field of both tables is filled
