@@ -66,12 +66,12 @@ func TestRenderMessageBodyRenderProseGatesMarkdown(t *testing.T) {
 	g := unicodeGlyphs
 	text := "esto es **negrita** de verdad"
 
-	off := renderMessageBody(styles, g, text, 40, true, false)
+	off := renderMessageBody(styles, g, text, 40, true, false, false)
 	if !strings.Contains(off, "**negrita**") {
 		t.Errorf("with renderProse off, ** markers must stay literal: %q", off)
 	}
 
-	on := renderMessageBody(styles, g, text, 40, true, true)
+	on := renderMessageBody(styles, g, text, 40, true, true, false)
 	if strings.Contains(on, "**negrita**") {
 		t.Errorf("with renderProse on, ** markers must be consumed by Glamour: %q", on)
 	}
@@ -89,7 +89,7 @@ func TestRenderMessageBodyMarkdownLeavesFencedCodeToChroma(t *testing.T) {
 	g := unicodeGlyphs
 	text := "una nota **importante**:\n```go\nfunc main() {}\n```\nfin"
 
-	out := renderMessageBody(styles, g, text, 40, true, true)
+	out := renderMessageBody(styles, g, text, 40, true, true, false)
 	if !strings.Contains(out, g.barLead) {
 		t.Errorf("the rail must still be drawn for the fenced segment: %q", stripANSI(out))
 	}

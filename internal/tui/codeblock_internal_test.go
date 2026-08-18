@@ -102,7 +102,7 @@ func TestRenderCodeBlockDrawsTheRail(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
 	g := unicodeGlyphs
 
-	out := renderCodeBlock(styles, g, "sql", "SELECT 1;\nSELECT 2;", 40, false)
+	out := renderCodeBlock(styles, g, "sql", "SELECT 1;\nSELECT 2;", 40, false, false)
 	lines := strings.Split(out, "\n")
 	if len(lines) < 3 {
 		t.Fatalf("want at least 3 rail lines (lang + 2 code lines), got %d: %q", len(lines), out)
@@ -125,13 +125,90 @@ func TestRenderCodeBlockNoLanguageHasNoLangLine(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
 	g := unicodeGlyphs
 
-	out := renderCodeBlock(styles, g, "", "one line only", 40, false)
+	out := renderCodeBlock(styles, g, "", "one line only", 40, false, false)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 1 {
 		t.Fatalf("want exactly one rail line for one line of code with no language, got %d: %q", len(lines), out)
 	}
 	if !strings.Contains(lines[0], "one line only") {
 		t.Errorf("code content missing: %q", lines[0])
+	}
+}
+
+// TestFoldSummaryPluralisesLineCount pins foldSummary's own "N lines"
+// wording rule, split out from renderCodeBlock precisely so this does not
+// also need the styling/rail machinery around it: singular for one line,
+// plural for any other count, with the language named up front when the
+// fence had one and omitted entirely when it did not.
+func TestFoldSummaryPluralisesLineCount(t *testing.T) {
+	g := unicodeGlyphs
+	cases := []struct {
+		lang, code string
+		want       string
+	}{
+		{lang: "go", code: "func main() {}", want: "▸ go, 1 line"},
+		{lang: "go", code: "line one\nline two", want: "▸ go, 2 lines"},
+		{lang: "", code: "solo una línea", want: "▸ 1 line"},
+		{lang: "", code: "una\ndos\ntres", want: "▸ 3 lines"},
+	}
+	for _, tc := range cases {
+		if got := foldSummary(g, tc.lang, tc.code); got != tc.want {
+			t.Errorf("foldSummary(%q, %q) = %q, want %q", tc.lang, tc.code, got, tc.want)
+		}
+	}
+}
+
+// TestRenderCodeBlockFoldedCollapsesToOneLine is renderCodeBlock's own
+// folded=true branch: the rail must still open the block (it is a layout
+// decision, unaffected by folding, per TestRenderCodeBlockDrawsTheRail
+// above), but the body must collapse to foldSummary's single dim line
+// instead of the full multi-line code — this is the actual fix for the real
+// session report that pasted code "fills the terminal" with no way to
+// collapse it.
+func TestRenderCodeBlockFoldedCollapsesToOneLine(t *testing.T) {
+	th := theme.Load("ascua")
+	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
+	g := unicodeGlyphs
+	code := "SELECT 1;\nSELECT 2;\nSELECT 3;"
+
+	out := renderCodeBlock(styles, g, "sql", code, 40, false, true)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("folded block must render as exactly one line, got %d: %q", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], g.barLead) {
+		t.Errorf("folded line must still start with the rail: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], g.foldMark) {
+		t.Errorf("folded line must carry the fold glyph %q: %q", g.foldMark, lines[0])
+	}
+	if !strings.Contains(lines[0], "sql") {
+		t.Errorf("folded line must still name the language: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "SELECT") {
+		t.Errorf("folded line must not leak the actual code content: %q", lines[0])
+	}
+}
+
+// TestRenderMessageBodyFoldedAppliesToEveryCodeSegment confirms the folded
+// flag threads all the way through renderMessageBody's per-segment loop:
+// with two separate fenced blocks in the same message, both must collapse,
+// while prose segments in between are entirely unaffected by folding.
+func TestRenderMessageBodyFoldedAppliesToEveryCodeSegment(t *testing.T) {
+	th := theme.Load("ascua")
+	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
+	g := unicodeGlyphs
+	text := "primero:\n```go\nfunc a() {}\n```\nluego:\n```go\nfunc b() {}\n```\nfin"
+
+	out := renderMessageBody(styles, g, text, 40, false, false, true)
+	if strings.Contains(out, "func a()") || strings.Contains(out, "func b()") {
+		t.Errorf("both code segments must be folded away, got %q", out)
+	}
+	if !strings.Contains(out, "primero:") || !strings.Contains(out, "luego:") || !strings.Contains(out, "fin") {
+		t.Errorf("prose segments must survive untouched: %q", out)
+	}
+	if got := strings.Count(out, g.foldMark); got != 2 {
+		t.Errorf("want the fold glyph once per folded block (2), got %d: %q", got, out)
 	}
 }
 
@@ -210,7 +287,7 @@ func TestRenderMessageBodyWithNoFenceMatchesWrapText(t *testing.T) {
 	g := unicodeGlyphs
 	text := "una respuesta normal sin ningún bloque de código, apenas prosa."
 
-	got := renderMessageBody(styles, g, text, 40, true, false)
+	got := renderMessageBody(styles, g, text, 40, true, false, false)
 	want := wrapText(text, 40)
 	if got != want {
 		t.Errorf("no-fence path must match wrapText verbatim:\ngot  %q\nwant %q", got, want)
@@ -230,7 +307,7 @@ func TestRenderMessageBodyHighlightCodeFalseStillDrawsRail(t *testing.T) {
 	g := unicodeGlyphs
 	text := "código:\n```go\nfunc main() {}\n```\nfin"
 
-	out := renderMessageBody(styles, g, text, 40, false, false)
+	out := renderMessageBody(styles, g, text, 40, false, false, false)
 	if !strings.Contains(out, g.barLead) {
 		t.Errorf("the rail must be drawn even with highlighting off: %q", out)
 	}

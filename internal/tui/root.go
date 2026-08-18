@@ -294,6 +294,22 @@ type Root struct {
 	cfgMarkdown bool
 	fps         int
 
+	// foldCode is ctrl+r's own toggle (tui.Map.ToggleFold, §17 2026-08-18
+	// "code blocks fill the terminal" fix, part 2): whether every fenced
+	// code block still in the live-managed region (head(), view.go) renders
+	// as its one-line summary instead of its full body. A single bool
+	// rather than a per-block map is a deliberate simplification, not a
+	// missing feature: the reported problem was the terminal filling up
+	// with code wholesale, and a global toggle solves exactly that without
+	// needing a stable per-block identity to key a map by — something
+	// Root's own copy-by-value semantics (see liveTurn's doc comment on why
+	// its fields must stay plain values) make awkward to thread through
+	// finishTurn/commitEntryCmd correctly. Real terminal scrollback already
+	// committed via commitEntryCmd cannot be redrawn afterwards (§7.5), so
+	// this only ever affects the last keepInline transcript entries plus
+	// the live turn — see commitEntryCmd's own comment for that limit.
+	foldCode bool
+
 	// animMode and cap are ui.animations.mode and the terminal's colour
 	// capability, kept so a resize can re-resolve Layout.AnimationsOff rather
 	// than carry forward whatever it was computed as at 80 columns. "auto"
@@ -1446,6 +1462,18 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		}
 		next, cmd := m.runCopy("")
 		return true, next, cmd
+
+	case m.keys.ToggleFold:
+		// Unlike ModelPicker/ThemePicker/CopyLast above, this is not gated
+		// to ModeChat: folding is a read-only view toggle over whatever is
+		// already on screen, not an action that starts something new, so it
+		// stays useful while ModeBusy is still streaming a long code block
+		// (arguably the moment it is most wanted) and does nothing harmful
+		// in any overlay mode either — it just is not reachable there,
+		// since every overlay mode's own updateX claims the keyboard first
+		// per handleGlobalKey's own doc comment.
+		m.foldCode = !m.foldCode
+		return true, m, nil
 	}
 	return false, m, nil
 }
@@ -2100,7 +2128,7 @@ func (m Root) evictOverflow() (Root, tea.Cmd) {
 		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
 			break
 		}
-		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown))
+		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown, m.foldCode))
 		m.printedUpTo++
 	}
 	return m, tea.Batch(cmds...)
