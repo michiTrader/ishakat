@@ -181,6 +181,8 @@ func SystemPrompt(cfg *config.Config) (string, string) {
 	}
 
 	if cfg.Tools.Enabled {
+		system = appendSystemBlock(system, toolUsagePolicy)
+
 		sk := DiscoverSkills(cfg)
 		if summary := skills.Summary(sk.Skills); summary != "" {
 			system = appendSystemBlock(system, "Available skills (call read_file on their path for the full content):\n"+summary)
@@ -192,6 +194,25 @@ func SystemPrompt(cfg *config.Config) (string, string) {
 
 	return system, warn
 }
+
+// toolUsagePolicy is appended to the system prompt whenever cfg.Tools.Enabled
+// is true (the same gate the skills summary above already uses — a policy
+// about calling tools is meaningless to a model that was given none).
+//
+// It exists because of a concrete failure mode reported against a real
+// session: with tools available and reachable, the model still answered a
+// "create a file" request by printing the whole file's contents as a fenced
+// code block in the chat reply and telling the human to copy it into a file
+// themselves — technically satisfying the request, but defeating the entire
+// point of shipping write_file/edit_file in the first place, and forcing the
+// human to do by hand exactly the mechanical step the tool exists to
+// automate. Nothing about §19's tool contracts stops a model from choosing
+// prose over a call; only an explicit instruction does. This is that
+// instruction: one direct rule (call the tool, don't paste the result) plus
+// the one exception worth naming (the human explicitly asked to see the
+// code first) so the rule does not read as "never show code", which would
+// be both false and unhelpful for an ordinary explanation-only question.
+const toolUsagePolicy = "When the user asks you to create, write or modify a file, call write_file/edit_file yourself instead of printing the file's contents in the chat reply and asking the user to save it themselves — the tool exists precisely so the user never has to copy/paste code by hand. Only paste code in the reply when the user is explicitly asking to see or review it, not when they are asking you to produce or change a file."
 
 // DiscoverSkills resolves the rung-0 skills listing (§19.2/§19.4, Step 19),
 // gated behind cfg.Tools.Enabled exactly like SystemPrompt's own fold above —
