@@ -120,12 +120,30 @@ func (t liveTurn) elapsed() time.Duration {
 // renderMessageBody: every fenced block in this one message collapses to its
 // one-line summary when true. See tui.Map.ToggleFold's own comment for why
 // this is a whole-message flag rather than a per-block one.
+//
+// The header is coloured with styles.User/styles.Assistant (§17 2026-08-19
+// "user/assistant messages are not visually differentiated" fix): both
+// fields have existed on theme.Styles since Step 3 (theme/style.go), each
+// theme's TOML has always defined distinct `user`/`assistant` colours
+// (ascua.toml's own `#7fd1b9`/`#ffb454`), but nothing in this package ever
+// called .Render with either one — every bubble's header drew in the plain
+// foreground colour regardless of who sent it, which is the entire reported
+// defect: at a glance, a fast-scrolling transcript reads as one undivided
+// column of text with no visual anchor for "which of these did I write".
+// Colouring only the header line, not the body, is deliberate: the body is
+// where code highlighting (Chroma) and prose styling (Glamour) already
+// apply their own colours, and re-tinting it on top would fight both
+// rather than complement either — the header alone is enough to place each
+// bubble's role at a glance, the same way a chat client colours the sender
+// name and lets the message text render in the app's normal reading colour.
 func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse, folded bool) string {
 	marker := g.userMark
+	roleStyle := styles.User
 	if role == "assistant" {
 		marker = g.assistantMark
+		roleStyle = styles.Assistant
 	}
-	header := fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04"))
+	header := roleStyle.Render(fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04")))
 	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
 }
 
