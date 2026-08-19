@@ -157,7 +157,7 @@ func TestDispatchSubAgentRoundTripsThroughToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	eng := engine.New(NewStreamer(prov, caps), 0)
+	eng := engine.New(NewStreamer(prov, caps, false), 0)
 
 	// The one line that makes this an end-to-end test rather than another
 	// unit test with a fake Runner: the real closure dispatch.go's own
@@ -252,7 +252,7 @@ func TestDispatchWithoutRunnerReportsAsToolErrorNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	eng := engine.New(NewStreamer(prov, caps), 0)
+	eng := engine.New(NewStreamer(prov, caps, false), 0)
 
 	// dispatchRunner is a Dispatch{Runner: nil} in effect: buildAgentOptions
 	// still registers dispatch (a non-nil SubAgentRunner value is what

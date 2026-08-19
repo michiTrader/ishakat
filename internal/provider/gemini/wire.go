@@ -72,11 +72,13 @@ type wirePart struct {
 	// real de imágenes llegue a este dialecto también.
 	InlineData *wireBlob `json:"inlineData,omitempty"`
 
-	// Thought marca un Part de razonamiento (resumen del pensamiento
-	// interno). Este adaptador nunca lo pide (generationConfig.thinkingConfig
-	// no se manda, ver buildBody) así que en la práctica nunca debería
-	// llegar, pero se modela para no fallar si algún día llega de todos
-	// modos.
+	// Thought marks a reasoning Part (a summary of the model's internal
+	// thinking). It arrives only when the request opted in with
+	// generationConfig.thinkingConfig.includeThoughts, which buildBody now
+	// sends whenever provider.Request.IncludeReasoning is set. Before that
+	// this adapter never asked, so this field was documented as "should
+	// never arrive in practice" and every reasoning path keyed off it —
+	// stream.go's own `case part.Thought` — was unreachable code.
 	Thought bool `json:"thought,omitempty"`
 
 	// ThoughtSignature es la firma opaca que Gemini exige de vuelta,
@@ -162,6 +164,35 @@ type wireRequest struct {
 type wireGenConfig struct {
 	Temperature     *float64 `json:"temperature,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+
+	// ThinkingConfig opts into thought summaries. Nil — the default — keeps
+	// the key off the wire entirely, so a turn that does not ask for
+	// reasoning serializes exactly as it did before this field existed.
+	ThinkingConfig *wireThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// wireThinkingConfig is generationConfig.thinkingConfig. Only IncludeThoughts
+// is modelled: it is the one field that decides whether the response carries
+// thought Parts at all, which is exactly what
+// provider.Request.IncludeReasoning asks for.
+//
+// thinkingLevel (Gemini 3) and thinkingBudget (Gemini 2.5) are deliberately
+// left out, and that is not an oversight. They control how *much* the model
+// reasons, not whether the client is told about it; they are mutually
+// exclusive across model generations (a budget sent to a Gemini 3 model and
+// a level sent to a 2.5 model are each an error, per Google's own thinking
+// guide); and [provider.params] can already set either one by hand without
+// recompiling (see buildBody's params escape hatch). Modelling them here
+// would mean this adapter guessing the target model's generation from its
+// wire id — precisely the kind of guess that produces a 400 the user cannot
+// explain.
+//
+// IncludeThoughts deliberately has no omitempty: the struct only ever exists
+// because the caller asked for thoughts, so the field is always true here,
+// and omitempty would erase the one field the object exists to carry,
+// leaving `"thinkingConfig": {}` — a request that asks for nothing.
+type wireThinkingConfig struct {
+	IncludeThoughts bool `json:"includeThoughts"`
 }
 
 // wireUsageMetadata es el bloque de consumo de GenerateContentResponse.

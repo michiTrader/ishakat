@@ -194,7 +194,15 @@ func (p *Provider) pumpSSE(ctx context.Context, body io.Reader, ch chan<- provid
 			}
 		}
 		if d.Content != "" {
-			if !emit(ctx, ch, provider.Event{Kind: provider.EventDelta, Text: d.Content}) {
+			// A thought-marked delta carries reasoning in the ordinary content
+			// field: on Google's shim the summary is not moved to a separate
+			// key, it is the answer field with a flag beside it. Emitting it as
+			// EventDelta would print the model's scratch work as the reply.
+			kind := provider.EventDelta
+			if d.Extra.thought() {
+				kind = provider.EventReasoning
+			}
+			if !emit(ctx, ch, provider.Event{Kind: kind, Text: d.Content}) {
 				return ctx.Err()
 			}
 		}
@@ -258,7 +266,14 @@ func (p *Provider) pumpWhole(ctx context.Context, body io.Reader, ch chan<- prov
 		}
 	}
 	if msg.Content != "" {
-		if !emit(ctx, ch, provider.Event{Kind: provider.EventDelta, Text: msg.Content}) {
+		// Same reasoning-vs-answer split as the streaming path: app.stream =
+		// false must not be the mode where thought summaries leak into the
+		// reply.
+		kind := provider.EventDelta
+		if msg.Extra.thought() {
+			kind = provider.EventReasoning
+		}
+		if !emit(ctx, ch, provider.Event{Kind: kind, Text: msg.Content}) {
 			return ctx.Err()
 		}
 	}

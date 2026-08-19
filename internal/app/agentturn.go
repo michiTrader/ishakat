@@ -244,7 +244,11 @@ func runAgentTurnHeadless(
 	allowToolCreate bool,
 	asker ask.Asker,
 ) (convo.Message, error) {
-	stream := NewStreamer(prov, provider.Caps{Tools: true})
+	// req.IncludeReasoning rather than a fresh config lookup: this function is
+	// handed the turn its caller already built, and reading [ui].reasoning a
+	// second time here would let the two disagree. A sub-agent inherits the
+	// parent turn's answer for the same reason it inherits the model.
+	stream := NewStreamer(prov, provider.Caps{Tools: true}, req.IncludeReasoning)
 	eng := engine.New(stream, maxRetries)
 	// Same eng, req.Model and req.System a sub-agent's own turn should
 	// answer with -- see newSubAgentRunner's own doc comment on why a

@@ -40,12 +40,18 @@ import (
 // cuentan en Degradation.ToolsFlattened.
 //
 // El razonamiento se omite siempre, con la misma razón que los otros dos
-// dialectos: reenviarlo confunde al modelo y se paga dos veces. Esto también
-// evita el requisito de thoughtSignature de Gemini para bloques de
-// pensamiento (que sí se exige de vuelta si el pensamiento se pidió) porque
-// este adaptador nunca pide pensamiento (wireGenConfig no manda
-// thinkingConfig) y por tanto nunca lo recibe como bloque de razonamiento
-// propio — la firma que SÍ puede llegar y viajar de vuelta es la de un
+// dialectos: reenviarlo confunde al modelo y se paga dos veces.
+//
+// Dropping it on the way out is also what keeps Gemini's thoughtSignature
+// requirement for *thought* blocks out of reach now that buildBody does ask
+// for thought summaries when provider.Request.IncludeReasoning is set: a
+// reasoning block that is never sent back can never be sent back missing
+// its signature. Google's own guidance ("don't concatenate parts with
+// signatures together", "don't merge one part with a signature with another
+// part without a signature") is why not sending them is the safe choice
+// rather than a limitation — the summaries exist to be read by the user, not
+// to be replayed to the model. La firma que SÍ puede llegar y viajar de
+// vuelta es la de un
 // BlockToolCall (ver el caso de abajo), que es un requisito distinto y
 // mucho más común: Gemini 3 la adjunta a la primera llamada a función de
 // cada paso incluso sin pensamiento extendido activado explícitamente.
@@ -251,8 +257,10 @@ func nameOr(name, fallback string) string {
 // thoughtsTokenCount se reporta aparte como Reasoning, igual que
 // convo.Usage ya modela para cualquier proveedor que separe esa cifra —
 // Anthropic no la tiene porque nunca pide pensamiento extendido en este
-// adaptador, pero Gemini SÍ puede reportarla incluso sin que este
-// adaptador pida thinkingConfig, en modelos que piensan por defecto.
+// adaptador, pero Gemini SÍ la reporta en modelos que piensan por defecto,
+// pida o no este adaptador thinkingConfig: los tokens de pensamiento se
+// generan (y se cobran) igual, y el opt-in de includeThoughts solo decide si
+// además llega el resumen legible.
 func toUsage(u *wireUsageMetadata) *convo.Usage {
 	if u == nil {
 		return nil

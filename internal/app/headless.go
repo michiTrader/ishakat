@@ -289,6 +289,11 @@ func Headless(opts HeadlessOptions) int {
 		Messages: []convo.Message{user},
 		System:   system,
 		Stream:   stream,
+		// Honours [ui].reasoning here too, so a `-p` run and an interactive
+		// session ask the service for the same thing. The reasoning is
+		// reported through the sink's own reasoning channel, which already
+		// existed and had nothing to carry.
+		IncludeReasoning: ReasoningWanted(cfg),
 	}
 
 	// 7. The turn. SIGINT and SIGTERM cancel the context instead of killing

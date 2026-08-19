@@ -90,8 +90,24 @@ type wireExtraContent struct {
 // cifrada del razonamiento interno del modelo. Es opaca por diseño —no se
 // puede leer, decodificar ni generar— y su único propósito es volver tal cual
 // en la petición siguiente.
+//
+// Thought is the other half of the same envelope, and it is a flag rather
+// than a payload: Google documents it as the field that "explicitly marks if
+// a field is a thought", and gives it precedence over thought_tag_marker.
+// It matters because on this shim a thought summary arrives as ordinary
+// `content` — the reasoning is *in* the answer field — so this boolean is the
+// only thing that tells the two apart. Without reading it, asking for thought
+// summaries would make the model's scratch work print as if it were the
+// reply, which is exactly the symptom seen on gateways that flatten
+// reasoning into content.
+//
+// It carries `omitempty` because false is the overwhelming majority of parts
+// and the envelope also travels outbound with the signature: a `"thought":
+// false` on every historical part would change the request shape for every
+// provider that never sends thoughts at all.
 type wireGoogleExtra struct {
 	ThoughtSignature string `json:"thought_signature,omitempty"`
+	Thought          bool   `json:"thought,omitempty"`
 }
 
 // signature saca la firma sin obligar a quien pregunta a comprobar dos
@@ -102,6 +118,16 @@ func (e *wireExtraContent) signature() string {
 		return ""
 	}
 	return e.Google.ThoughtSignature
+}
+
+// thought says whether this part is the model thinking rather than answering.
+// Same two-pointer convenience as signature(), and the same answer for every
+// provider that is not Gemini: false.
+func (e *wireExtraContent) thought() bool {
+	if e == nil || e.Google == nil {
+		return false
+	}
+	return e.Google.Thought
 }
 
 // googleExtra construye el sobre para una firma, o nil si no hay firma que

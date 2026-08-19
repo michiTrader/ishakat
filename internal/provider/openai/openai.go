@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -169,6 +170,32 @@ func (p *Provider) buildBody(req provider.Request, msgs []ChatMessage) ([]byte, 
 		}
 	}
 
+	// Thought summaries on Google's OpenAI-compatible shim. Google's thinking
+	// models only narrate their reasoning when the request opts in, and on this
+	// endpoint the opt-in is not an OpenAI field: it travels inside extra_body
+	// under the provider's own key, exactly as the compatibility guide
+	// documents. Without it the response carries no thought at all, there is
+	// nothing for reasoningText to find, and the reasoning preview stays empty
+	// no matter what ui.reasoning says.
+	//
+	// reasoning_effort is deliberately NOT used here even though it also
+	// controls thinking: it sets how *much* the model thinks, never whether the
+	// thinking comes back, and Google documents that the two cannot be sent
+	// together. Choosing it would spend reasoning tokens and still show nothing.
+	//
+	// Gated on the host because extra_body is Gemini-specific. Sending it to
+	// OpenAI, Groq or DeepSeek would either be ignored or rejected as an
+	// unknown field, and those services already narrate reasoning by default
+	// through reasoning_content — they need no opt-in. Anything the gate gets
+	// wrong stays fixable from the TOML, since this runs before the overrides.
+	if req.IncludeReasoning && isGoogleHost(p.base) {
+		body["extra_body"] = map[string]any{
+			"google": map[string]any{
+				"thinking_config": map[string]any{"include_thoughts": true},
+			},
+		}
+	}
+
 	for k, v := range p.set.Params {
 		applyParam(body, k, v)
 	}
@@ -181,6 +208,32 @@ func (p *Provider) buildBody(req provider.Request, msgs []ChatMessage) ([]byte, 
 		return nil, fmt.Errorf("openai: no se pudo serializar el cuerpo del turno: %w", err)
 	}
 	return out, nil
+}
+
+// isGoogleHost says whether a base URL points at Google's own
+// OpenAI-compatible endpoint, which is the only place extra_body.google means
+// anything.
+//
+// It matches on the host and not on the provider id or the model name, because
+// neither is reliable: the id is whatever the user typed in the TOML
+// ("gemini-direct" is only a preset default), and a Gemini model reached
+// *through* OmniRoute or OpenRouter is not on a Google host and must not get
+// Google's private request fields. The host is the one thing that actually
+// decides who parses the body.
+//
+// The URL is parsed rather than substring-matched so that a path or a query
+// string cannot fake the host: strings.Contains would accept
+// "https://evil.example.com/?x=googleapis.com". A URL that will not parse gets
+// false, which is the safe answer — the field simply is not sent.
+func isGoogleHost(base string) bool {
+	u, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "generativelanguage.googleapis.com" ||
+		strings.HasSuffix(host, ".googleapis.com") ||
+		strings.HasSuffix(host, ".google.com")
 }
 
 // applyParam aplica un override. Un valor nil borra la clave: así se puede

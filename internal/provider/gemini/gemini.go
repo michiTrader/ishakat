@@ -144,6 +144,17 @@ func (p *Provider) buildBody(req provider.Request, contents []wireContent, syste
 		gc.MaxOutputTokens = req.MaxTokens
 		haveGC = true
 	}
+	// Thought summaries are opt-in on Google's side: without this the
+	// response carries no `thought` Part at all, emitPart's own
+	// `case part.Thought` never fires, and the interface shows an empty
+	// reasoning preview no matter what ui.reasoning says. Sent only when
+	// asked (§4.2: reasoning tokens are billed) and, like every other field
+	// here, before the params overrides, so [provider.params] can still
+	// replace or delete generationConfig wholesale.
+	if req.IncludeReasoning {
+		gc.ThinkingConfig = &wireThinkingConfig{IncludeThoughts: true}
+		haveGC = true
+	}
 	if haveGC {
 		body["generationConfig"] = gc
 	}

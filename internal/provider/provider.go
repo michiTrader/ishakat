@@ -173,6 +173,33 @@ type Request struct {
 	Temperature *float64
 	MaxTokens   *int
 
+	// IncludeReasoning asks the service to send the model's own reasoning
+	// stream (EventReasoning) alongside the answer, when it has one to give.
+	//
+	// It exists because "the model thinks" and "the service narrates that
+	// thinking to the client" are two different facts, and every dialect
+	// here only ever handled the second one passively: EventReasoning was
+	// emitted whenever a chunk happened to carry a reasoning field, and no
+	// adapter ever asked for one. That is enough for a service that
+	// narrates by default (DeepSeek's reasoning_content, OpenRouter's
+	// reasoning) and produces nothing at all for Google, whose thinking
+	// models return thought summaries only when the request opts in —
+	// generationConfig.thinkingConfig.includeThoughts on the native API,
+	// extra_body.google.thinking_config.include_thoughts on the
+	// OpenAI-compatible shim. A user on a Gemini model therefore saw an
+	// empty reasoning preview no matter what ui.reasoning said, and every
+	// layer above it looked correct while doing nothing, because the data
+	// never left Google's side.
+	//
+	// False is the safe default and stays byte-for-byte identical on the
+	// wire to what every dialect sent before this field existed: a request
+	// that does not want reasoning must not grow a field for it, both
+	// because reasoning tokens are billed (§4.2) and because a service that
+	// validates unknown fields strictly — the very thing Gemini's shim is
+	// documented to do (config/credentials.go's own preset Notes) — would
+	// reject the turn outright.
+	IncludeReasoning bool
+
 	// Params son overrides crudos que se mezclan en el cuerpo JSON justo
 	// antes de enviarlo. Vienen de [provider.params] y de [[provider.model]]:
 	// es la vía para hablar con un servicio que pide un campo que ishakat no

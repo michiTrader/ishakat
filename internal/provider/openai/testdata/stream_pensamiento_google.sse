@@ -1,0 +1,12 @@
+data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"The user greets me. ","extra_content":{"google":{"thought":true}}}}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"A short reply fits.","extra_content":{"google":{"thought":true}}}}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hola, "}}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ishakat en línea."},"finish_reason":"stop"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":24,"completion_tokens":52,"total_tokens":76,"completion_tokens_details":{"reasoning_tokens":40}}}
+
+data: [DONE]
+

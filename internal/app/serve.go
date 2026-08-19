@@ -574,6 +574,9 @@ func (sess *serveSession) runTurn(msg clientMsg) {
 		Messages: []convo.Message{user},
 		System:   system,
 		Stream:   stream,
+		// Same [ui].reasoning answer every other door gives, so a session over
+		// the WebSocket bridge is not the one place reasoning goes missing.
+		IncludeReasoning: ReasoningWanted(sess.cfg),
 	}
 
 	started := time.Now()

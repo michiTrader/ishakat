@@ -157,7 +157,7 @@ func runToolTurnWithCaps(t *testing.T, cfg *config.Config, guard *permissions.Gu
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	eng := engine.New(NewStreamer(prov, caps), 0)
+	eng := engine.New(NewStreamer(prov, caps, false), 0)
 
 	hist := &convo.Conversation{}
 	hist.Add(convo.User("create the file"))
