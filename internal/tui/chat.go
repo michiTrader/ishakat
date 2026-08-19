@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/convo"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
@@ -136,7 +137,18 @@ func (t liveTurn) elapsed() time.Duration {
 // rather than complement either — the header alone is enough to place each
 // bubble's role at a glance, the same way a chat client colours the sender
 // name and lets the message text render in the app's normal reading colour.
-func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse, folded bool) string {
+//
+// reasoning/reasoningMode (§17 point 6a, "show at least ~2 lines of
+// thinking glued to the response, in grey") add a dim preview between the
+// header and the body for an assistant bubble whose turn carried a
+// reasoning stream. reasoning is always whatever the caller recorded
+// (transcriptEntry.reasoning, never touched by mode); reasoningMode is
+// ui.reasoning's three values ("off"/"collapsed"/"full") and is what
+// actually decides whether/how much prints — see renderReasoningPreview's
+// own doc comment for the exact truncation rule. A user bubble is passed
+// an empty reasoning by every call site (only an assistant turn ever
+// produces one), so this is a no-op there regardless of mode.
+func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse, folded bool, reasoning, reasoningMode string) string {
 	marker := g.userMark
 	roleStyle := styles.User
 	if role == "assistant" {
@@ -144,7 +156,11 @@ func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, 
 		roleStyle = styles.Assistant
 	}
 	header := roleStyle.Render(fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04")))
-	body := wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
+	body := wrapText(header, width)
+	if preview := renderReasoningPreview(styles, reasoning, reasoningMode, width); preview != "" {
+		body += "\n" + preview
+	}
+	body += "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
 	if role == "user" {
 		// §17 2026-08-19 second half: user messages get a distinct
 		// *background*, not just the header foreground fixed above —
@@ -157,14 +173,93 @@ func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, 
 	return body
 }
 
+// reasoningModeOr resolves ui.reasoning (config/schema.go's UI.Reasoning)
+// against defaults.toml's own documented default, the same "restate the
+// default rather than trust the zero value" rule animationsCfg (anim.go)
+// already follows for [ui.animations] — cfg == nil happens in this
+// package's own tests, which build a Root without a real *config.Config at
+// all, and a zero-valued string there would silently mean "off" instead of
+// the "collapsed" defaults.toml actually promises.
+func reasoningModeOr(cfg *config.Config) string {
+	if cfg == nil || cfg.UI.Reasoning == "" {
+		return "collapsed"
+	}
+	return cfg.UI.Reasoning
+}
+
+// reasoningPreviewLines is "~2 lines" from the report, taken literally: the
+// point was a short glance at what the model was doing, not a second reading
+// pane competing with the answer for the screen's own limited height (§2).
+const reasoningPreviewLines = 2
+
+// renderReasoningPreview turns a turn's raw reasoning text into the "glued to
+// the response, in grey" preview §17 point 6a asks for, or "" when there is
+// nothing to show — which renderTranscriptLine treats as "add no line at
+// all" rather than an empty dim row, the same "no pointless escape pair"
+// discipline PaintBackground's own blank-line handling already follows.
+//
+// mode is ui.reasoning verbatim, not a bool: three real behaviours, not two.
+//   - "off" (or unset/anything unrecognised — the safe default matching
+//     defaults.toml's own pre-Step-33 behaviour of showing nothing) returns
+//     "" unconditionally, regardless of how much reasoning is available.
+//   - "collapsed" (defaults.toml's own default) truncates to
+//     reasoningPreviewLines lines and, when more remains, appends an
+//     ellipsis line rather than silently cutting a sentence in half — the
+//     same "say that something was dropped" discipline truncateOutput
+//     (agentloop.go) and foldSummary (codeblock.go) both already follow for
+//     their own truncations.
+//   - "full" prints the whole stream, unclipped — for a user who explicitly
+//     wants to read everything the model was doing, not just a taste of it.
+//
+// The whole preview renders through styles.Dim — the same grey codeblock.go
+// already uses for a folded block's one-line summary and a fenced block's
+// language tag — wrapped to width first so a long reasoning line does not
+// escape the terminal the same way an unwrapped answer used to (wrap.go's
+// own doc comment). Wrapping happens before truncation, not after: cutting
+// at "N wrapped rows" is what "~2 lines" on screen actually means, whereas
+// cutting at "N sentences/paragraphs of raw text" could still overflow the
+// terminal on a narrow window.
+func renderReasoningPreview(styles theme.Styles, reasoning, mode string, width int) string {
+	reasoning = strings.TrimSpace(reasoning)
+	if reasoning == "" {
+		return ""
+	}
+	switch mode {
+	case "full":
+		return styles.Dim.Render(wrapText(reasoning, width))
+	case "collapsed":
+		wrapped := wrapText(reasoning, width)
+		lines := strings.Split(wrapped, "\n")
+		if len(lines) <= reasoningPreviewLines {
+			return styles.Dim.Render(wrapped)
+		}
+		lines = lines[:reasoningPreviewLines]
+		lines = append(lines, "…")
+		return styles.Dim.Render(strings.Join(lines, "\n"))
+	default:
+		// "off", empty, or an unrecognised value: show nothing. This is the
+		// same "an unrecognised override is not an error, it degrades to
+		// the safe default" rule theme.overrideCapability already follows
+		// for [ui] color, applied here to [ui] reasoning.
+		return ""
+	}
+}
+
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
 // (§9.3) y, si está en curso, la línea de animación con tiempo/tokens.
-func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode, renderProse, folded bool) string {
+//
+// reasoningMode is ui.reasoning (Root.cfgReasoning) threaded through to the
+// same renderTranscriptLine call a finished bubble goes through, so a
+// reasoning preview appears *while* the turn is still streaming (t.reason,
+// fed live by drainStream's appendReasoning call) instead of only popping
+// into existence the instant the turn commits — the model is "thinking out
+// loud" from the caller's point of view the whole time, not just at the end.
+func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush string, plainCancelHint string, highlightCode, renderProse, folded bool, reasoningMode string) string {
 	if !t.active {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode, renderProse, folded))
+	b.WriteString(renderTranscriptLine(styles, g, width, "assistant", t.model, t.body()+g.streamCursor, t.startedAt, highlightCode, renderProse, folded, t.reasoning(), reasoningMode))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("%s pensando %.1fs %s %d tok\n", crush, t.elapsed().Seconds(), g.dot, t.tokenCount()))
 	b.WriteString(plainCancelHint)
@@ -198,6 +293,6 @@ func renderLiveTurn(styles theme.Styles, g glyphs, width int, t liveTurn, crush 
 // keeps whichever fold state it had at eviction time for good. That is a
 // real, documented limitation, not an oversight: ctrl+r only ever reaches
 // the last keepInline entries still redrawn by head() (root.go).
-func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode, renderProse, folded bool) tea.Cmd {
-	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode, renderProse, folded) + "\n")
+func commitEntryCmd(styles theme.Styles, g glyphs, width int, e transcriptEntry, highlightCode, renderProse, folded bool, reasoningMode string) tea.Cmd {
+	return tea.Println(renderTranscriptLine(styles, g, width, e.role, e.name, e.text, e.ts, highlightCode, renderProse, folded, e.reasoning, reasoningMode) + "\n")
 }
