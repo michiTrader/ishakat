@@ -219,6 +219,7 @@ func (m Root) finishAgentTurn(result engine.AgentResult, err error) (tea.Model, 
 
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
+		reasoning: result.Reasoning,
 	})
 
 	// checkFallback's own counter (§11 Phase 4, root.go's finishTurn has

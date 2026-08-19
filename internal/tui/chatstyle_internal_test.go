@@ -24,8 +24,8 @@ func TestRenderTranscriptLineColoursHeaderByRole(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
 
-	userOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola", ts, false, false, false)
-	assistantOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "assistant", "openai/gpt-5", "hola", ts, false, false, false)
+	userOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola", ts, false, false, false, "", "")
+	assistantOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "assistant", "openai/gpt-5", "hola", ts, false, false, false, "", "")
 
 	userEsc := ansiFG(th.User)
 	assistantEsc := ansiFG(th.Assistant)
@@ -60,7 +60,7 @@ func TestRenderTranscriptLineHeaderColourDoesNotBleedIntoBody(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
 
-	out := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "un mensaje sin formato especial", ts, false, false, false)
+	out := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "un mensaje sin formato especial", ts, false, false, false, "", "")
 	lines := strings.SplitN(out, "\n", 2)
 	if len(lines) != 2 {
 		t.Fatalf("expected a header line and a body line, got %d line(s): %q", len(lines), out)
@@ -89,7 +89,7 @@ func TestRenderTranscriptLineNoColourEmitsNoEscape(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
 	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
 
-	out := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola", ts, false, false, false)
+	out := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola", ts, false, false, false, "", "")
 	if strings.ContainsRune(out, '\x1b') {
 		t.Errorf("theme.CapNone must never emit an escape sequence, got %q", out)
 	}
@@ -108,8 +108,8 @@ func TestRenderTranscriptLineUserGetsBackground(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
 
-	userOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola\nmundo", ts, false, false, false)
-	assistantOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "assistant", "openai/gpt-5", "hola\nmundo", ts, false, false, false)
+	userOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola\nmundo", ts, false, false, false, "", "")
+	assistantOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "assistant", "openai/gpt-5", "hola\nmundo", ts, false, false, false, "", "")
 
 	bgEsc := ansiBG(th.UserBG)
 	lines := strings.SplitN(userOut, "\n", 2)
@@ -142,7 +142,7 @@ func TestRenderTranscriptLineUserBackgroundSurvivesCodeBlock(t *testing.T) {
 	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
 
 	text := "mira esto:\n```go\nfunc main() { x := 1 }\n```\ngracias"
-	out := renderTranscriptLine(styles, unicodeGlyphs, 60, "user", "tú", text, ts, true, false, false)
+	out := renderTranscriptLine(styles, unicodeGlyphs, 60, "user", "tú", text, ts, true, false, false, "", "")
 
 	bgEsc := ansiBG(th.UserBG)
 	if got := strings.Count(out, bgEsc); got < 2 {

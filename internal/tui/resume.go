@@ -119,7 +119,19 @@ func historyToTranscript(g glyphs, history []convo.Message) []transcriptEntry {
 				}
 			}
 
-			entries = append(entries, transcriptEntry{role: "assistant", name: name, text: text, ts: last.Ts})
+			entries = append(entries, transcriptEntry{
+				role: "assistant", name: name, text: text, ts: last.Ts,
+				// last.Reasoning() (convo/message.go) concatenates any
+				// BlockReasoning blocks on this specific message — the
+				// same field asstBlocks (engine/agentloop.go) started
+				// prepending onto the natural-termination iteration's
+				// message once §17 point 6a's engine-layer half landed,
+				// so a resumed session shows the same "~2 lines, grey"
+				// preview a live one did, not just the plain-streaming
+				// path's turns (finishTurn already round-trips its own
+				// live.reasoning() the same way — see its own call site).
+				reasoning: last.Reasoning(),
+			})
 
 		default:
 			// A RoleTool or RoleSystem message reaching here directly

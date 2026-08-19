@@ -143,6 +143,18 @@ type transcriptEntry struct {
 	name string
 	text string
 	ts   time.Time
+
+	// reasoning is the model's own "thinking" stream for this turn (§17
+	// point 6a: "show at least ~2 lines of thinking glued to the response,
+	// in grey"), populated only for role == "assistant" — a user's own
+	// message never carries one. Empty is the overwhelmingly common case:
+	// a model with no reasoning capability, a plain-streaming turn under
+	// cfgReasoning == "off", or simply a turn where the provider sent no
+	// EventReasoning deltas at all. renderTranscriptLine decides how much
+	// of it to actually show (cfgReasoning's own "collapsed" vs "full"
+	// distinction), never this struct — a transcriptEntry is a durable
+	// record of what happened, not a rendering decision.
+	reasoning string
 }
 
 // Root es el modelo raíz de Bubble Tea (§7.1). En el Paso 3 no hay cfg
@@ -292,7 +304,35 @@ type Root struct {
 	// the two gate two different renderers over two different kinds of text
 	// (see renderMessageBody's own comment).
 	cfgMarkdown bool
-	fps         int
+
+	// cfgReasoning is ui.reasoning (config/schema.go's UI.Reasoning,
+	// defaults.toml's reasoning = "collapsed"): whether/how much of the
+	// model's own "thinking" stream (EventReasoning deltas, surfaced live
+	// via liveTurn.reason and, since engine.AgentResult gained a Reasoning
+	// field, via a tool-enabled turn's result too) is shown alongside its
+	// answer. Three values, matching the TOML comment and docs/PLAN.md's
+	// own `[ui]` example verbatim: "off" shows nothing (transcriptEntry
+	// still records it regardless of mode — finishTurn/finishAgentTurn
+	// always populate transcriptEntry.reasoning when the turn produced
+	// one, so a later config change to "collapsed"/"full" can still show
+	// history recorded while "off" was active — renderTranscriptLine
+	// simply never draws it); "collapsed" — the
+	// default — shows a short, dim, "~2 lines" preview glued to the top of
+	// the answer (renderReasoningPreview, chat.go); "full" shows the whole
+	// stream, unclipped.
+	//
+	// This is a *new* interpretation, not headless's own: internal/app/
+	// headless.go's own reasoning := strings.EqualFold(cfg.UI.Reasoning,
+	// "full") treats "collapsed" identically to "off" (both hidden) on the
+	// text sink, because a pipe has no fold/expand affordance to collapse
+	// *into* — headless's own showReasoning doc comment says as much. The
+	// TUI has no such excuse: a terminal transcript can show a short
+	// preview and still read cleanly, which is the literal shape the user
+	// asked for ("show at least ~2 lines... glued to the response"), so
+	// "collapsed" here means what its name says instead of copying
+	// headless's degenerate case.
+	cfgReasoning string
+	fps          int
 
 	// foldCode is ctrl+r's own toggle (tui.Map.ToggleFold, §17 2026-08-18
 	// "code blocks fill the terminal" fix, part 2): whether every fenced
@@ -1039,6 +1079,7 @@ func NewRoot(o Options) Root {
 		cfgBanner:       o.Cfg == nil || o.Cfg.UI.Banner,
 		cfgSyntax:       o.Cfg == nil || o.Cfg.UI.Syntax,
 		cfgMarkdown:     o.Cfg == nil || o.Cfg.UI.Markdown,
+		cfgReasoning:    reasoningModeOr(o.Cfg),
 		animMode:        anim.Mode,
 		cap:             o.Cap,
 		eng:             engineOr(o.Engine),
@@ -1922,6 +1963,7 @@ func (m Root) finishTurn(err error, aborted bool) (tea.Model, tea.Cmd) {
 
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "assistant", name: m.live.model, text: text, ts: time.Now(),
+		reasoning: m.live.reasoning(),
 	})
 
 	// checkFallback's own counter (§11 Phase 4): a real provider failure
@@ -2132,7 +2174,7 @@ func (m Root) evictOverflow() (Root, tea.Cmd) {
 		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
 			break
 		}
-		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown, m.foldCode))
+		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown, m.foldCode, m.cfgReasoning))
 		m.printedUpTo++
 	}
 	return m, tea.Batch(cmds...)
