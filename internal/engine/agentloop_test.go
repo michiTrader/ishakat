@@ -106,8 +106,9 @@ func toolCallEvent(id, name string, args string) Event {
 	return Event{Kind: EventToolCall, ID: id, Name: name, Args: json.RawMessage(args)}
 }
 
-func deltaEvent(s string) Event { return Event{Kind: EventDelta, Text: s} }
-func doneEvent() Event          { return Event{Kind: EventDone} }
+func deltaEvent(s string) Event     { return Event{Kind: EventDelta, Text: s} }
+func doneEvent() Event              { return Event{Kind: EventDone} }
+func reasoningEvent(s string) Event { return Event{Kind: EventReasoning, Text: s} }
 
 func TestRunAgentTurnStopsAtCostBudgetBeforeTool(t *testing.T) {
 	ss := &scriptedStreamer{scripts: [][]Event{
@@ -219,6 +220,68 @@ func TestRunAgentTurnToolCallThenAnswer(t *testing.T) {
 	}
 	if resultID != "c1" {
 		t.Errorf("BlockToolResult.ToolCallID = %q, want %q", resultID, "c1")
+	}
+}
+
+// TestRunAgentTurnCarriesReasoningToNaturalTermination is §17 point 6a's own
+// regression test: before AgentResult gained a Reasoning field, the
+// natural-termination path threw the per-iteration reasoning builder away —
+// only abortedAssistant's cancellation-only path ever surfaced it. A
+// tool-enabled turn that runs a tool and then answers normally has to carry
+// through the *last* iteration's reasoning (the one that produced the final
+// text), not the first iteration's (which led to the tool call and is not
+// what the user is reading now) — this is also what asstBlocks now persists
+// into history for --resume and for internal/app/agentturn.go's own
+// BlockReasoning translation, so this test checks both surfaces.
+func TestRunAgentTurnCarriesReasoningToNaturalTermination(t *testing.T) {
+	ss := &scriptedStreamer{
+		scripts: [][]Event{
+			{reasoningEvent("let me check the files first"), toolCallEvent("c1", "list", `{"dir":"."}`), doneEvent()},
+			{reasoningEvent("now I can answer"), deltaEvent("the directory contains: a.go"), doneEvent()},
+		},
+	}
+	runner := newFakeRunner()
+	runner.results["list"] = ToolResult{Text: "a.go"}
+
+	eng := New(ss.stream, 0)
+	hist := &convo.Conversation{}
+	hist.Add(convo.User("what files are in this directory"))
+
+	res, err := eng.RunAgentTurn(context.Background(), Request{
+		Model:    "fake/pro",
+		Messages: hist.Active(),
+	}, AgentOptions{
+		Tools:  []ToolDef{{Name: "list", Description: "list files"}},
+		Runner: runner.run,
+	}, hist)
+	if err != nil {
+		t.Fatalf("RunAgentTurn: unexpected error: %v", err)
+	}
+	if res.Reasoning != "now I can answer" {
+		t.Errorf("Reasoning = %q, want the final iteration's reasoning %q", res.Reasoning, "now I can answer")
+	}
+
+	// The first iteration's reasoning ("let me check the files first") must
+	// have landed on the assistant message that carried the tool call, and
+	// the second iteration's ("now I can answer") on the one that carried
+	// the final text — mirroring asstBlocks' own per-iteration construction.
+	msgs := hist.Messages
+	// msgs[0] = user, msgs[1] = assistant(reasoning+tool_call), msgs[2] = tool
+	// result, msgs[3] = assistant(reasoning+text)
+	if len(msgs) != 4 {
+		t.Fatalf("history has %d messages, want 4", len(msgs))
+	}
+	if got := msgs[1].Reasoning(); got != "let me check the files first" {
+		t.Errorf("msgs[1].Reasoning() = %q, want %q", got, "let me check the files first")
+	}
+	if !msgs[1].Has(convo.BlockToolCall) {
+		t.Error("msgs[1] should still carry a BlockToolCall")
+	}
+	if got := msgs[3].Reasoning(); got != "now I can answer" {
+		t.Errorf("msgs[3].Reasoning() = %q, want %q", got, "now I can answer")
+	}
+	if got := msgs[3].Text(); got != "the directory contains: a.go" {
+		t.Errorf("msgs[3].Text() = %q, want %q", got, "the directory contains: a.go")
 	}
 }
 

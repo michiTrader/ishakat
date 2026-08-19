@@ -124,6 +124,27 @@ type AgentResult struct {
 	Usage *convo.Usage
 	Calls int
 
+	// Reasoning is the reasoning stream (EventReasoning deltas) collected
+	// during the same iteration that produced Text (§17 point 6a, "the
+	// thinking preview"). It is set at every exit that also sets Text —
+	// natural termination, the cap/budget/loop-detection/futile stops, and
+	// a mid-batch cancellation or refusal — mirroring Text's own
+	// unconditional text.String() assignment at each of those sites.
+	//
+	// Before this field existed, reasoning was silently dropped on every
+	// non-cancelled iteration: the loop's own per-iteration `reasoning`
+	// builder (below) was read only by abortedAssistant, exclusively on the
+	// ctx.Err() != nil path. A tool-enabled turn that finished normally, or
+	// that stopped on its own (cap, budget, loop detection), never
+	// surfaced anything the model "thought" on its way to that outcome, and
+	// neither TUI nor headless had any field on this struct to read it
+	// from even if they wanted to. This makes the plain-streaming path
+	// (internal/tui/root.go's drainStream, already fed from liveTurn.reason)
+	// and the tool-enabled path (finishAgentTurn/runAgentTurnHeadless)
+	// symmetric: both now have real reasoning data at the point a turn
+	// ends, not just the cancelled-mid-loop case.
+	Reasoning string
+
 	// Stopped is empty when the model ended on a text turn (the natural
 	// termination). It carries a short reason when the cap, budget, or loop
 	// detection ended the turn early, so the caller can surface it honestly.
@@ -237,10 +258,11 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			return result, err
 		}
 
-		// Drain this iteration's stream: collect text for the final answer and
-		// accumulate tool calls. Reasoning is dropped, exactly as
-		// RunToCompletion drops it: nothing that calls this wants the model's
-		// scratch space, only its final text and its tool requests.
+		// Drain this iteration's stream: collect text for the final answer,
+		// the model's reasoning (§17 point 6a: kept, not dropped, so the
+		// caller can show a "thinking" preview — see AgentResult.Reasoning's
+		// own doc comment for why this used to be thrown away), and
+		// accumulate tool calls.
 		var text strings.Builder
 		var reasoning strings.Builder
 		var toolCalls []toolCallOut
@@ -300,6 +322,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				partial := abortedAssistant(text.String(), reasoning.String(), toolCalls, req.Model)
 				history.Add(partial)
 				result.Text = text.String()
+				result.Reasoning = reasoning.String()
 			}
 			result.Aborted = true
 			return result, ctx.Err()
@@ -310,15 +333,32 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			// returned so the caller can show what arrived before the failure,
 			// matching run()'s own contract.
 			result.Text = text.String()
+			result.Reasoning = reasoning.String()
 			return result, turnErr
 		}
 
-		// Record the assistant turn in history: its text, its reasoning (so
+		// Record the assistant turn in history: its reasoning, its text (so
 		// the saved session is faithful) and its tool calls (so the dialect
 		// can re-serialize them on the next iteration). Even an iteration that
 		// produced only tool calls has to land in history — the next request
 		// needs the assistant's tool_calls message to precede the tool results.
-		asstBlocks := make([]convo.Block, 0, 1+len(toolCalls))
+		//
+		// The ReasoningBlock added here (§17 point 6a) is new: before this,
+		// asstBlocks only ever carried TextBlock/ToolCallBlock, and
+		// abortedAssistant's own ReasoningBlock (cancellation only) was the
+		// sole place in this file that ever attached one — every
+		// non-cancelled iteration's reasoning vanished the moment this slice
+		// went out of scope. Persisting it here is what makes --resume able
+		// to show reasoning for a tool-enabled turn too, the same as a
+		// cancelled one already could; it also finally feeds
+		// internal/app/agentturn.go's `case convo.BlockReasoning:` branch,
+		// which was well-formed but dead code until now (see that file's own
+		// comment on this history-walking loop). Ordered before the text
+		// block, mirroring abortedAssistant's own block order.
+		asstBlocks := make([]convo.Block, 0, 2+len(toolCalls))
+		if reasoning.Len() > 0 {
+			asstBlocks = append(asstBlocks, convo.ReasoningBlock(reasoning.String()))
+		}
 		if text.Len() > 0 {
 			asstBlocks = append(asstBlocks, convo.TextBlock(text.String()))
 		}
@@ -341,6 +381,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		// This is the only path that yields a "complete" answer.
 		if len(toolCalls) == 0 {
 			result.Text = text.String()
+			result.Reasoning = reasoning.String()
 			return result, nil
 		}
 
@@ -351,6 +392,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 		if opts.BudgetUSD > 0 && result.CostUSD >= opts.BudgetUSD {
 			result.Stopped = fmt.Sprintf("cost budget reached: estimated spend $%.4f (limit $%.4f)", result.CostUSD, opts.BudgetUSD)
 			result.Text = text.String()
+			result.Reasoning = reasoning.String()
 			notExecuted(history, toolCalls, "cost budget reached before this call ran")
 			return result, nil
 		}
@@ -376,6 +418,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					"tool cap reached: %d calls this turn (limit %d). The model was still asking for tools; the last was %s.",
 					callsThisTurn-1, maxCalls, tc.name)
 				result.Text = text.String()
+				result.Reasoning = reasoning.String()
 				notExecuted(history, toolCalls[i:], "tool cap reached before this call ran")
 				return result, nil
 			}
@@ -400,6 +443,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					"loop detected: tool %q called twice in a row with the same arguments. Stopping to ask the user.",
 					tc.name)
 				result.Text = text.String()
+				result.Reasoning = reasoning.String()
 				notExecuted(history, toolCalls[i:], "loop detected before this call ran")
 				return result, nil
 			}
@@ -480,6 +524,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				if errors.As(rerr, &denied) && denied.Denied() {
 					result.Stopped = fmt.Sprintf("stopped: %s", rerr.Error())
 					result.Text = text.String()
+					result.Reasoning = reasoning.String()
 					// The refused call still needs its own tool reply before
 					// the rest are closed out, or the assistant message keeps
 					// an orphaned tool_call and the next request 400s (Bug 2).
@@ -529,6 +574,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 						"Trying further variants would not change the result.",
 					futileRun, firstLine(outText))
 				result.Text = text.String()
+				result.Reasoning = reasoning.String()
 				notExecuted(history, toolCalls[i+1:], "the turn ended after repeated identical failures")
 				return result, nil
 			}
