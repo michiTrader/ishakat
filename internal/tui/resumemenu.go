@@ -106,7 +106,7 @@ func (m Root) renderResumeMenu() string {
 
 	var b strings.Builder
 	b.WriteString(" reabrir una sesión\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	if r.err != nil {
 		fmt.Fprintf(&b, " %s %s\n", g.warnMark, r.err.Error())
@@ -126,7 +126,7 @@ func (m Root) renderResumeMenu() string {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter choose  esc cancel\n", g.scrollHint)
 	return b.String()
 }

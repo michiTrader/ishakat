@@ -324,7 +324,7 @@ func (m Root) renderToolScope() string {
 	d := m.toolScope
 
 	var b strings.Builder
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(" Tools for this mission\n\n")
 	b.WriteString(" Proposed from your goal:\n")
 
@@ -357,7 +357,7 @@ func (m Root) renderToolScope() string {
 		}
 	}
 
-	b.WriteString("\n " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString("\n " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter choose  esc = 1\n", g.scrollHint)
 	return b.String()
 }

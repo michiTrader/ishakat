@@ -285,7 +285,7 @@ func (m Root) renderSuggest() string {
 
 	var b strings.Builder
 	b.WriteString(" sugerencia: cristalizar un patrón repetido\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	for _, line := range wrapSuggestLines(fmt.Sprintf("visto %d veces, la última el %s:", cand.N, cand.Last), width-1) {
 		b.WriteString(" " + line + "\n")
 	}
@@ -305,7 +305,7 @@ func (m Root) renderSuggest() string {
 		}
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	for i, opt := range s.options() {
 		pointer := " "
 		if i == s.sel {
@@ -318,7 +318,7 @@ func (m Root) renderSuggest() string {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter elegir  esc ahora no\n", g.scrollHint)
 	return b.String()
 }

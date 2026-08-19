@@ -184,7 +184,7 @@ func (m Root) renderToolApprove() string {
 	var b strings.Builder
 	b.WriteString(" aprobación de herramienta\n")
 	fmt.Fprintf(&b, " %s   %s\n", d.req.Name, tierLabel(d.req.Tier))
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	argLines, structured := renderManifestProvenance(d.req.Name, d.req.Arguments, width-1)
 	if !structured {
 		argLines = wrapArgsLines(d.req.Arguments, width-1)
@@ -192,7 +192,7 @@ func (m Root) renderToolApprove() string {
 	for _, line := range argLines {
 		b.WriteString(" " + line + "\n")
 	}
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	for i, opt := range d.options {
 		pointer := " "
@@ -206,7 +206,7 @@ func (m Root) renderToolApprove() string {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter elegir  esc denegar\n", g.scrollHint)
 	return b.String()
 }

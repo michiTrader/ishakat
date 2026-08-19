@@ -290,7 +290,7 @@ func (m Root) renderMission() string {
 	d := m.mission
 
 	var b strings.Builder
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	// "Goal        " is 12 columns plus the line's own leading space (1),
 	// so the goal text itself may use at most width-13 — a long stated
 	// goal at 40 columns (this dialog's own narrowest supported width,
@@ -328,7 +328,7 @@ func (m Root) renderMission() string {
 		}
 	}
 
-	b.WriteString("\n " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString("\n " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter choose  esc = 2\n", g.scrollHint)
 	return b.String()
 }

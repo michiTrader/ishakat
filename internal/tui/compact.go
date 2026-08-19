@@ -235,10 +235,10 @@ func (m Root) renderCompact() string {
 
 	var b strings.Builder
 	b.WriteString(" compactando contexto\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " compactando %d turnos con %s\n", turns, m.compactModel)
 	b.WriteString(" " + CrushFrame(m.lay, m.animOffset) + "\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(" esc cancela\n")
 	return b.String()
 }

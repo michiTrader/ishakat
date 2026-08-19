@@ -235,7 +235,7 @@ func (m Root) renderAskUser() string {
 
 	var b strings.Builder
 	b.WriteString(" pregunta del agente\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	// The Submit tab's own summary is drawn through ask.State.Render
 	// itself, which already includes its own tab bar when there is more
@@ -247,7 +247,7 @@ func (m Root) renderAskUser() string {
 		for _, line := range strings.Split(wrapText(askUserTabBar(d.state), width-1), "\n") {
 			b.WriteString(" " + line + "\n")
 		}
-		b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+		b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	}
 
 	if d.state.AtSubmit() {
@@ -279,7 +279,7 @@ func (m Root) renderAskUser() string {
 		}
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s mover  enter confirmar  tab siguiente  esc omitir\n", g.scrollHint)
 	return b.String()
 }

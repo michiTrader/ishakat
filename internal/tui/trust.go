@@ -150,7 +150,7 @@ func (m Root) renderTrust() string {
 	d := m.trust
 
 	var b strings.Builder
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(" New project\n")
 	fmt.Fprintf(&b, " %s\n", ShortenPath(d.path, width-1))
 	b.WriteString(" " + trustGitLine(d) + "\n")
@@ -171,7 +171,7 @@ func (m Root) renderTrust() string {
 		}
 	}
 
-	b.WriteString("\n " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString("\n " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter choose  esc = 2\n", g.scrollHint)
 	return b.String()
 }

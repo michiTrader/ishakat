@@ -112,7 +112,7 @@ func (m Root) renderThemePicker() string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, " temas %s %d\n", g.dot, len(p.names))
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	if len(p.names) == 0 {
 		b.WriteString(" no hay temas disponibles\n")
@@ -133,7 +133,7 @@ func (m Root) renderThemePicker() string {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter use  esc cancel\n", g.scrollHint)
 	return b.String()
 }
