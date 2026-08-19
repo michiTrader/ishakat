@@ -20,7 +20,7 @@ func TestStreamerDeliversDeltaReasoningUsageAndDone(t *testing.T) {
 		fake.Usage(10, 2),
 	)
 
-	streamer := NewStreamer(fp, provider.Caps{})
+	streamer := NewStreamer(fp, provider.Caps{}, false)
 	ch, err := streamer(context.Background(), engine.Request{Model: "m"})
 	if err != nil {
 		t.Fatalf("streamer returned an error on handshake: %v", err)
@@ -58,7 +58,7 @@ func TestStreamerDeliversDeltaReasoningUsageAndDone(t *testing.T) {
 
 func TestStreamerForwardsModelMessagesAndSystem(t *testing.T) {
 	fp := fake.Text("t", "ok")
-	streamer := NewStreamer(fp, provider.Caps{})
+	streamer := NewStreamer(fp, provider.Caps{}, false)
 
 	req := engine.Request{
 		Model:    "anthropic/claude-sonnet-4-5",
@@ -92,7 +92,7 @@ func TestStreamerPropagatesAHandshakeError(t *testing.T) {
 	handshakeErr := &provider.Error{Retryable: true, RetryAfter: time.Second}
 	fp := &fake.Provider{HandshakeErr: handshakeErr}
 
-	streamer := NewStreamer(fp, provider.Caps{})
+	streamer := NewStreamer(fp, provider.Caps{}, false)
 	_, err := streamer(context.Background(), engine.Request{Model: "m"})
 	if err == nil {
 		t.Fatal("streamer returned no error for a handshake failure")
@@ -118,7 +118,7 @@ func TestStreamerPropagatesAMidStreamError(t *testing.T) {
 		provider.Event{Kind: provider.EventError, Err: streamErr},
 	)
 
-	streamer := NewStreamer(fp, provider.Caps{})
+	streamer := NewStreamer(fp, provider.Caps{}, false)
 	ch, err := streamer(context.Background(), engine.Request{Model: "m"})
 	if err != nil {
 		t.Fatalf("streamer returned an error on handshake: %v", err)

@@ -24,6 +24,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
@@ -62,6 +63,36 @@ func ToolsSupported(cat *catalog.Catalog, ref string) (bool, string) {
 			"or run `ishakat models --refresh` if you believe the catalog is stale)", ref)
 }
 
+// ReasoningWanted reports whether a turn should ask the service to narrate the
+// model's reasoning, which is what fills the preview the interface draws under
+// each answer.
+//
+// It reads [ui].reasoning and nothing else, and the empty string means
+// "collapsed" — the documented default in defaults.toml, not "off". A missing
+// key is an unconfigured install, and an unconfigured install is exactly the
+// one that reported seeing no reasoning at all.
+//
+// The catalog's Caps.Reasoning is deliberately NOT consulted, which is the
+// opposite of the choice ToolsSupported makes above, for two reasons. Sending
+// `tools` to a model that rejects them turns every turn into a 400, so there
+// the catalog's "no" is worth obeying; asking a non-thinking model for thought
+// summaries costs nothing and returns nothing, so a stale or missing catalog
+// row would only recreate the silent-nothing failure this whole change exists
+// to remove. And the dialects already narrow the blast radius themselves: the
+// OpenAI adapter only sends Google's opt-in to a Google host.
+//
+// It is also not a cost decision, which is the objection this would otherwise
+// invite. A thinking model thinks either way and bills those tokens either way
+// (Gemini reports thoughtsTokenCount whether or not the request opts in); the
+// flag only decides whether the user is allowed to read what they already paid
+// for. Turning it off saves nothing and hides something.
+func ReasoningWanted(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return strings.TrimSpace(strings.ToLower(cfg.UI.Reasoning)) != "off"
+}
+
 // CapsFor builds the provider.Caps for a turn against ref.
 //
 // wantTools is the caller's own intent, not the configuration: the
@@ -72,12 +103,18 @@ func ToolsSupported(cat *catalog.Catalog, ref string) (bool, string) {
 // Images and Reasoning stay at their zero value on purpose. Caps.Images
 // only selects between two flattening messages today (serialize.go: real
 // image parts are Phase 3 work, and both branches count the same
-// Degradation.ImagesDropped either way), and the OpenAI dialect never reads
+// Degradation.ImagesDropped either way), and no dialect reads
 // Caps.Reasoning at all. Setting either one now would change wire output
 // for a capability that is not implemented, which is how a "harmless"
 // widening becomes the next silent bug. Tools is the one field that
 // actually gates a request body today, so it is the one field this function
 // decides.
+//
+// Asking for reasoning is deliberately not expressed here even though it
+// looks like a capability, because it is not one: Caps describes what the
+// model can do, while wanting to *read* the thinking is a preference of the
+// person watching ([ui].reasoning). It travels as Request.IncludeReasoning
+// instead — see ReasoningWanted and NewStreamer.
 func CapsFor(cfg *config.Config, cat *catalog.Catalog, ref string, wantTools bool) (provider.Caps, string) {
 	if !wantTools || !cfg.Tools.Enabled {
 		return provider.Caps{}, ""

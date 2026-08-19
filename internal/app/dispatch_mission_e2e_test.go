@@ -248,7 +248,7 @@ func TestDispatchedSubAgentIsRefusedByADialogPathMissionRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	eng := engine.New(NewStreamer(prov, caps), 0)
+	eng := engine.New(NewStreamer(prov, caps, false), 0)
 
 	// The same real closure dispatch.go's own production call sites build,
 	// threading the identical *Guard -- so a rule the parent's own mission

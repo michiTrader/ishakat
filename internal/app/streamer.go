@@ -23,7 +23,19 @@ import (
 // the dialect serializes. They share the same fields by design (§12bis #2),
 // so the copy is field-by-field, the same way Model/Messages/System already
 // cross this boundary.
-func NewStreamer(prov provider.Provider, caps provider.Caps) engine.Streamer {
+//
+// reasoning is bound at construction for the same reason caps is: it comes
+// from [ui].reasoning (see ReasoningWanted), which a running turn never
+// changes. It is a separate parameter rather than a field on caps because it
+// is not a capability — see CapsFor's comment.
+//
+// It is an explicit parameter and not an inferred default on purpose. Every
+// caller now has to say which it wants, and that is the point: the bug this
+// closes was a whole feature that rendered correctly and displayed nothing
+// because no layer ever actually asked the service for the data. A parameter
+// that must be passed cannot silently go back to false the way an unset
+// struct field did.
+func NewStreamer(prov provider.Provider, caps provider.Caps, reasoning bool) engine.Streamer {
 	return func(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
 		tools := make([]provider.ToolDef, len(req.Tools))
 		for i, t := range req.Tools {
@@ -34,12 +46,13 @@ func NewStreamer(prov provider.Provider, caps provider.Caps) engine.Streamer {
 			}
 		}
 		pch, err := prov.Stream(ctx, provider.Request{
-			Model:    req.Model,
-			Messages: req.Messages,
-			System:   req.System,
-			Caps:     caps,
-			Stream:   true,
-			Tools:    tools,
+			Model:            req.Model,
+			Messages:         req.Messages,
+			System:           req.System,
+			Caps:             caps,
+			Stream:           true,
+			Tools:            tools,
+			IncludeReasoning: reasoning,
 		})
 		if err != nil {
 			// Returned as-is, not wrapped: retryAfter (internal/engine)

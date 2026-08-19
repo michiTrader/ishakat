@@ -60,9 +60,11 @@ import (
 // that passes true — compact_model's own engine must never be handed tools
 // (§10: summarizing is not acting).
 //
-// Images/Reasoning stay at the zero value; CapsFor's own comment explains
-// why widening them today would change wire output for capabilities that
-// are not implemented yet.
+// Images/Reasoning stay at the zero value in Caps; CapsFor's own comment
+// explains why widening them today would change wire output for capabilities
+// that are not implemented yet. Whether the turn asks the service to narrate
+// its reasoning is a separate question, answered from [ui].reasoning by
+// ReasoningWanted and passed to NewStreamer.
 func BuildEngine(cfg *config.Config, cat *catalog.Catalog, modelText, version string, wantTools bool) (eng *engine.Engine, ref ModelRef, system, warn string, err error) {
 	var fb *BootFallback
 	ref, fb, err = ResolveModelForBoot(cfg, cat, modelText)
@@ -92,7 +94,7 @@ func BuildEngine(cfg *config.Config, cat *catalog.Catalog, modelText, version st
 		}
 	}
 
-	stream := NewStreamer(prov, caps)
+	stream := NewStreamer(prov, caps, ReasoningWanted(cfg))
 	return engine.New(stream, cfg.App.MaxRetries), ref, system, warn, nil
 }
 
@@ -152,7 +154,7 @@ func NewEngineFactory(cfg *config.Config, cat *catalog.Catalog, version string, 
 			return nil, err
 		}
 		caps, _ := CapsFor(cfg, cat, ref.Ref, wantTools)
-		stream := NewStreamer(prov, caps)
+		stream := NewStreamer(prov, caps, ReasoningWanted(cfg))
 		return engine.New(stream, cfg.App.MaxRetries), nil
 	}
 }
