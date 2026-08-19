@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -208,6 +209,13 @@ type Styles struct {
 	Error     lipgloss.Style
 	Code      lipgloss.Style
 	Box       lipgloss.Style
+
+	// UserBG paints Theme.UserBG as a background, never a foreground — it is
+	// built and used separately from User (which stays a header-only
+	// foreground accent, §17 2026-08-19 first half) because a user message's
+	// *body* needs a background colour behind text that already carries its
+	// own foreground/other styling (see PaintBackground's doc comment).
+	UserBG lipgloss.Style
 }
 
 // NewStyles construye los estilos. Con CapNone todos quedan sin color, así el
@@ -239,6 +247,11 @@ func NewStyles(t Theme, cap Capability, glyphs GlyphSet) Styles {
 		Warn:      fg(t.Warn),
 		Error:     fg(t.Error),
 		Code:      fg(t.FG),
+	}
+	if !plain {
+		s.UserBG = lipgloss.NewStyle().Background(lipgloss.Color(t.UserBG.Hex()))
+	} else {
+		s.UserBG = lipgloss.NewStyle()
 	}
 	s.Box = lipgloss.NewStyle().
 		Border(boxBorder(glyphs)).
@@ -309,6 +322,63 @@ func (s Styles) GradientLines(block string, offset int) string {
 // método de conveniencia para que otros paquetes (tui) no tengan que conocer
 // el campo Dim directamente, solo la interfaz mínima que necesitan.
 func (s Styles) DimRender(text string) string { return s.Dim.Render(text) }
+
+// ansiFullReset is the plain SGR reset every lipgloss-rendered run ends in
+// (charmbracelet/x/ansi's own Style.Styled appends exactly this after its
+// own content, see ansi.ResetStyle) — the byte sequence PaintBackground has
+// to find and patch. It is its own alias rather than every call site below
+// spelling out ansi.ResetStyle directly, so a future bump of that dependency
+// that renamed or restructured the constant would fail this file's own
+// build instead of silently drifting out of sync with lipgloss's real
+// output.
+const ansiFullReset = ansi.ResetStyle
+
+// PaintBackground wraps an already-rendered, possibly multi-line block of
+// text in the UserBG background colour, without losing that background at
+// any point *inside* the block where the text carries its own embedded
+// style (a header's User foreground, a Chroma token, a Glamour span, ...).
+//
+// The naive approach — bg.Render(block) — does not work: lipgloss.Style's
+// own Render only wraps the *whole* string once, but any already-styled run
+// inside that string ends in its own ansiFullReset, and a bare "\x1b[m" also
+// zeroes the *background* the outer Render just set. Between any two
+// pre-styled runs on the same line the background would visibly "leak" back
+// to the terminal's own default. Style.Width(n) forces line padding, which
+// fixes that leak but pads every line — including the block's last one —
+// with trailing spaces even when nothing asked for a padded box, an
+// unwanted side effect for what should read as "text on a coloured strip."
+//
+// The fix is to ask the style itself for the exact escape codes it would
+// wrap around any text (by rendering a single NUL byte as a probe and
+// splitting on it), then apply those codes by hand: prefix + suffix around
+// each non-empty line, and — critically — the prefix again immediately
+// after every embedded ansiFullReset inside that line, so the background is
+// re-established the instant an inner style's own reset would have cleared
+// it. This mirrors fg()'s own "CapNone renders no escape at all" contract
+// for free: under CapNone, s.UserBG is lipgloss.NewStyle() with no
+// Background set, so the probe's prefix/suffix both come back empty and the
+// whole function is a byte-for-byte no-op — no separate "if plain" branch
+// needed here, same as every other Styles method.
+func (s Styles) PaintBackground(block string) string {
+	probe := s.UserBG.Render("\x00")
+	i := strings.IndexByte(probe, 0)
+	if i < 0 {
+		return block
+	}
+	prefix, suffix := probe[:i], probe[i+1:]
+	if prefix == "" && suffix == "" {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	for idx, ln := range lines {
+		if ln == "" {
+			continue
+		}
+		patched := strings.ReplaceAll(ln, ansiFullReset, ansiFullReset+prefix)
+		lines[idx] = prefix + patched + suffix
+	}
+	return strings.Join(lines, "\n")
+}
 
 // RenderBox draws content inside the theme's box, occupying exactly width
 // terminal columns in total — the two vertical borders included.

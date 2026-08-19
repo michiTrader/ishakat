@@ -144,7 +144,17 @@ func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, 
 		roleStyle = styles.Assistant
 	}
 	header := roleStyle.Render(fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04")))
-	return wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
+	body := wrapText(header, width) + "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
+	if role == "user" {
+		// §17 2026-08-19 second half: user messages get a distinct
+		// *background*, not just the header foreground fixed above —
+		// applied to the whole rendered bubble (header + body) via
+		// PaintBackground so it survives the header's own User colour and
+		// any code/prose styling in the body without losing the paint at
+		// their embedded resets (see PaintBackground's doc comment).
+		body = styles.PaintBackground(body)
+	}
+	return body
 }
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
