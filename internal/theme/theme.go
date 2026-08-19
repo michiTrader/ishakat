@@ -55,6 +55,24 @@ type Theme struct {
 	Error     RGB
 	CodeBG    RGB
 
+	// UserBG is the background painted behind a user message's whole body
+	// (§17 2026-08-19 "user messages should have a different background
+	// color" — a distinct requirement from the same entry's header-
+	// foreground fix, already closed in the previous session). It is
+	// deliberately its own field rather than a derived tint of User: a
+	// theme author picking a background wants a colour dark/desaturated
+	// enough to sit behind readable text at every capability level, which
+	// is not automatically true of whatever hue looks good as a thin
+	// header accent — ascua.toml's own `#7fd1b9` teal, painted solid
+	// behind a paragraph of `#e8e6e3` text, would be legible but far
+	// brighter than every other surface in the interface. A theme's TOML
+	// that predates this field (or simply omits `user_bg`) is not left
+	// with a jarring black box: parse (below) starts every field from
+	// `base` — builtinFallback's own value — exactly as it already does
+	// for every other colour a theme leaves unset, so an old theme file
+	// keeps a sensible default rather than RGB{}'s pure black.
+	UserBG RGB
+
 	Syntax map[string]RGB
 
 	// Source es de dónde salió: "embebido" o la ruta del archivo.
@@ -84,8 +102,17 @@ func builtinFallback() Theme {
 		Warn:      must("#e8b25c"),
 		Error:     must("#f2635f"),
 		CodeBG:    must("#1c1a18"),
-		Syntax:    map[string]RGB{},
-		Source:    "compilado",
+		// A dark, desaturated tint of User (#7fd1b9) rather than the teal
+		// itself: painted solid behind a whole paragraph of #e8e6e3 text,
+		// the bright accent would be louder than every other surface in
+		// the interface (see UserBG's own doc comment above) — this is
+		// close in hue to CodeBG (#1c1a18) so the two dark surfaces read
+		// as part of the same palette, but distinct enough (cooler, a
+		// touch of green) to still tell a user bubble's background apart
+		// from a code block's at a glance.
+		UserBG: must("#182420"),
+		Syntax: map[string]RGB{},
+		Source: "compilado",
 	}
 }
 
@@ -210,6 +237,7 @@ func parse(b []byte, base Theme) (Theme, []string) {
 		"fg_dim":    &th.FGDim,
 		"accent":    &th.Accent,
 		"user":      &th.User,
+		"user_bg":   &th.UserBG,
 		"assistant": &th.Assistant,
 		"border":    &th.Border,
 		"success":   &th.Success,

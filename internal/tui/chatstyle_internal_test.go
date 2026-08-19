@@ -94,3 +94,67 @@ func TestRenderTranscriptLineNoColourEmitsNoEscape(t *testing.T) {
 		t.Errorf("theme.CapNone must never emit an escape sequence, got %q", out)
 	}
 }
+
+// TestRenderTranscriptLineUserGetsBackground is the regression test for §17
+// 2026-08-19's second half, "user messages should have a different
+// background color" — a distinct requirement from the header-foreground fix
+// pinned by TestRenderTranscriptLineColoursHeaderByRole above. It confirms a
+// user bubble's rendered output carries the theme's UserBG background
+// escape somewhere in *both* the header line and the body line (the whole
+// bubble, not just one or the other), and that an assistant bubble carries
+// neither — the background is exclusively a user-message affordance.
+func TestRenderTranscriptLineUserGetsBackground(t *testing.T) {
+	th := theme.Load("")
+	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
+	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
+
+	userOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "user", "tú", "hola\nmundo", ts, false, false, false)
+	assistantOut := renderTranscriptLine(styles, unicodeGlyphs, 40, "assistant", "openai/gpt-5", "hola\nmundo", ts, false, false, false)
+
+	bgEsc := ansiBG(th.UserBG)
+	lines := strings.SplitN(userOut, "\n", 2)
+	if len(lines) != 2 {
+		t.Fatalf("expected a header line and a body block, got %d piece(s): %q", len(lines), userOut)
+	}
+	if !strings.Contains(lines[0], bgEsc) {
+		t.Errorf("user bubble header missing the UserBG background escape: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], bgEsc) {
+		t.Errorf("user bubble body missing the UserBG background escape: %q", lines[1])
+	}
+	if strings.Contains(assistantOut, bgEsc) {
+		t.Errorf("assistant bubble must not carry the user background: %q", assistantOut)
+	}
+}
+
+// TestRenderTranscriptLineUserBackgroundSurvivesCodeBlock guards the
+// scenario PaintBackground's own doc comment calls out by name: a user
+// message whose body contains a fenced, syntax-highlighted code block is
+// full of Chroma's own per-token escapes, each ending in a full SGR reset.
+// Without the reset-patching PaintBackground does, the background would
+// visibly "leak" back to the terminal's default between tokens. This pins
+// that the background escape reappears after the code block's own colouring
+// — i.e. that it is present more than once in the rendered body — rather
+// than only at the very start of the message.
+func TestRenderTranscriptLineUserBackgroundSurvivesCodeBlock(t *testing.T) {
+	th := theme.Load("")
+	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
+	ts := time.Date(2026, 8, 19, 14, 2, 0, 0, time.UTC)
+
+	text := "mira esto:\n```go\nfunc main() { x := 1 }\n```\ngracias"
+	out := renderTranscriptLine(styles, unicodeGlyphs, 60, "user", "tú", text, ts, true, false, false)
+
+	bgEsc := ansiBG(th.UserBG)
+	if got := strings.Count(out, bgEsc); got < 2 {
+		t.Fatalf("background escape must reappear after the code block's own resets, got only %d occurrence(s): %q", got, out)
+	}
+	if !strings.Contains(stripANSI(out), "func main() { x := 1 }") {
+		t.Errorf("code text must survive unchanged under the background paint: %q", stripANSI(out))
+	}
+}
+
+// ansiBG is ansiFG's own sibling: the truecolor *background* escape lipgloss
+// emits for c ("48;2;r;g;b" rather than foreground's "38;2;r;g;b").
+func ansiBG(c theme.RGB) string {
+	return strings.Replace(ansiFG(c), "38;2;", "48;2;", 1)
+}
