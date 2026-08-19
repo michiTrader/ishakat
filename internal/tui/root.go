@@ -1118,8 +1118,12 @@ func NewRoot(o Options) Root {
 		// reply built on top of would then contradict. historyToTranscript
 		// (resume.go) is the same conversion finishTurn/submit apply live,
 		// applied here in one pass at construction instead of one entry at
-		// a time as the conversation unfolds.
-		transcript: historyToTranscript(o.History),
+		// a time as the conversation unfolds. lay is already built above
+		// (this composite literal cannot reference r.lay, since r does not
+		// exist yet), so historyToTranscript's own glyph lookup (needed to
+		// reconstruct each tool-using turn's toolActivityLines summary —
+		// see its own doc comment) reads straight off that local instead.
+		transcript: historyToTranscript(lay.glyphs(), o.History),
 	}
 	r.conv.Messages = o.History
 	// RestoredMissions (§21.16 decision 3) gets its own notice appended
@@ -1605,7 +1609,7 @@ func (m Root) applySessionChosen(id string) (tea.Model, tea.Cmd) {
 	// has to update both or the two would disagree from the very next
 	// turn.
 	m.conv = *conv
-	m.transcript = historyToTranscript(conv.Messages)
+	m.transcript = historyToTranscript(m.lay.glyphs(), conv.Messages)
 	m.printedUpTo = 0
 
 	// Same rebind switchEngine's own comment describes: a resumed session
