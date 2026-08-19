@@ -176,7 +176,7 @@ func (m Root) renderLogin() string {
 
 	var b strings.Builder
 	b.WriteString(" autenticando " + m.login.preset.Name + "\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	if !m.login.waiting {
 		b.WriteString(" solicitando codigo de dispositivo...\n")
 	} else {
@@ -185,7 +185,7 @@ func (m Root) renderLogin() string {
 		b.WriteString(" esperando autorizacion...\n")
 	}
 	b.WriteString(" " + CrushFrame(m.lay, m.animOffset) + "\n")
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(" esc cancela\n")
 	return b.String()
 }

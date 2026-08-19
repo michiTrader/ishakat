@@ -186,13 +186,13 @@ func (m Root) renderConfirm() string {
 	b.WriteString(" cambiar modelo\n")
 	fmt.Fprintf(&b, " de  %s   %s\n", d.from.Display(), contextLabel(d.from))
 	fmt.Fprintf(&b, " a   %s   %s\n", d.to.Display(), contextLabel(d.to))
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	for _, line := range confirmConflictLines(g, d.plan) {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	for i, opt := range d.options {
 		pointer := " "
 		if i == d.sel {
@@ -205,7 +205,7 @@ func (m Root) renderConfirm() string {
 		b.WriteString(" " + line + "\n")
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	fmt.Fprintf(&b, " %s move  enter choose  esc cancel\n", g.scrollHint)
 	return b.String()
 }

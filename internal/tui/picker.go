@@ -334,7 +334,7 @@ func (m Root) renderPicker() string {
 		b.WriteString(" " + m.styles.Warn.Render(notice) + "\n")
 	}
 	fmt.Fprintf(&b, " %s %s%s\n", searchGlyph(g), p.query, g.streamCursor)
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 
 	if len(p.rows) == 0 {
 		b.WriteString(" " + emptyPickerMessage(p) + "\n")
@@ -347,7 +347,7 @@ func (m Root) renderPicker() string {
 		}
 	}
 
-	b.WriteString(" " + strings.Repeat(g.rule, width-1) + "\n")
+	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(fmt.Sprintf(" %s move  enter use  %s%s collapse\n", g.scrollHint, g.inputPrefix, g.inputPrefix))
 	fmt.Fprintf(&b, " ctrl+f filter:%s  esc close\n", p.filter.label())
 	return b.String()
