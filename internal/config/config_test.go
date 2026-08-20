@@ -885,6 +885,52 @@ func TestAgentsMDExplicitFalseIsHonored(t *testing.T) {
 	}
 }
 
+// TestTUIModeDefaultsToAuto is DESIGN-tui-mode.md §5's own requirement: "auto"
+// is a real default value, not a platform-specific string baked into
+// defaults.toml, so the shipped file stays identical everywhere and the
+// decision is made once at start-up by internal/termenv.Detect.
+func TestTUIModeDefaultsToAuto(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "minimal.toml")
+	if err := os.WriteFile(p, []byte("schema = 1\n"), 0o600); err != nil {
+		t.Fatalf("could not write the temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("embedded defaults failed Validate: %v", err)
+	}
+	if cfg.UI.TUIMode != "auto" {
+		t.Errorf("ui.tui_mode should default to %q, got %q", "auto", cfg.UI.TUIMode)
+	}
+	if !cfg.UI.FullscreenExitTranscript {
+		t.Error("ui.fullscreen_exit_transcript should default to true (DECISION-1b)")
+	}
+}
+
+// TestTUIModeExplicitValueIsHonored mirrors TestAgentsMDExplicitFalseIsHonored:
+// a user layer that pins the mode must not be silently overwritten by the
+// embedded default merging on top of it.
+func TestTUIModeExplicitValueIsHonored(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "pinned.toml")
+	body := "schema = 1\n[ui]\ntui_mode = \"fullscreen\"\nfullscreen_exit_transcript = false\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("could not write the temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.UI.TUIMode != "fullscreen" {
+		t.Errorf("ui.tui_mode = %q in the user layer should stick, got %q", "fullscreen", cfg.UI.TUIMode)
+	}
+	if cfg.UI.FullscreenExitTranscript {
+		t.Error("ui.fullscreen_exit_transcript = false in the user layer should stick")
+	}
+}
+
 func TestRedacted(t *testing.T) {
 	cfg := &config.Config{
 		Providers: []config.Provider{

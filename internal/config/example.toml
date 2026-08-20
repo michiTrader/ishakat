@@ -34,6 +34,10 @@ color = "auto"
 # spinner with plain ASCII, for consoles whose font shows boxes instead of
 # block-drawing characters (a stock Windows PowerShell, for one).
 glyphs = "auto"
+# tui_mode: auto | regular | fullscreen — see `ishakat doctor` for what "auto"
+# resolved to and why. fullscreen owns the screen and reflows on resize;
+# regular keeps your terminal's own scrollback and text selection.
+tui_mode = "auto"
 
 [ui.animations]
 mode = "auto"

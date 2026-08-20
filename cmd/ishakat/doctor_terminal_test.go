@@ -81,3 +81,49 @@ func TestReportAgentsMDWithNilConfigDefaultsToOn(t *testing.T) {
 		t.Errorf("output does not default to enabled with a nil config:\n%s", out)
 	}
 }
+
+// TestReportTerminalShowsTUIModeWithItsReason is DESIGN-tui-mode.md §5's own
+// closing line for `doctor`: "prints the resolved mode with its reason and
+// the override that changes it — the same contract theme.Diagnosis.Advice
+// already honours". reportTerminal writes to a bytes.Buffer here, which is
+// never a terminal, so this also exercises the honesty rule (§3.1): an
+// explicit fullscreen override is refused when stdout is redirected, and the
+// refusal must say so rather than silently falling back.
+func TestReportTerminalShowsTUIModeWithItsReason(t *testing.T) {
+	var buf bytes.Buffer
+	reportTerminal(&buf, &config.Config{UI: config.UI{TUIMode: "auto"}})
+	out := buf.String()
+
+	if !strings.Contains(out, "tui_mode") {
+		t.Fatalf("output does not report tui_mode at all:\n%s", out)
+	}
+	if !strings.Contains(out, "regular") {
+		t.Errorf("a buffer is never a terminal; tui_mode should resolve to regular:\n%s", out)
+	}
+}
+
+// TestReportTerminalExplainsARefusedFullscreenOverride covers the one case
+// theme.Diagnose's own contract exists to serve: a decision that came out
+// "wrong" (regular, when the user asked for fullscreen) must say why, not
+// just what.
+func TestReportTerminalExplainsARefusedFullscreenOverride(t *testing.T) {
+	var buf bytes.Buffer
+	reportTerminal(&buf, &config.Config{UI: config.UI{TUIMode: "fullscreen"}})
+	out := buf.String()
+
+	if !strings.Contains(out, "not a terminal") {
+		t.Errorf("output does not explain why fullscreen was refused for a non-terminal writer:\n%s", out)
+	}
+}
+
+// TestReportTerminalSurvivesANilConfig mirrors
+// TestReportAgentsMDWithNilConfigDefaultsToOn for the terminal half of the
+// report: doctorConfig's documented nil-on-error path must not panic here
+// either.
+func TestReportTerminalSurvivesANilConfig(t *testing.T) {
+	var buf bytes.Buffer
+	reportTerminal(&buf, nil)
+	if !strings.Contains(buf.String(), "tui_mode") {
+		t.Errorf("output does not report tui_mode with a nil config:\n%s", buf.String())
+	}
+}

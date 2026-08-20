@@ -75,6 +75,22 @@ type UI struct {
 	// start-up logo was reported as unreadable.
 	Glyphs string `toml:"glyphs"`
 
+	// TUIMode is DECISION-1(d), docs/DESIGN-tui-mode.md §5: "auto" (default) |
+	// "regular" | "fullscreen". "auto" is deliberately not a platform-specific
+	// string — the shipped defaults.toml stays identical everywhere, and the
+	// decision is made once at start-up by internal/termenv.Detect, which is
+	// testable. See that package's own doc comment for what decides the
+	// answer (the terminal drawing the output, not the OS running the
+	// process — WSL is not a verdict either way).
+	TUIMode string `toml:"tui_mode"`
+
+	// FullscreenExitTranscript is DECISION-1b: when true (the default),
+	// leaving fullscreen prints the whole conversation to the terminal's own
+	// scrollback before handing it back, so nothing the session said is lost
+	// with the alternate screen. Ignored in "regular", which never took the
+	// scrollback away in the first place.
+	FullscreenExitTranscript bool `toml:"fullscreen_exit_transcript"`
+
 	Animations Animations `toml:"animations"`
 	Footer     Footer     `toml:"footer"`
 }
