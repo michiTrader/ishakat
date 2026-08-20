@@ -256,8 +256,12 @@ func TestB2bAnEntryIsCommittedExactlyOnce(t *testing.T) {
 // A terminal holding both is a terminal that received the same entry down two
 // different paths.
 //
-// Deferred with B2b: same mechanism, same owner instruction. The pin stays so
-// a silent fix cannot land unnoticed.
+// Was deferred alongside B2b (same mechanism, same owner instruction). W1's
+// RC-3 fix changed evictOverflow to measure frameRowsUnclipped instead of the
+// now-clipped head(), which moved eviction earlier relative to the live
+// turn's own fold — and that was enough for this particular repro shape (not
+// B2b's — see its own still-deferred pin) to stop reproducing across repeated
+// runs. Promoted to a hard assertion per this test's own instruction.
 func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
 
@@ -267,16 +271,10 @@ func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 	}
 
 	all := strings.Join(s.All(), "\n")
-	folded := strings.Contains(all, "| tu ")
-	unfolded := strings.Contains(all, "| tú ")
-
-	if folded && unfolded {
-		t.Logf("fold-split still present (deferred): both \"| tu \" and \"| tú \" are on the terminal.\n%s",
+	if folded, unfolded := strings.Contains(all, "| tu "), strings.Contains(all, "| tú "); folded && unfolded {
+		t.Errorf("fold-split: both \"| tu \" and \"| tú \" are on the terminal.\n%s",
 			s.Dump("screen+scrollback:"))
-		return
 	}
-	t.Fatal("fold-split appears fixed: committed entries now share the live region's fold. " +
-		"Promote this test to a hard assertion.")
 }
 
 // B3: /clear must clear the scrollback, not just paint over the screen.

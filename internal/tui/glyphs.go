@@ -67,6 +67,16 @@ type glyphs struct {
 	// collapse/expand toggle — foldMark follows that precedent rather than
 	// inventing a third glyph for the same idea.
 	foldMark string
+
+	// clipMark prefixes the "N rows above" affordance RC-3's height
+	// invariant draws when the live region has to clip something to keep
+	// the whole frame inside the terminal (view.go's clipHead). "…" is
+	// Latin-1 punctuation, already in asciiFolds as a fallback for prose
+	// that reaches foldASCII — but a decorative affordance is not prose
+	// that happened to contain the character, it is the character chosen on
+	// purpose for this one job, so it gets its own explicit ASCII spelling
+	// ("...") rather than depending on the fold ever seeing it.
+	clipMark string
 }
 
 var unicodeGlyphs = glyphs{
@@ -85,6 +95,7 @@ var unicodeGlyphs = glyphs{
 	spinner:       []rune("░▒▓█▓▒░▒▓"),
 	warnMark:      "⚠",
 	foldMark:      "▸",
+	clipMark:      "…",
 }
 
 var asciiGlyphs = glyphs{
@@ -103,6 +114,7 @@ var asciiGlyphs = glyphs{
 	spinner:       []rune(".:-=+=-:."),
 	warnMark:      "!",
 	foldMark:      ">",
+	clipMark:      "...",
 }
 
 // glyphsFor returns the table for a set. Every field of both tables is filled
