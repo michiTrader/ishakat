@@ -258,6 +258,14 @@ implements that document rather than re-designing it.
 
 ## 3. The three decisions
 
+> **STATUS 2026-08-20 — all three are ANSWERED by the owner.** Each decision
+> below now carries an `ANSWERED` block recording what was decided, plus the
+> constraints attached to it. Where a decision went **against** my
+> recommendation, that is stated as such: the record is the decision, not the
+> advice. DECISION-1 additionally acquired three binding engineering
+> constraints, which are discharged in a separate gate document —
+> **`docs/DESIGN-tui-mode.md`** — that must be agreed before any code moves.
+
 ### DECISION-1 · who owns the screen (reopens §3 "inline, no reflow")
 
 **This is the decision that resolves B1, B2, B3, B4, F14, F16, F20 and the
@@ -291,11 +299,54 @@ Kill criterion for (d): if `fullscreen` cannot reach parity on the existing
 `internal/tui` suite plus the new grid tests within its wave, it ships disabled
 behind the setting rather than becoming a second half-correct renderer.
 
+> **ANSWERED 2026-08-20 — (d) dual mode APPROVED.** `regular` for Termux,
+> `fullscreen` for desktop and other compatible terminals. §3's "inline, never
+> alt-screen / no reflow" is therefore **reopened**, and the reopening notice is
+> recorded in `PLAN.md` §3 so the CLOSED marker cannot be read in isolation.
+>
+> The approval came with three constraints, all binding, none optional:
+>
+> 1. **No hard-to-install dependencies, Termux above all.** Prefer what Ishakat
+>    already uses; if `fullscreen` appears to need something new, first prove it
+>    cannot be done with the existing set.
+>    → *Discharged:* `docs/DESIGN-tui-mode.md` §1. Nothing new is added — not a
+>    module, not a build tag, not a C dependency; `go.mod` is untouched by W0,
+>    W1 and W3. The load-bearing fact is that `tea.View.AltScreen` is a plain
+>    `bool` on the value `View()` returns, so `fullscreen` is a field, not a
+>    renderer. pty- and VT-emulator dependencies were considered and **rejected
+>    on Termux grounds specifically**, because a pty means CGO and CGO is exactly
+>    what is already delicate there.
+> 2. **Robust environment detection — and WSL must be able to reach
+>    `fullscreen`.** "WSL = regular" is explicitly *not* an acceptable shortcut.
+>    → *Discharged:* `DESIGN-tui-mode.md` §2–§3. Detection splits into two
+>    orthogonal questions — `Platform` (where the process runs) and `Host` (what
+>    actually draws our bytes) — and **mode is decided by `Host`**, with
+>    `Platform` only as a tie-breaker. WSL under Windows Terminal or tmux gets
+>    `fullscreen`; WSL under bare legacy conhost gets `regular`. 13 worked
+>    scenarios are written out and become the table-driven tests.
+> 3. **Not two fragile implementations.** `regular`/`fullscreen` is a rendering
+>    decision; both paths share one logical conversation state, with no
+>    duplication, corruption or content loss across resize.
+>    → *Discharged:* `DESIGN-tui-mode.md` §4. One `render(state, w, h) -> Frame`
+>    that is **forbidden to know the mode at all**, and a single
+>    `emit(Frame, mode)` that is the only mode-aware function in the tree.
+>    Resize never patches — it rebuilds from state. Six harness assertions pin
+>    this, including shrink→shrink→grow→grow idempotence.
+>
+> The kill criterion above stands unchanged and now applies to the W3 gate.
+
 **Sub-decision 1b:** on `fullscreen` exit, what does the terminal keep? Pi has
 a setting for it (`transcript`). Proposal: print the whole session transcript to
 real scrollback on exit, so a user who leaves the app still has the conversation
 in their terminal — this preserves the practical benefit of inline (grep your
 scrollback afterwards) without paying for it during the session.
+
+> **ANSWERED 2026-08-20 — APPROVED.** On `fullscreen` exit the conversation is
+> dumped to real scrollback. This makes the transcript dump a **correctness
+> requirement, not a nicety**: it is the sixth harness assertion in
+> `DESIGN-tui-mode.md` §4.1 (exit transcript must contain every committed turn,
+> in order, exactly once), and it is part of the W3 gate rather than a follow-up
+> polish item. Config key: `fullscreen_exit_transcript`, default `true`.
 
 ### DECISION-2 · the turn becomes an event stream (changes `RunAgentTurn`'s contract)
 
@@ -332,6 +383,22 @@ changes and not refinements:
    own `Steering mode`/`Follow-up mode` settings (`one-at-a-time` in the
    report's dump) become two config keys rather than hard-coded behaviour.
 
+> **ANSWERED 2026-08-20 — all three consequences APPROVED.**
+>
+> - **Consequence 1** (`ModeBusy` non-modal, `esc` re-scoped) is accepted as a
+>   deliberate change to a documented shortcut (§13). The documentation change
+>   ships **with** the behaviour change, not after it.
+> - **Consequence 2** is accepted, and I am recording it here as a **security
+>   property rather than a design preference**: steering can never approve a
+>   pending tool call, widen autonomy, or cancel a §21.4 invariant. "Just send
+>   the text into the running loop" is the obvious implementation and it would
+>   silently create an approval channel, so this needs a test that *asserts the
+>   negative* — a steering message arriving while a tool call is pending must
+>   leave that call pending. Treated as a W2 gate, not a code-review note.
+> - **Consequence 3** is accepted: the follow-up queue is session state and
+>   survives turn boundaries, with `Steering mode`/`Follow-up mode` as config
+>   keys.
+
 ### DECISION-3 · provider display identity (and the `-m model[provider]` syntax)
 
 **Resolves F11's naming half, and touches F2.**
@@ -355,12 +422,69 @@ Open question for the owner: should the built-in preset `gemini-direct` be
 it keep its id and only gain the label? My recommendation is label-only:
 same visible result, zero migration risk.
 
+> **ANSWERED 2026-08-20 — FULL RENAME, against my recommendation.** The owner's
+> decision: `google` becomes the **real internal identifier**, not a display
+> label. `gemini-direct` → `google` everywhere — migrations, references, tests,
+> config, documentation. Rationale given: *"sigue siendo un proyecto interno y
+> tenemos tiempo para hacerlo correctamente"*. My label-only recommendation is
+> **overruled and withdrawn**; it stays above only as the record of what was
+> considered.
+>
+> Because the id is what configs, refs and session files persist, a rename is a
+> data migration and not a find-and-replace. The plan is therefore:
+>
+> 1. **Permanent read-time alias.** `gemini-direct` resolves to `google` on read,
+>    forever, in `catalog.Resolve` and in every place a provider id is parsed.
+>    This is not a deprecation window — old session JSONL files are historical
+>    records and must stay readable indefinitely.
+> 2. **One-shot write migration**, idempotent and backed up before touching
+>    anything: `config.toml` provider tables and keys, the credentials store
+>    (`internal/config/credentials.go:129`, `ID: "gemini-direct"`), and any
+>    session-index `Ref` that is rewritten in the normal course of use.
+> 3. **Session JSONL is never rewritten in place.** Historical turns keep the id
+>    they were written with; the alias in (1) is what makes them resolve. A
+>    migration that rewrites history is how you corrupt a transcript.
+> 4. **The label from the original proposal still ships** — it is orthogonal, and
+>    it is what makes `model-id [google] TVR ✓` render.
+> 5. **A test asserts the alias, not just the rename**: loading a pre-rename
+>    `config.toml` and a pre-rename session must both still work after migration.
+>
+> Scheduling note: this lands in **W5**, deliberately after the rendering and
+> loop waves. A rename touching config, credentials and session refs is exactly
+> the kind of change that should not be in flight while the renderer is being
+> rebuilt.
+
 ---
 
 ## 4. Sequencing
 
 Each wave states the invariant it establishes. **A wave does not close because
 its features "work"; it closes because its invariant is under test.**
+
+> **APPROVED ORDER 2026-08-20 — W0 → W1 → W3 → W2 → W4 → W5 → W6.**
+> The owner chose the alternative offered in §6.5: **W3 before W2**, i.e. the
+> visual corruption is relieved before the blocked input. Same total cost,
+> different order of relief.
+>
+> Two gating rules were attached, and they are rules rather than intentions:
+>
+> - **W0 stays a test harness.** It does not change behaviour. Its entire job is
+>   to make B1–B4 *fail for the documented reason* before anything is fixed. A
+>   harness written after the fix proves nothing.
+> - **No wave starts until the previous one meets its acceptance criteria and its
+>   tests pass.** Waves are gates, not labels on a backlog.
+>
+> Consequence of W3-before-W2 worth stating out loud: **F8b's payoff is
+> deferred.** Its "expand old code blocks" half needs the owned viewport from W3
+> *and* the event stream from W2, so with this order the rendering half lands
+> first and sits inert until W2 arrives. That is a real cost of the chosen order,
+> accepted knowingly, not an oversight.
+>
+> One more gate precedes W0 entirely: the **pre-implementation documentation
+> gate** demanded by the owner — anything that adds a dependency or changes
+> terminal detection must first be documented as *what is added, why it is
+> necessary, and how it affects Termux install/compile*. That document is
+> `docs/DESIGN-tui-mode.md`. **W0 does not begin until it is agreed.**
 
 ### W0 · Ground truth: a harness that can see a terminal (prerequisite for everything)
 
@@ -501,7 +625,7 @@ six-liner, plus DECISION-3.
 
 ---
 
-## 6. What I need from you before W1
+## 6. What I need from you before W1 — all answered (2026-08-20)
 
 1. **DECISION-1:** approve dual mode (d) — and confirm `fullscreen` as the
    desktop default, `regular` on Termux. If you would rather go straight to
@@ -518,3 +642,22 @@ six-liner, plus DECISION-3.
    harness first, then the loop, then the renderer). The alternative, if the
    visual corruption bothers you more than the blocked input, is
    W0→W1→W3→W2 — same total cost, different order of relief.
+
+---
+
+### 6.1 The answers
+
+| # | Question | Answer | Notes |
+|---|---|---|---|
+| 1 | DECISION-1 dual mode | **APPROVED (d)** | `regular` on Termux, `fullscreen` on desktop/compatible. §3 "inline, no reflow" is formally reopened. Three constraints attached — see the ANSWERED block and `docs/DESIGN-tui-mode.md`. |
+| 2 | DECISION-1b exit transcript | **APPROVED — yes** | Dump the conversation to real scrollback on `fullscreen` exit. Promoted from nicety to a W3 gate assertion. |
+| 3 | DECISION-2 three consequences | **ALL THREE APPROVED** | Consequence 2 is recorded as a security property with a negative-assertion test, not a design preference. |
+| 4 | DECISION-3 label vs rename | **FULL RENAME — against my recommendation** | `google` becomes the real internal id. Permanent read-time alias for `gemini-direct`; one-shot idempotent write migration; session JSONL never rewritten in place. Lands in W5. |
+| 5 | Wave order | **W0→W1→W3→W2→W4→W5→W6** | The alternative, W3 before W2. Waves are gates. W0 must stay a pure harness. F8b's payoff is knowingly deferred. |
+
+**Extra constraint the owner added, not in the original five:** a mandatory
+pre-implementation documentation gate for any new dependency or any change to
+terminal detection — stating what is added, why, and the specific effect on
+Termux install/compile. Answered by `docs/DESIGN-tui-mode.md`, whose headline is
+that **nothing new is added at all**. No wave, W0 included, starts until that
+document is agreed.
