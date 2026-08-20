@@ -17,6 +17,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/mission"
 	"github.com/MichiTrader/ishakat/internal/skills"
 	"github.com/MichiTrader/ishakat/internal/slash"
+	"github.com/MichiTrader/ishakat/internal/termenv"
 	"github.com/MichiTrader/ishakat/internal/theme"
 )
 
@@ -362,6 +363,12 @@ type Root struct {
 	// wide.
 	animMode string
 	cap      theme.Capability
+
+	// tuiMode is Options.TUIMode, carried unchanged (see that field's own
+	// comment for why it has no reader yet as of W3 part 1: /debug is the
+	// first one, added below, purely as a visibility seam ahead of the
+	// render/emit work that will actually act on it).
+	tuiMode termenv.Mode
 
 	// footerItems is ui.footer.items: which footer items to draw and in which
 	// order. Empty means the default order of footerItemOrder.
@@ -740,6 +747,27 @@ type Options struct {
 
 	NoTTY bool
 
+	// TUIMode is DECISION-1(d)'s already-resolved render-mode verdict
+	// (termenv.Detect, run once by internal/app.Run against [ui] tui_mode
+	// and NoTTY above — this package never calls termenv itself, the same
+	// §6.1 rule Cap/Glyphs/Termux already follow: tui does not read the
+	// environment, it is handed the answer). The zero value is
+	// termenv.ModeRegular, which is also termenv.Detect's own "not sure"
+	// default, so a bare Options (every test in this package) keeps
+	// today's inline behaviour with no caller having to think about it.
+	//
+	// Deliberately unused by View()/render() as of W3 part 1: reading it
+	// here is one line, but the line that would actually act on it —
+	// v.AltScreen in view.go — is not written yet, because doing that
+	// before the render/emit seam (docs/DESIGN-tui-mode.md §4) exists would
+	// silently break DECISION-1b's exit-transcript guarantee (see W3 part
+	// 1's own docs/PLAN.md §17 entry for the Bubble Tea insertAbove
+	// mechanics that make this concrete, not hypothetical). Landing the
+	// plumbing now and the behaviour later, in that order, is what keeps
+	// the eventual AltScreen change a one-line, reviewable diff instead of
+	// a change that also has to introduce the field it depends on.
+	TUIMode termenv.Mode
+
 	// Engine is the turn runner (§7.3), already built over a concrete
 	// provider by internal/app.BuildEngine. nil is a supported value and
 	// means "no provider configured": every turn then fails immediately with
@@ -1084,6 +1112,7 @@ func NewRoot(o Options) Root {
 		cfgReasoning:    reasoningModeOr(o.Cfg),
 		animMode:        anim.Mode,
 		cap:             o.Cap,
+		tuiMode:         o.TUIMode,
 		eng:             engineOr(o.Engine),
 		engineFor:       o.EngineFor,
 		loginFor:        o.LoginFor,
