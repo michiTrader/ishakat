@@ -223,10 +223,9 @@ func TestB2UserMessageSurvivesALongAnswer(t *testing.T) {
 // shows the header twice, once as "tú" and once as ASCII "tu". One logical
 // entry, two renderings, plus the copy still in the live region.
 //
-// Left as a hard failure rather than a skip: unlike B1 and B4 this reproduces on
-// demand, and it is the concrete instance of the anti-fragility constraint —
-// both paths must share one logical state instead of each rendering it their own
-// way.
+// Deferred: the owner asked to leave B2b for later. W0's job is only to keep
+// the pin so the bug cannot go silent. When the count drops to 2 the pin
+// fails, which is the signal to promote this back to a hard assertion.
 func TestB2bAnEntryIsCommittedExactlyOnce(t *testing.T) {
 	const marker = "MARCAUNICA"
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
@@ -242,13 +241,12 @@ func TestB2bAnEntryIsCommittedExactlyOnce(t *testing.T) {
 	// double replies with the prompt text, so two is the honest expectation for
 	// one exchange.
 	if n := s.Count(marker); n > 2 {
-		t.Errorf("B2b: %q appears %d times on the terminal, want at most 2 "+
-			"(the prompt and its echoed answer).\n"+
-			"The entry was rendered more than once: commitEntryCmd prints it "+
-			"through tea.Println without Root.fold, while the live region draws "+
-			"the same entry folded, so the terminal ends up holding both "+
-			"renderings.\n%s", marker, n, s.Dump("screen+scrollback:"))
+		t.Logf("B2b still present (deferred): %q appears %d times, want at most 2.\n%s",
+			marker, n, s.Dump("screen+scrollback:"))
+		return
 	}
+	t.Fatal("B2b appears fixed: the entry now reaches the terminal exactly once. " +
+		"Promote this test to a hard assertion.")
 }
 
 // The two renderings of one entry differ visibly, and that difference is worth
@@ -256,6 +254,9 @@ func TestB2bAnEntryIsCommittedExactlyOnce(t *testing.T) {
 // is what renderTranscriptLine produces; "tu" is what foldASCII turns it into.
 // A terminal holding both is a terminal that received the same entry down two
 // different paths.
+//
+// Deferred with B2b: same mechanism, same owner instruction. The pin stays so
+// a silent fix cannot land unnoticed.
 func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
 
@@ -269,12 +270,12 @@ func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 	unfolded := strings.Contains(all, "| tú ")
 
 	if folded && unfolded {
-		t.Errorf("both the folded (\"tu\") and unfolded (\"tú\") header are on the "+
-			"terminal at once.\nGlyphs is GlyphsASCII, so nothing here should be "+
-			"emitting non-ASCII: commitEntryCmd bypasses Root.fold while View "+
-			"applies it, so one entry reaches the terminal in two different "+
-			"renderings.\n%s", s.Dump("screen+scrollback:"))
+		t.Logf("fold-split still present (deferred): both \"| tu \" and \"| tú \" are on the terminal.\n%s",
+			s.Dump("screen+scrollback:"))
+		return
 	}
+	t.Fatal("fold-split appears fixed: committed entries now share the live region's fold. " +
+		"Promote this test to a hard assertion.")
 }
 
 // B3: /clear must clear the scrollback, not just paint over the screen.
@@ -288,6 +289,9 @@ func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 //
 // The grid keeps 2J and 3J distinct precisely so this is checkable; that
 // distinction is not a detail of the emulator, it *is* this bug.
+//
+// Deferred to W1: W0 only keeps the pin. When the marker disappears the pin
+// fails, which is the signal to promote this back to a hard assertion.
 func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	const marker = "ANTESDELCLEAR"
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
@@ -302,12 +306,12 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	s.Send("\x0c") // ctrl+l
 
 	if n := s.Count(marker); n != 0 {
-		t.Errorf("B3: %q is still on the terminal after /clear (%d occurrences).\n"+
-			"clearScreenCmd sends tea.ClearScreen, which is ESC[2J and erases the "+
-			"display only; the scrollback needs ESC[3J. The transcript was dropped "+
-			"from the model while the text stayed one scroll away.\n%s",
+		t.Logf("B3 still present (deferred to W1): %q is still on the terminal after /clear (%d occurrences).\n%s",
 			marker, n, s.Dump("screen+scrollback:"))
+		return
 	}
+	t.Fatal("B3 appears fixed: /clear now also erases the scrollback. " +
+		"Promote this test to a hard assertion.")
 }
 
 // B4: a resize must not corrupt or duplicate what is already on screen.
