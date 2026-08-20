@@ -44,9 +44,10 @@ func TestSubmitPasaAModeBusy(t *testing.T) {
 	if !strings.Contains(m.View().Content, "pensando") {
 		t.Errorf("tras submit debería verse la línea de 'pensando': %q", m.View().Content)
 	}
-	// En ModeBusy el cursor real de terminal se apaga: no hay nada editable.
-	if m.View().Cursor != nil {
-		t.Error("en ModeBusy no debería haber cursor de edición activo")
+	// RC-2: ModeBusy still draws the input box, so the hardware cursor stays
+	// inside it. That is not typing-while-busy (updateBusy still swallows keys).
+	if m.View().Cursor == nil {
+		t.Error("ModeBusy must keep the terminal cursor inside the still-drawn input (RC-2)")
 	}
 }
 

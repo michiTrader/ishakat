@@ -1,6 +1,6 @@
 # Roadmap · the 2026-08-20 UX report, triaged and sequenced
 
-**Status: W0 in progress.** The harness (#183) and B1–B4 regressions (#184) are in; RC-1 is implemented; B2b and B3 remain expected-fail pins (not silent). W1–W6 are still planning only. This document exists to
+**Status: W0 in progress.** The harness (#183) and B1–B4 regressions (#184) are in; RC-1 and RC-2 are implemented; B2b and B3 remain expected-fail pins (not silent). W1–W6 are still planning only. This document exists to
 be argued with before a line of code is written, the same way
 `docs/DESIGN-model-curation.md` was written to be argued with first.
 
@@ -120,7 +120,13 @@ an explicit `quit_repeat = 2`) rather than by writing a chord twice.
 
 ### RC-2 · the cursor is deliberately unset while busy (explains half of **B1**)
 
-`cursorFor` (`internal/tui/view.go:205`) returns `nil` for every mode except
+**Fixed 2026-08-20 (W0).** `cursorFor` now returns the same offset cursor in
+`ModeBusy` as in `ModeChat`; overlays still return `nil`. `updateBusy` still
+swallows keystrokes — showing the cursor in the empty input is not
+typing-while-busy (that is W2). The `/` overflow arithmetic (RC-3) is still
+W1. The diagnosis below is the record of what was wrong.
+
+`cursorFor` (`internal/tui/view.go`) used to return `nil` for every mode except
 `ModeChat`. In Bubble Tea v2 a `tea.View` with no cursor does not move the
 terminal's cursor — it stays wherever the last write left it, which is the end
 of the frame: the input box's bottom border. That is precisely the reported
@@ -132,7 +138,7 @@ The `/` case has a second, independent cause: `cursorFor` offsets by
 while the whole frame fits on screen** (see RC-3). Once it does not, every
 absolute row it computes is wrong by however many rows the terminal has
 scrolled, and opening the dropdown is one of the cheapest ways to push the
-frame past the bottom.
+frame past the bottom. That arithmetic is **not** this fix.
 
 ### RC-3 · there is no "the frame never exceeds the terminal" invariant (explains **B2**, the rest of **B1**)
 
@@ -515,6 +521,10 @@ a renderer bug by reading upstream source.
   `validateKeys`, press counting, help generated from the Map. B2b and B3
   are expected-fail pins, not silent, and are not part of this fix.
 - Fix RC-2 (the cursor always resolves to a real position inside the input).
+  **Done 2026-08-20:** `cursorFor` returns the offset cursor in `ModeBusy` as
+  well as `ModeChat`; overlays still hide it; `updateBusy` still swallows
+  keys. Typing while busy is W2, not this change. B2b and B3 stay expected-fail
+  pins.
 
 **Closes:** F19, half of B1. **Invariant:** every render claim in this document
 is falsifiable by a test that looks at a grid.

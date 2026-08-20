@@ -193,9 +193,18 @@ func (m Root) footerState() FooterState {
 	return st
 }
 
-// cursorFor calcula dónde debe pintarse el cursor real de la terminal: dentro
-// del textarea cuando el input tiene foco, o nil cuando no hay nada que
-// editar (ModeBusy, ModeHelp).
+// cursorFor is where the terminal's real cursor should sit: inside the
+// textarea when the chat input box is on screen, or nil when an overlay
+// has replaced that box (ModeHelp, ModePicker, and the rest of renderRaw's
+// dedicated branches).
+//
+// ModeBusy still draws the input box (renderRaw's default path) even though
+// keystrokes are swallowed (updateBusy). Returning nil here was RC-2: Bubble
+// Tea v2 then leaves the hardware cursor wherever the last write ended,
+// which is the box's bottom border — the reported └──❚────┘, and the reason
+// the cursor appeared to be "taken away" the moment a task started. Showing
+// the cursor in the empty input is not typing-while-busy (that is W2); it is
+// only not taking the cursor away.
 //
 // textarea.Cursor() reports a position relative to the widget's own top-left
 // corner, which the widget documents and which is easy to miss: returning it
@@ -203,7 +212,11 @@ func (m Root) footerState() FooterState {
 // banner — instead of inside the input box. The offset added here is the box
 // origin plus every row drawn above it.
 func (m Root) cursorFor() *tea.Cursor {
-	if m.mode != ModeChat {
+	switch m.mode {
+	case ModeChat, ModeBusy:
+		// The chat input box is on screen. ModeBusy is included on
+		// purpose (RC-2); do not add overlay modes here.
+	default:
 		return nil
 	}
 	c := m.input.Cursor()

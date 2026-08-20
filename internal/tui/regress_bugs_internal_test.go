@@ -409,6 +409,74 @@ func TestRC2CursorResolvesInsideTheInput(t *testing.T) {
 	}
 }
 
+// TestRC2CursorStaysInsideTheInputWhileBusy is the half of RC-2 that the idle
+// test above cannot see. cursorFor used to return nil in every mode except
+// ModeChat; Bubble Tea then left the hardware cursor on the input box's
+// bottom border the moment a turn started. The witness is the busy line:
+// this assertion is only meaningful while "pensando" is still on screen.
+//
+// The engine is gated so the turn cannot finish under us — an ungated echo
+// of a short prompt can drain between WaitFor and Cursor, and the test
+// would then pass for the ModeChat path instead of the ModeBusy one.
+//
+// Typing while busy is W2 and is not enabled here.
+func TestRC2CursorStaysInsideTheInputWhileBusy(t *testing.T) {
+	const w, h = 60, 20
+	root := NewRoot(Options{
+		Version: "0.0.0-test",
+		CWD:     "/home/user/projects/ishakat",
+		Theme:   theme.Load(""),
+		Cap:     theme.CapNone,
+		Glyphs:  theme.GlyphsASCII,
+		NoTTY:   false,
+	})
+	eng, _ := echoEngine(true)
+	s := testterm.Start(t, withEngine(root, eng), w, h)
+
+	s.Type("hola")
+	s.Enter()
+	s.WaitFor("busy line on screen", func(g *testterm.Grid) bool {
+		return g.Contains(busyWitness)
+	})
+
+	if !strings.Contains(strings.Join(s.Lines(), "\n"), busyWitness) {
+		t.Fatalf("RC-2 busy: the turn finished before the cursor could be checked; "+
+			"this test is only meaningful while %q is on screen.\n%s",
+			busyWitness, s.Dump("screen:"))
+	}
+
+	cx, cy := s.Cursor()
+	lines := s.Lines()
+	if cy < 0 || cy >= len(lines) {
+		t.Fatalf("RC-2 busy: cursor row %d is outside the %d-row screen.\n%s",
+			cy, len(lines), s.Dump("screen:"))
+	}
+	if cx < 0 || cx >= w {
+		t.Fatalf("RC-2 busy: cursor column %d is outside the %d-column screen.\n%s",
+			cx, w, s.Dump("screen:"))
+	}
+	line := lines[cy]
+	if strings.Contains(line, busyWitness) {
+		t.Errorf("RC-2 busy: the cursor is on the busy line %q, not the input.\n%s",
+			line, s.Dump("screen:"))
+	}
+	if strings.Contains(line, "hola") {
+		t.Errorf("RC-2 busy: the cursor is on row %d (%q), which still holds the "+
+			"submitted text.\n%s", cy, line, s.Dump("screen:"))
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "+-") {
+		t.Errorf("RC-2 busy: the cursor is on the box border %q.\n"+
+			"That is the reported └──❚────┘: Bubble Tea left it where the last write ended.\n%s",
+			line, s.Dump("screen:"))
+	}
+	if !strings.Contains(line, ">") {
+		t.Errorf("RC-2 busy: the cursor is on row %d (%q), which is not the input line.\n"+
+			"The cursor was taken away the moment the task started.\n%s",
+			cy, line, s.Dump("screen:"))
+	}
+}
+
 // TestTheEchoEngineActuallyAnswers is a guard for the tests above rather than a
 // bug regression. Every one of them depends on the echo double actually
 // answering; if it stopped being wired in, or if the wait stopped waiting for
@@ -429,6 +497,4 @@ func TestTheEchoEngineActuallyAnswers(t *testing.T) {
 	}
 }
 
-// Root must still satisfy tea.Model for testterm.Start to accept it, as a build
-// error rather than a confusing runtime failure.
 var _ tea.Model = Root{}
