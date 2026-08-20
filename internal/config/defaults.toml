@@ -43,6 +43,14 @@ layout = "auto"
 max_width = 100
 color = "auto"
 glyphs = "auto"
+# tui_mode: auto | regular | fullscreen — see docs/DESIGN-tui-mode.md §5.
+# "auto" detects the terminal (`ishakat doctor` shows the reason); Termux
+# always lands on "regular" regardless of what the host otherwise looks like.
+tui_mode = "auto"
+# fullscreen only: print the whole conversation to the terminal's own
+# scrollback on exit, so nothing said while the alternate screen was up is
+# lost. Ignored in "regular".
+fullscreen_exit_transcript = true
 
 [ui.animations]
 mode = "auto"

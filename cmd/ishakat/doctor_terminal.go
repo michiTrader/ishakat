@@ -6,8 +6,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
+
 	"github.com/MichiTrader/ishakat/internal/agentsmd"
 	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/termenv"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tui"
 	"github.com/MichiTrader/ishakat/internal/xdg"
@@ -25,15 +28,22 @@ import (
 // from the outside. Now there is, and every line names both the value and its
 // cause, so the next report can arrive with the diagnosis already in it.
 func reportTerminal(w io.Writer, cfg *config.Config) {
-	colorOverride, glyphOverride := "", ""
+	colorOverride, glyphOverride, tuiModeOverride := "", "", ""
 	if cfg != nil {
 		colorOverride, glyphOverride = cfg.UI.Color, cfg.UI.Glyphs
+		tuiModeOverride = cfg.UI.TUIMode
 	}
 
 	// The diagnosis is asked about stdout, not about stderr or a guess: whether
 	// there is a terminal at all is the one question the environment cannot
 	// answer, and a redirected stdout legitimately gets no colour.
 	d := theme.Diagnose(colorOverride, glyphOverride, os.Stdout)
+
+	// Same question, same writer, the other axis: DECISION-1(d)'s regular vs
+	// fullscreen. It is asked separately from theme.Diagnose because it is a
+	// genuinely different decision — see internal/termenv's own doc comment
+	// for why "WSL" alone is never the answer.
+	tm := termenv.Detect(tuiModeOverride, isTerminalWriter(os.Stdout))
 
 	if cwd, err := os.Getwd(); err == nil {
 		// The display form, not the raw path: this is the exact string the
@@ -43,6 +53,7 @@ func reportTerminal(w io.Writer, cfg *config.Config) {
 	}
 	fmt.Fprintf(w, "  color        %-14s %s\n", d.Color, d.ColorReason)
 	fmt.Fprintf(w, "  glyphs       %-14s %s\n", d.Glyphs, d.GlyphsReason)
+	fmt.Fprintf(w, "  tui_mode     %-14s %s\n", tm.Mode, tm.Reason)
 
 	if set := d.Set(); len(set) > 0 {
 		pairs := make([]string, 0, len(set))
@@ -54,6 +65,17 @@ func reportTerminal(w io.Writer, cfg *config.Config) {
 		// An empty environment is not a boring case: it is the signature of a
 		// console host, and the reason the ASCII look is chosen on Windows.
 		fmt.Fprintf(w, "  signals      none set\n")
+	}
+	// tui_mode's own signals are a mostly-disjoint set from theme's (TMUX,
+	// WT_SESSION as a multiplexer/Windows-Terminal host hint rather than a
+	// colour hint, WSL_DISTRO_NAME, CI, ...), so they get their own line
+	// rather than being folded into "signals" above and silently dropped.
+	if set := tm.Set(); len(set) > 0 {
+		pairs := make([]string, 0, len(set))
+		for _, s := range set {
+			pairs = append(pairs, s.Name+"="+s.Value)
+		}
+		fmt.Fprintf(w, "  tui signals  %s\n", strings.Join(pairs, "  "))
 	}
 
 	fmt.Fprintln(w)
@@ -67,13 +89,26 @@ func reportTerminal(w io.Writer, cfg *config.Config) {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
 
-	if len(d.Advice) > 0 {
+	advice := append([]string{}, d.Advice...)
+	advice = append(advice, tm.Advice...)
+	if len(advice) > 0 {
 		fmt.Fprintln(w)
-		for _, line := range d.Advice {
+		for _, line := range advice {
 			fmt.Fprintf(w, "  note: %s\n", line)
 		}
 		fmt.Fprintf(w, "  note: config.toml is at %s\n", xdg.ConfigFile())
 	}
+}
+
+// isTerminalWriter answers whether w is a real terminal, the same duck-typed
+// Fd() check internal/theme's own unexported helper of the same name uses —
+// duplicated rather than exported, because internal/termenv must not import
+// internal/theme (see internal/arch_test.go's TestTermenvStaysPure) and a
+// three-line predicate is cheaper than a shared micro-package neither side
+// otherwise needs.
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(f.Fd())
 }
 
 // reportAgentsMD prints Step 18's three AGENTS.md paths and which of them
