@@ -75,6 +75,14 @@ func TestNoOverflowAtCriticalWidths(t *testing.T) {
 			r.mode = ModeHelp
 			assertNoOverflow(t, "pantalla de ayuda", r, width)
 
+			// ModeHotkeys is F3's own dedicated screen (hotkeys.go),
+			// reached the same way as ModeHelp above — it reuses
+			// helpShortcuts()'s own rows, so any width regression there
+			// would show up here too.
+			rh := tm.(Root)
+			rh.mode = ModeHotkeys
+			assertNoOverflow(t, "pantalla de atajos (roadmap F3)", rh, width)
+
 			// ModeMission's own dialog (§21.6, Step 31 part 2, mission.go)
 			// draws a compiled rule line per capability
 			// ("bash    **playwright**   deny") whose fixed-width

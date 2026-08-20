@@ -87,6 +87,9 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		m.mode = ModeHelp
 		m.help = true
 		return m, nil
+	case slash.KindHotkeys:
+		m.mode = ModeHotkeys
+		return m, nil
 	case slash.KindClear:
 		// Same effect as ctrl+l (handleGlobalKey): only the screen (and, per
 		// RC-3/B3, the real scrollback) is wiped — the conversation itself,

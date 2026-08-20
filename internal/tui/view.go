@@ -154,6 +154,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeHelp {
 		return m.renderHelp()
 	}
+	if m.mode == ModeHotkeys {
+		return m.renderHotkeys()
+	}
 	if m.mode == ModePicker {
 		return m.renderPicker()
 	}
