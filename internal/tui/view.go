@@ -6,25 +6,105 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/MichiTrader/ishakat/internal/termenv"
 )
 
 // View satisface tea.Model. En v2 View() devuelve tea.View, no un string
-// (§7.2). El modo inline es simplemente no activar AltScreen: conservamos el
-// scrollback real del terminal en vez de tomar la pantalla completa.
+// (§7.2).
+//
+// This is docs/DESIGN-tui-mode.md §4 Rule 2's split, made literal:
+//
+//	render(state, width, height) -> Frame     // shared. no mode awareness.
+//	emit(Frame, mode)            -> tea.View  // the ONLY mode-aware function.
+//
+// View itself does neither: it calls render() to get the mode-blind Frame,
+// then hands that Frame plus m.tuiMode to emit, which is the one function in
+// this package allowed to look at the mode at all. That is what makes the
+// eventual fullscreen behaviour (owning AltScreen, its own scrollback, its
+// own resize repair) a change confined to emit's fullscreen branch, instead
+// of a change that has to go hunt down every place mode-awareness leaked
+// into — which is exactly the "two frágil renderers" the owner's constraint
+// (quoted in §4) rules out.
 func (m Root) View() tea.View {
-	var v tea.View
-	v.SetContent(m.render())
-	v.AltScreen = false
-	v.MouseMode = tea.MouseModeNone
-	v.Cursor = m.cursorFor()
-	return v
+	return emit(Frame{Content: m.render()}, m.tuiMode, m.cursorFor())
 }
 
 // render arma la región viva completa: banner (solo al arranque, cuando no
 // hay transcript todavía), transcript comprometido, turno vivo si lo hay, y
-// la caja de entrada con el footer.
+// la caja de entrada con el footer. Frame's Width mirrors m.lay.Width so
+// emit can re-derive AltScreen's window without importing Layout itself
+// (see Frame's own doc comment).
+//
+// This function, and everything it calls (renderRaw, head, clampFrameWidth,
+// fold, and every layout helper in footer.go/input.go/etc.), is Rule 2's
+// "lives above the seam" half: none of them take or read a termenv.Mode.
+// grep confirms this rather than asserting it — m.tuiMode has exactly two
+// readers in the whole package as of this commit: View (above) and
+// debugcmd.go's /debug line, neither of which is on this call path.
 func (m Root) render() string {
 	return clampFrameWidth(m.fold(m.renderRaw()), m.lay.Width)
+}
+
+// Frame is render's mode-blind output: what the frame looks like, with
+// nothing yet said about how — or whether — it reaches the real terminal.
+// It is a thin wrapper around a string today rather than a cell grid,
+// deliberately: Rule 2 only requires that render and emit be two functions
+// with no mode leaking into the first one, not that the shared type be
+// richer than what render already produces. Growing Frame into something
+// emit's fullscreen branch can repaint cell-by-cell (rather than re-run
+// render() wholesale on every resize, which is what Rule 3 already asks for
+// and is sufficient for a first cut) is deferred until that branch actually
+// needs it — introducing the richer shape before there is a second
+// consumer of it would be exactly the kind of speculative structure §4
+// warns against.
+type Frame struct {
+	// Content is render's output: the width-clamped, glyph-folded string
+	// View() used to pass to v.SetContent directly.
+	Content string
+}
+
+// emit is Rule 2's only mode-aware function. It takes the Frame render()
+// built with no knowledge of the mode, and decides how it reaches the real
+// terminal.
+//
+//   - regular: unchanged from before this split — AltScreen stays false, so
+//     Bubble Tea's inline renderer keeps the terminal's own scrollback and
+//     text selection working, and evictOverflow (root.go)/commitEntryCmd
+//     (chat.go) go on being what permanently commits a line via
+//     tea.Println. That is "printed means final" (§4, regular's own rule),
+//     and none of it changes here.
+//   - fullscreen: NOT YET IMPLEMENTED. Per docs/DESIGN-tui-mode.md §4, this
+//     branch is where AltScreen would become true and where this package
+//     would start owning its own scrollback/viewport instead of relying on
+//     tea.Println. That is real, unwritten behaviour — a resize-repair
+//     strategy, DECISION-1b's exit transcript, and the six §4.1 harness
+//     assertions in fullscreen all have to land together per the roadmap's
+//     "no wave closes piecemeal" rule — so for now this branch falls
+//     through to the exact same regular behaviour rather than flipping
+//     AltScreen on a renderer that cannot yet repaint what that implies.
+//     Landing the seam now and the fullscreen behaviour later, in that
+//     order, is what keeps that eventual change a diff confined to this one
+//     branch instead of a diff that also has to introduce the seam it
+//     needs. See Options.TUIMode's and Root.tuiMode's own doc comments
+//     (root.go) for the identical reasoning already applied to the
+//     detection wiring itself.
+func emit(f Frame, mode termenv.Mode, cursor *tea.Cursor) tea.View {
+	var v tea.View
+	v.SetContent(f.Content)
+	v.MouseMode = tea.MouseModeNone
+	v.Cursor = cursor
+	switch mode {
+	case termenv.ModeFullscreen:
+		// TODO(W3): own scrollback + AltScreen=true once the fullscreen
+		// resize-repair strategy exists. See this function's own doc
+		// comment for why that is a deliberate, separate slice and not an
+		// oversight.
+		v.AltScreen = false
+	default:
+		v.AltScreen = false
+	}
+	return v
 }
 
 // clampFrameWidth is RC-5's width invariant: no line render() returns is ever

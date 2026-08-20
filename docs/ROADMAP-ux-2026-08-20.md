@@ -597,7 +597,7 @@ platform default.
 
 **Closes:** B4, F14, F16, F3 fully.
 
-> **Status (2026-08-20): W3 in progress, not closed — parts 1-2 landed.**
+> **Status (2026-08-20): W3 in progress, not closed — parts 1-3 landed.**
 > `internal/termenv` (the detection package `docs/DESIGN-tui-mode.md` §2
 > specifies) was already built and merged as part of W0, fully passing its
 > own 12+-scenario table from §3.4. Part 1 wired it into config and
@@ -610,15 +610,23 @@ platform default.
 > `termenv.Detect` once (reusing the same TTY answer `NoTTY` already
 > computed) and hands the result into a new `tui.Options.TUIMode` field,
 > wired into `Root.tuiMode` and surfaced by `/debug`'s `[terminal]` section
-> for in-session confirmation. **Deliberately not done yet:** `view.go`'s
-> `View()` still hardcodes `AltScreen = false` unconditionally; `tuiMode`
-> has no reader that changes what gets drawn. Flipping `AltScreen` without
-> first building the render/emit seam (§4 Rule 2) would silently break
-> DECISION-1b's exit-transcript promise the moment eviction met the
-> alternate screen's own non-persistent buffer — exactly the "second
-> half-correct renderer" the wave's own kill criterion forbids. F14/F16/F3
-> are untouched. See `docs/PLAN.md` §17, 2026-08-20 "W3 (part 2)" (and
-> "W3 (part 1)" below it) for the full detail.
+> for in-session confirmation. Part 3 built §4 Rule 2's render/emit seam:
+> `internal/tui/view.go` now has a `Frame` type and an `emit(Frame, mode,
+> cursor) tea.View` function — the only function in the package with a
+> `termenv.Mode` parameter — with `View()` shrunk to
+> `emit(Frame{Content: m.render()}, m.tuiMode, m.cursorFor())`. `render()`
+> itself needed no change: it was already mode-blind, which the new
+> `TestRenderIsModeInvariant` now confirms by asserting byte-identical output
+> from a regular/fullscreen pair driven through an identical script.
+> **Deliberately not done yet:** `emit`'s `fullscreen` branch still falls
+> through to `AltScreen = false` — a documented stub, not an oversight.
+> Turning it into `true` needs its own scrollback/viewport, a resize-repair
+> strategy (Rule 3), and DECISION-1b's exit-transcript flush, none of which
+> exist yet; doing it without those would silently break the exit-transcript
+> promise the moment eviction met the alternate screen's own non-persistent
+> buffer — exactly the "second half-correct renderer" the wave's own kill
+> criterion forbids. F14/F16/F3 are untouched. See `docs/PLAN.md` §17,
+> 2026-08-20 "W3 (part 3)" (and parts 2/1 below it) for the full detail.
 
 ### W4 · The model surface stops being noise
 
