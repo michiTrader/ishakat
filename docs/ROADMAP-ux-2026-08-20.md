@@ -1,0 +1,520 @@
+# Roadmap · the 2026-08-20 UX report, triaged and sequenced
+
+**Status: planning only. Nothing here is implemented.** This document exists to
+be argued with before a line of code is written, the same way
+`docs/DESIGN-model-curation.md` was written to be argued with first.
+
+It takes one long report — 4 rendering bugs plus ~20 feature requests, most of
+them phrased as "Pi does this and I want it" — and turns it into: an inventory
+with stable IDs, the root causes that are **already located in this codebase**
+(with file/line evidence, so the next session does not re-investigate), three
+architectural decisions that need the owner's explicit approval because they
+contradict decisions marked **CLOSED** in `docs/PLAN.md` §3, and a wave-by-wave
+implementation order with closing criteria.
+
+The report's own framing is taken at face value and it changes the shape of the
+answer: *"no quiero cambios superficiales, si hay que cambiar arquitectura o
+cambiar cosas de raíz estoy dispuesto a pagar el costo"*. So the sequencing
+below is **not** "cheapest first". It is "the thing that unblocks the most
+other things first, even when that thing is a refactor".
+
+Companion reading: `docs/PLAN.md` §3 (closed decisions — two of them are
+reopened here, explicitly, per §0.2's rule), §7 (the Bubble Tea loop), §9 (the
+wireframes and breakpoints), §12bis (the tool loop), §13 (the command surface),
+§21 (autonomy/phase — steering touches it), and `docs/DESIGN-model-curation.md`
+(already-designed, still-unimplemented catalog curation, which wave W4 finally
+implements).
+
+---
+
+## 0. How to read this
+
+- **B1–B4** are the reported bugs, in the report's own numbering.
+- **F1–F20** are the feature requests, numbered by order of appearance.
+- **RC-1…RC-9** are root causes located during triage. Each names the file and
+  the mechanism. Several requests collapse onto one RC — that is the whole
+  point of triaging before building.
+- **DECISION-1…3** are the three things I will not decide alone.
+- **W0–W6** are the waves. A wave is not a sprint: it is a set of changes that
+  share one invariant, and it closes when that invariant is tested.
+
+One rule inherited from `AGENTS.md` and worth restating because this backlog is
+long: **no quick fixes.** Every item below is either done properly (the
+invariant is stated, the test harness can see it, the closing criterion is
+verifiable) or it is not done and says so.
+
+---
+
+## 1. Inventory
+
+### 1.1 Bugs
+
+| ID | Report | Symptom | Group | Severity |
+|---|---|---|---|---|
+| **B1** | bug 1 | The hardware cursor leaves the input box and gets drawn on the box's bottom border once the frame fills the terminal, and also when the `/` dropdown opens. Typing still works. | render | **P0** — the app looks broken while being functional |
+| **B2** | bug 2 | A long answer "eats" earlier history: the user's own message stops being visible. | render | **P0** |
+| **B3** | bug 3 | `/clear` and `ctrl+l` repaint a clean UI but the old session is still in the terminal's scrollback. It never truly clears. | render | **P1** |
+| **B4** | bug 4 | Changing the terminal **width** duplicates, fragments and truncates the visible conversation (banner printed 6+ times, half-lines interleaved). Growing the window back does **not** repair it. | render | **P0** |
+
+### 1.2 Feature requests
+
+| ID | Report | Ask | Group | Priority |
+|---|---|---|---|---|
+| **F1** | installer | One-line installer with a branded UI (`irm …/install.ps1 \| iex` on PowerShell), then plain `ishakat` on PATH | distribution | P3 |
+| **F2** | `/login` | In-session login that applies **hot** (no restart, no `--refresh`), and that offers omniroute among the choices | providers | P2 |
+| **F3** | `/hotkeys` | A shortcuts screen; keep our ESC-dismissable overlay style (better than Pi's, which dirties the transcript); **and** overlays must open while the agent is working, without blocking input | UI surface | P1 |
+| **F4** | `/settings` | Interactive settings editor: searchable list, per-item description, live apply, persist | config | P2 |
+| **F5** | scoped-models | Enable/disable which models appear in `/model` and in `ctrl+p` cycling; `ctrl+s` saves; a disabled row is dimmed **entirely**, not just its `✓`/`✗` | catalog | P2 |
+| **F6** | subagents | Keep/extend sub-agents; decide whether the surface is "extensions" | agent | P3 |
+| **F7** | steering | The input must stay usable — and keep the cursor — while the agent works | loop | **P0** |
+| **F8** | thinking | (a) reasoning streams **live** during a tool-enabled turn; (b) **one** command/chord expands & collapses reasoning *and* code blocks together, like Pi | loop + render | P1 |
+| **F9** | `/effort` | Effort/thinking-level picker, a chord to cycle it, and a headless-equivalent flag | model surface | P2 |
+| **F10** | `provider add` | Default to **not** verifying (`--verify` becomes the opt-in) | CLI | P1 (cheap) |
+| **F11** | `/model` rows | `name [provider] TVR ✓` — short provider label (`google`, not `gemini-direct`), dimmed, no `models/`/`gemini/` prefix noise, price/detail for the highlighted row, "catalogs refreshed" notice; plus a CLI selector like `-m gemini-3.6-flash[omniroute]` | catalog | P2 |
+| **F12** | `/name` | `/name [text]` names the session | session | P3 (cheap) |
+| **F13** | steering/queue | Mid-turn steering messages (the running task takes them into account), `alt+enter` queues follow-ups, `alt+up` edits the queue | loop | P1 |
+| **F14** | responsive | Use the whole terminal at any size; the footer must **reflow**, not silently drop information when narrow | render | P1 |
+| **F15** | spinner | Prefer `⠴ Working...` over the current animation | cosmetic | P3 (cheap) |
+| **F16** | input box | Keep our box style, but let it expand to the full width | render | P2 |
+| **F17** | `/reload` | Reload keybindings, skills, prompts, themes, context files | config | P2 |
+| **F18** | `@` | `@` autocompletes a path to reference a file | UI surface | P2 |
+| **F19** | `ctrl+c` ×2 | Double `ctrl+c` must actually exit (it does not), plus an audit of every other advertised chord | keys | **P0** (cheap) |
+| **F20** | breathing room | One blank row between the footer and the bottom edge of the terminal | render | P3 (cheap) |
+
+Two asides from the report that are **already true today** and must not be
+regressed while doing the above: `/help` is an overlay that ESC dismisses
+instead of a transcript dump (the report calls this better than Pi), and the
+input box's own `┌ │ └` style is liked as-is.
+
+---
+
+## 2. Root causes already located
+
+These are findings, not guesses. Each one was read out of the current tree.
+
+### RC-1 · `ctrl+c` ×2 is dead in any real run (explains **F19**)
+
+`internal/config/defaults.toml:67` ships `quit = "ctrl+c ctrl+c"`, and
+`internal/tui/keys.go`'s `NewMap` copies that string verbatim into `Map.Quit`.
+`handleGlobalKey` (`internal/tui/root.go:1431`) compares it against
+`keyPressString(msg)`, which is `tea.KeyPressMsg.String()`
+(`internal/tui/input.go:124`) — a **single chord**, i.e. `"ctrl+c"`. The
+two-chord string can therefore never match, so with a real config loaded the
+Quit branch is unreachable: no grace window, no exit, and `ctrl+c` also stops
+cancelling a turn.
+
+Why the suite is green: `newTestRoot` (`internal/tui/root_test.go:14`) builds
+`Options` **without** `Cfg`, so `NewRoot` never calls `NewMap` and the tests
+exercise `defaultMap` (`Quit: "ctrl+c"`), which works. The bug lives exactly in
+the gap between the default map and the shipped defaults file.
+
+Scope of the fix is bigger than one string: **every** `[keys]` default needs to
+be validated as a chord this build can actually produce, and the double-press
+semantic needs to be expressed as data (`quit = "ctrl+c"` + a repeat count, or
+an explicit `quit_repeat = 2`) rather than by writing a chord twice.
+
+### RC-2 · the cursor is deliberately unset while busy (explains half of **B1**)
+
+`cursorFor` (`internal/tui/view.go:205`) returns `nil` for every mode except
+`ModeChat`. In Bubble Tea v2 a `tea.View` with no cursor does not move the
+terminal's cursor — it stays wherever the last write left it, which is the end
+of the frame: the input box's bottom border. That is precisely the reported
+`└──❚────┘`, and it is also why the report says the cursor is "taken away" the
+moment a task starts.
+
+The `/` case has a second, independent cause: `cursorFor` offsets by
+`headRows(m.head()) + headRows(m.slashMenuBlock())`, which is correct **only
+while the whole frame fits on screen** (see RC-3). Once it does not, every
+absolute row it computes is wrong by however many rows the terminal has
+scrolled, and opening the dropdown is one of the cheapest ways to push the
+frame past the bottom.
+
+### RC-3 · there is no "the frame never exceeds the terminal" invariant (explains **B2**, the rest of **B1**)
+
+`evictOverflow` (`internal/tui/root.go:2166`) is the only guard, and it has two
+holes it documents itself:
+
+- it stops at `keepInline = 2` (`root.go:2146`), so once the last two entries
+  alone are taller than the terminal, nothing can shrink the frame;
+- it evicts **whole transcript entries** only, and a live turn's own growing
+  body is not an entry at all — a single long streaming answer overflows with
+  nothing to evict.
+
+Bubble Tea's inline renderer repaints by moving the cursor up as many rows as it
+believes it drew. A frame taller than the screen breaks that belief permanently,
+which is the mechanism `evictOverflow`'s own comment (`root.go:2154`) already
+describes — it just was not given enough authority to enforce it. Missing
+invariant, stated plainly:
+
+> **The rendered frame is never taller than `lay.Height`.** Whatever does not
+> fit is committed to scrollback or clipped by the live region, never emitted.
+
+`B2`'s "my message disappeared" is this invariant being violated: the frame is
+taller than the screen, so the top of it (the user's own bubble) is scrolled
+away by the terminal, and the renderer's next repaint overwrites rather than
+restores it.
+
+### RC-4 · `/clear` clears the frame, never the scrollback (explains **B3**)
+
+Both `ctrl+l` (`root.go:1473`) and `/clear` (`internal/tui/slashrun.go:89`)
+drop `m.transcript`, reset `printedUpTo` and return `clearScreenCmd`
+(`root.go:1910`), i.e. `tea.ClearScreen`. That erases the *visible screen*; it
+does not touch the terminal's saved scrollback, and everything
+`commitEntryCmd`/`tea.Println` printed lives exactly there — by design (§3:
+"printed means final"). So `/clear` cannot remove it: the mechanism that makes
+old turns scrollable is the same mechanism that makes them unclearable.
+
+Two honest options, and the choice belongs in DECISION-1: emit an explicit
+scrollback-erase (`ESC[3J`) alongside the screen clear, which is what the report
+actually expects; or keep scrollback and rename the command's promise. Anything
+in between is the current state, which the report correctly calls "parece que
+borra pero no borra".
+
+### RC-5 · width changes cannot be repaired under §3 (explains **B4**)
+
+`docs/PLAN.md` §3 closes this: *"already-printed lines do not re-wrap when the
+terminal width changes"*, reaffirmed 2026-08-03 with option (b) (reflow the live
+region only) explicitly rejected. `updateDispatch`'s `WindowSizeMsg` branch
+(`root.go:1258`) does the only thing that decision allows: rebuild `Layout`,
+re-apply the input prefix/width, repaint the live region. Everything already
+printed keeps its old wrapping.
+
+But the report shows something worse than stale wrapping: **duplication that
+survives growing the window back**, and a banner printed six times. That is the
+renderer's row accounting drifting — a line emitted wider than the *physical*
+terminal width gets wrapped by the terminal into 2 rows while the renderer
+counted 1, so its next up-move lands mid-frame and it repaints over live text
+instead of replacing it. Contributors currently in the tree:
+
+- `ContentWidth()` (`internal/tui/layout.go:99`) caps prose at
+  `ui.max_width = 100` in `BPAncho` but the frame is measured in
+  `renderRaw`/`headRows` by counting `\n` only (`root.go:2174`) — nothing
+  asserts "no emitted line is wider than `lay.Width`";
+- the start-up banner is both re-rendered by `head()` while the transcript is
+  empty **and** printed to real scrollback by `submit`/`startAgentTurn`
+  (`agentturn.go:112`, and the whole `banner_clear_internal_test.go` file is
+  archaeology about that interaction) — two producers of the same rows is
+  exactly the shape of "banner ×6";
+- an upstream inline-renderer erase bug was already hit once here and fixed by
+  pinning `charm.land/bubbletea/v2@faf4dcf` (§17, 2026-08-18). The same class
+  of defect is plausible again on width shrink, and this time we should be able
+  to **prove** it locally rather than by reading upstream source (see W0).
+
+**Conclusion:** B4 is not fixable as a bug. It is the accepted trade-off of a
+CLOSED decision, and the report is a request to reopen that decision — which is
+DECISION-1.
+
+### RC-6 · the tool loop blocks, so the UI has nothing to show and nothing to accept (explains **F7**, **F8a**, **F13**, half of **F3**)
+
+`RunAgentTurn` (`internal/engine/agentloop.go:174`) runs the whole
+model→tools→model cycle and returns once, and its own doc comment says the
+streaming path "will wrap each iteration's channel drain around its own
+StreamBuf" — which was never built. `agentTurnCmd` (`internal/tui/agentturn.go`)
+therefore hands Bubble Tea a single blocking `tea.Cmd`, and the UI's only live
+signal for the whole turn is `tickAnim`. Consequences, all reported:
+
+- reasoning appears in one lump at the end (`finishAgentTurn` reads
+  `result.Reasoning`), never "being written";
+- `updateBusy` (`root.go:1753`) swallows every key except Cancel, so the input
+  is inert while working;
+- there is no seam at which a steering message could be injected between
+  iterations, so **F13 is not implementable at all** on today's contract.
+
+Note the plain-streaming path (`m.eng.Start` + `StreamBuf` + `drainStream`,
+`root.go:1919`) already does live reasoning correctly. The refactor is about
+giving the agent path the same eventing, not about inventing it.
+
+### RC-7 · the footer drops information instead of reflowing (explains **F14**)
+
+`RenderFooter` (`internal/tui/footer.go:68`) joins the items and then **removes
+items right-to-left** until the line fits. That is why the report's narrow
+terminal lost `context/tokens/cost/cwd` entirely. Pi wraps instead. The fix is a
+layout policy (wrap to N rows, then abbreviate, then drop) plus the same
+"content adapts, information survives" rule applied to the help/hotkeys tables
+the report praises (`renderHelp` uses a hard-coded `helpWidth = 38`,
+`view.go:249`).
+
+### RC-8 · the picker shows the wire id, not a human label (explains **F11**)
+
+Rows are built from the catalog `Ref` — `provider_id` + `/` + the provider's own
+model id — so Google's OpenAI-compat shim yields
+`gemini-direct/models/gemini-3.6-flash`: two redundant path segments and a
+provider id nobody would choose to read. Meanwhile `capsLabel`
+(`internal/tui/picker.go:573`) already computes exactly the `TVR` badge the
+report asks for, and `pickerMetaLine` already has context/cost/latency. So F11
+is mostly *re-arranging information we already compute* plus one genuinely new
+piece of data: a short, human provider label — which is DECISION-3.
+
+### RC-9 · the curation design is written and unbuilt (explains **F5**, and the "discontinued models" noise behind it)
+
+`docs/DESIGN-model-curation.md` is `Status: design only`, and its §1.1 finding
+still holds: `hide_deprecated = true` is already the default and already
+honoured, but nothing ever *tags* a model deprecated because
+`internal/catalog/modelsdev.go` does not parse models.dev's `status` field. Six
+lines fix the flag; the scoped-models UI the report wants sits on top of it. W4
+implements that document rather than re-designing it.
+
+---
+
+## 3. The three decisions
+
+### DECISION-1 · who owns the screen (reopens §3 "inline, no reflow")
+
+**This is the decision that resolves B1, B2, B3, B4, F14, F16, F20 and the
+"expand old code blocks" half of F8b.** It is marked CLOSED twice in §3, so per
+§0.2 it is not changed on my own initiative — it is put here, with costs.
+
+What §3 bought by choosing inline: native phone scrolling, native text
+selection for copy/paste, and the invariant "printed means final", which
+several code paths lean on. What it cost, now all four visible in one report:
+no reflow on width change (B4), no real clear (B3), and a frame that can exceed
+the screen and desynchronise the renderer (B1, B2).
+
+| Option | What it is | Verdict |
+|---|---|---|
+| **(a) status quo** | keep inline; fix only what inline allows | ❌ leaves B4 permanently broken and B3 renamed rather than fixed |
+| **(b) inline, hardened** | enforce the frame-height invariant (RC-3), a frame-width invariant (RC-5), a single banner producer, real `ESC[3J` on clear | ✅ **do this regardless** — it is W0/W1, and it is a prerequisite for everything else, but it does not give reflow |
+| **(c) alt-screen + owned viewport** | take the screen, keep our own scrollback and scroll keys, reflow everything on resize | ⚠️ gives every reported behaviour, costs native scroll + mouse selection on Termux — the two things §3 refused to pay |
+| **(d) dual mode** | `[ui] tui_mode = "regular" \| "fullscreen"`: `regular` = (b), `fullscreen` = (c); default by platform (Termux → regular, desktop → fullscreen) | ✅ **recommended** |
+
+Recommendation: **(d)**, and note it is what Pi itself does — the report's own
+`/settings` dump contains `TUI mode regular` and `Fullscreen exit output
+transcript`. It keeps §3's promise on the platform §3 was written for (a phone),
+gives the desktop the reflowing, clearable, fully-responsive UI the report is
+asking for, and makes the trade-off a user-visible setting instead of a hidden
+architectural constraint. Cost, stated honestly: two render paths to keep
+correct, which is only affordable **because** W0 builds a test harness that can
+see a real terminal grid (below). Without that harness, (d) is how you get two
+sets of B4.
+
+Kill criterion for (d): if `fullscreen` cannot reach parity on the existing
+`internal/tui` suite plus the new grid tests within its wave, it ships disabled
+behind the setting rather than becoming a second half-correct renderer.
+
+**Sub-decision 1b:** on `fullscreen` exit, what does the terminal keep? Pi has
+a setting for it (`transcript`). Proposal: print the whole session transcript to
+real scrollback on exit, so a user who leaves the app still has the conversation
+in their terminal — this preserves the practical benefit of inline (grep your
+scrollback afterwards) without paying for it during the session.
+
+### DECISION-2 · the turn becomes an event stream (changes `RunAgentTurn`'s contract)
+
+**Resolves F7, F8a, F13, and the "overlays while working" half of F3.**
+
+Proposal: `RunAgentTurn` keeps its blocking form for headless/serve (it is the
+§12bis closing criterion and internal/app depends on it), and grows a streaming
+sibling that emits, per iteration: reasoning deltas, text deltas, tool-call
+start/end, usage, phase changes, and an **injection point** where the runtime
+may add a message before the next model call. The TUI uses only the streaming
+form; the existing `StreamBuf` is the model for the buffering discipline
+(coalesce at 50 ms, §7.3) so the UI does not get one message per token.
+
+Three consequences the owner should agree to, because they are contract
+changes and not refinements:
+
+1. **`ModeBusy` stops being modal.** The input stays focused and editable, the
+   cursor stays in the box (RC-2), overlays (`/help`, `/stats`, `/theme`,
+   `/hotkeys`, `/settings`) open on top of a running turn, and `esc` keeps
+   meaning cancel only while the input is empty — otherwise `esc` clears the
+   editor, and cancellation moves to a chord that cannot be typed by accident
+   mid-sentence. This is a keyboard-semantics change to a documented shortcut
+   (§13), so it needs a yes.
+2. **Steering is a real conversation event, not a UI trick.** A steering message
+   is appended to the session history between iterations, is persisted to the
+   JSONL like any other user message, and is shown in the transcript as one.
+   It **never** widens permissions: a steering message cannot approve a pending
+   tool call, cannot change autonomy, and cannot cancel a §21.4 invariant —
+   §21's dialogs remain the only path for that. (Stated because "just send the
+   text into the running loop" is the obvious implementation and it would
+   quietly become an approval channel.)
+3. **Queued follow-ups are session state.** `alt+enter` queues, `alt+up`
+   re-opens the queue for editing, and the queue survives a turn boundary. Pi's
+   own `Steering mode`/`Follow-up mode` settings (`one-at-a-time` in the
+   report's dump) become two config keys rather than hard-coded behaviour.
+
+### DECISION-3 · provider display identity (and the `-m model[provider]` syntax)
+
+**Resolves F11's naming half, and touches F2.**
+
+Today a provider has an `id` (`gemini-direct`) used as both the config key and
+the display name (`internal/config/credentials.go:129` already carries a
+separate `Name: "Google Gemini"`, unused by the picker). The report wants
+`[google]`.
+
+Proposal: add an optional short `label` to the provider schema, default it from
+the preset (`gemini-direct → google`, `omniroute → omniroute`), render
+`model-id [label] TVR ✓` with the label dimmed, and **keep `id` as the only
+thing configs, refs and session files ever store** — a display label that leaks
+into persisted refs would make every saved session ambiguous. The proposed CLI
+syntax `-m gemini-3.6-flash[omniroute]` is then sugar resolved through the same
+`catalog.Resolve` path as everything else, with `provider/model` still valid.
+
+Open question for the owner: should the built-in preset `gemini-direct` be
+**renamed** to `google` (a breaking change for anyone who already ran
+`provider add`, needing a migration in `config.toml` + credentials), or should
+it keep its id and only gain the label? My recommendation is label-only:
+same visible result, zero migration risk.
+
+---
+
+## 4. Sequencing
+
+Each wave states the invariant it establishes. **A wave does not close because
+its features "work"; it closes because its invariant is under test.**
+
+### W0 · Ground truth: a harness that can see a terminal (prerequisite for everything)
+
+Nothing in W1–W3 can be verified today. `newHeadlessRoot`/`playTurn` drive
+`Update`/`View` directly and never construct a `tea.Program`, so no existing
+test can observe what actually reaches a terminal — which is precisely why B1,
+B2, B3 and B4 all shipped green, and why §17's 2026-08-18 entry had to diagnose
+a renderer bug by reading upstream source.
+
+- Build a test-side terminal emulator (a cell grid: writes, wraps, cursor
+  moves, `ESC[2J`/`ESC[3J`, scroll region) and a harness that runs a real
+  `tea.Program` against it.
+- Regression cases that must fail **before** any fix lands: frame taller than
+  the grid keeps the input box on the last rows (B1); the user's message is
+  still on the grid after a long answer (B2); after `/clear` the grid **and**
+  its scrollback are empty (B3); shrink→shrink→grow→grow leaves a grid
+  byte-identical to a fresh render of the same state (B4); the banner appears
+  exactly once, ever.
+- Fix RC-1 (`[keys]` chord validation + an explicit repeat-count representation
+  for double-press) and audit every chord advertised in `renderHelp` against
+  the map that is actually loaded — the report's "y claro los comandos que
+  hagan falta" is exactly this audit.
+- Fix RC-2 (the cursor always resolves to a real position inside the input).
+
+**Closes:** F19, half of B1. **Invariant:** every render claim in this document
+is falsifiable by a test that looks at a grid.
+
+### W1 · The frame is bounded and the screen is ours to clear
+
+- Enforce RC-3's height invariant: the live region clips (with an explicit
+  "…N rows above" affordance), `keepInline` stops being a floor that can be
+  violated, and the live turn is subject to the same bound as the transcript.
+- Enforce RC-5's width invariant: no emitted line exceeds the physical width.
+- One banner producer, not two.
+- Real clear (`ESC[3J`) for `ctrl+l` and `/clear`, per DECISION-1.
+- **F20** (one blank row above the bottom edge) and the footer's reflow policy
+  (RC-7) land here, because both are frame-geometry rules and W0's harness is
+  what proves they hold at every width.
+
+**Closes:** B1, B2, B3, F20, part of F14.
+
+### W2 · The turn stops blocking
+
+Implements DECISION-2. Order inside the wave matters: eventing first, then the
+UI affordances that depend on it.
+
+1. Streaming agent-turn API in `internal/engine` (blocking form preserved for
+   headless/serve, which is §12bis's closing criterion).
+2. TUI consumes events: live reasoning during tool-enabled turns (**F8a**),
+   phase/footer updates from real events rather than inferred ones.
+3. Non-modal `ModeBusy`: typing, `/`-commands and overlays while working
+   (**F7**, **F3**).
+4. Steering + follow-up queue with their two config keys (**F13**).
+5. One toggle that folds/unfolds reasoning **and** code together (**F8b**),
+   replacing today's `ctrl+r`-folds-code-only. Its limitation is honest and
+   inherited: in `regular` (inline) mode it cannot touch what is already in
+   real scrollback; in `fullscreen` it can, which is one of DECISION-1's
+   concrete payoffs.
+
+**Closes:** F7, F8, F13, F3; unblocks F9.
+
+### W3 · Screen ownership and true responsiveness
+
+Implements DECISION-1(d): `fullscreen` render path with owned scrollback,
+reflow on resize, exit-transcript, and the `[ui] tui_mode` setting with a
+platform default.
+
+- **B4** closes here and only here.
+- **F14** completes (help/hotkeys tables and every overlay reflow to the real
+  width instead of `helpWidth = 38`).
+- **F16** (input box expands to full width) closes here.
+- `/hotkeys` (**F3**) ships as its own overlay, generated from the loaded
+  keymap so it can never drift from reality again (RC-1's second lesson).
+
+**Closes:** B4, F14, F16, F3 fully.
+
+### W4 · The model surface stops being noise
+
+Implements `docs/DESIGN-model-curation.md`, starting with its own §1.1
+six-liner, plus DECISION-3.
+
+- Parse models.dev `status` → real `TagDeprecated`/`TagBeta`, so the
+  already-default `hide_deprecated` finally does something (RC-9).
+- **F5** scoped-models: per-model enable/disable, `ctrl+s` persists,
+  disabled rows dimmed in full, and the set drives both `/model` and `ctrl+p`
+  cycling.
+- **F11** row format `id [label] TVR ✓` + detail (price/context) for the
+  highlighted row + the "catalogs refreshed / N pending" notice + the
+  `-m id[provider]` CLI form.
+- **F10** invert `provider add` verification (`--no-verify` behaviour becomes
+  the default; `--verify` opts in) — cheap, and it is in this wave because it
+  is the same code path as the catalog/credential work.
+- **F2** `/login` hot-apply and omniroute in the selection list (the hot-swap
+  machinery already exists: `engineFor`/`EngineFactory`, `root.go`).
+
+**Closes:** F5, F10, F11, F2, F9's model-side needs.
+
+### W5 · Configuration and command surface
+
+- **F4** `/settings`: searchable, described, live-applying editor over the
+  existing `config` schema — which means the schema needs per-key metadata
+  (label, help text, kind, allowed values) instead of a hand-maintained UI.
+  That metadata is the actual work here; the overlay is the easy half.
+- **F17** `/reload` (keymap, skills, prompts, themes, context files) — cheap
+  once the metadata exists, and it is the honest fallback for anything
+  `/settings` cannot hot-apply.
+- **F9** `/effort` + a cycle chord + the headless flag.
+- **F12** `/name`, **F15** the `⠴ Working...` spinner, **F18** `@` path
+  completion (the `path.go`/`suggest.go` machinery is already there).
+
+**Closes:** F4, F17, F9, F12, F15, F18.
+
+### W6 · Distribution and sub-agents
+
+- **F1** the branded one-line installers (`install.ps1` for PowerShell
+  alongside the existing `install.sh`), plus PATH verification, and the "just
+  type `ishakat`" first-run experience.
+- **F6** sub-agents: audit what `internal/tools/dispatch.go` already does
+  against §21.11's display promises, and decide whether the user-facing surface
+  is "extensions" or stays tool-shaped. This is a design question, so it gets a
+  companion document rather than a wave item.
+
+---
+
+## 5. Deliberately not in any wave
+
+- **Mouse-based text selection inside `fullscreen`.** It is what alt-screen
+  costs; `/copy`, `ctrl+y` and the exit-transcript are the answer.
+- **Reflowing real scrollback in `regular` mode.** Physically impossible; §3's
+  trade-off survives on that path, now as a documented mode rather than a
+  global constraint.
+- **Per-block fold memory across a session.** §17 (2026-08-18) already chose a
+  single global toggle with reasons; F8b extends *what* it folds, not *how much
+  state* it keeps.
+- **Autonomy on `shift+tab`.** §21.16 decision 4 defers it pending real Termux
+  measurement; F9's chord is about *effort/thinking level*, which is a
+  different axis, and it must not be wired to autonomy by accident.
+
+---
+
+## 6. What I need from you before W1
+
+1. **DECISION-1:** approve dual mode (d) — and confirm `fullscreen` as the
+   desktop default, `regular` on Termux. If you would rather go straight to
+   alt-screen everywhere (c), say so; it is less work than (d), it just gives
+   up native scrolling on the phone.
+2. **DECISION-1b:** on exiting `fullscreen`, print the session transcript to
+   the terminal? (my recommendation: yes)
+3. **DECISION-2:** approve the three contract consequences — non-modal busy
+   mode with `esc` re-scoped, steering as a persisted message that can never
+   approve anything, and the follow-up queue as session state.
+4. **DECISION-3:** label-only (`gemini-direct` keeps its id, displays as
+   `google`) — or a real rename with a migration?
+5. **Wave order:** W0→W1→W2→W3 is my recommendation (correctness and the
+   harness first, then the loop, then the renderer). The alternative, if the
+   visual corruption bothers you more than the blocked input, is
+   W0→W1→W3→W2 — same total cost, different order of relief.
