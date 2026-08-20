@@ -543,6 +543,16 @@ is falsifiable by a test that looks at a grid.
 
 **Closes:** B1, B2, B3, F20, part of F14.
 
+> **Status (2026-08-20), part 1 of W1 landed:** real clear (`ESC[3J` via
+> `wipeScrollbackCmd`/`clearAndWipeCmd`, `root.go`) for `ctrl+l`, `/clear`
+> and `/new` — closes **B3**. `TestB3ClearAlsoClearsScrollback` promoted
+> from a deferred pin to a hard assertion. See `docs/PLAN.md` §17,
+> 2026-08-20 "W1 (part 1)". **Still open in this wave, not yet started:**
+> RC-3's height invariant (B1/B2), RC-5's width invariant, the one-banner-
+> producer fix, F20, and RC-7's footer reflow — W1 is not closed until all
+> of them land and the whole wave's acceptance criteria pass together, per
+> this document's own "no wave starts/closes piecemeal" rule.
+
 ### W2 · The turn stops blocking
 
 Implements DECISION-2. Order inside the wave matters: eventing first, then the

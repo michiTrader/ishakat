@@ -290,8 +290,10 @@ func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 // The grid keeps 2J and 3J distinct precisely so this is checkable; that
 // distinction is not a detail of the emulator, it *is* this bug.
 //
-// Deferred to W1: W0 only keeps the pin. When the marker disappears the pin
-// fails, which is the signal to promote this back to a hard assertion.
+// Fixed in W1: ctrl+l/`/clear`/`/new` now also send ESC[3J
+// (wipeScrollbackCmd, root.go), so the marker must be gone from both the
+// screen and the scrollback once /clear has run. Promoted from W0's
+// deferred pin to a hard assertion.
 func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	const marker = "ANTESDELCLEAR"
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
@@ -306,12 +308,10 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	s.Send("\x0c") // ctrl+l
 
 	if n := s.Count(marker); n != 0 {
-		t.Logf("B3 still present (deferred to W1): %q is still on the terminal after /clear (%d occurrences).\n%s",
+		t.Fatalf("B3: %q is still on the terminal after /clear (%d occurrences); "+
+			"ctrl+l must erase real scrollback (ESC[3J), not just repaint the screen.\n%s",
 			marker, n, s.Dump("screen+scrollback:"))
-		return
 	}
-	t.Fatal("B3 appears fixed: /clear now also erases the scrollback. " +
-		"Promote this test to a hard assertion.")
 }
 
 // B4: a resize must not corrupt or duplicate what is already on screen.

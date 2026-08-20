@@ -88,19 +88,19 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		m.help = true
 		return m, nil
 	case slash.KindClear:
-		// Same effect as ctrl+l (handleGlobalKey): only the screen is wiped,
-		// the conversation itself — and what the next turn sends the model —
-		// is untouched.
+		// Same effect as ctrl+l (handleGlobalKey): only the screen (and, per
+		// RC-3/B3, the real scrollback) is wiped — the conversation itself,
+		// and what the next turn sends the model, is untouched.
 		m.transcript = nil
 		m.printedUpTo = 0
-		return m, clearScreenCmd
+		return m, clearAndWipeCmd()
 	case slash.KindNew:
 		// Unlike /clear, /new also drops the conversation itself: the next
 		// turn starts with no history at all.
 		m.conv = convo.Conversation{}
 		m.transcript = nil
 		m.printedUpTo = 0
-		return m, clearScreenCmd
+		return m, clearAndWipeCmd()
 	case slash.KindExit:
 		m.quitting = true
 		return m, tea.Quit
