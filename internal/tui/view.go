@@ -452,14 +452,24 @@ func (m Root) cursorFor() *tea.Cursor {
 // m.commands (internal/slash.Registry.HelpLines) rather than hand-written:
 // Step 9 closes the gap this function's comment used to document — the
 // dropdown (slashMenuBlock) reads the very same table.
+//
+// F14 (roadmap W3): the two rule headings used to be padded to a fixed 38
+// columns regardless of the terminal, which is the same "picked a width once
+// and stopped looking" bug F14 names for the footer before this. width is
+// measured once, from m.lay.ContentWidth() — the same call every other
+// overlay (renderPicker, renderConfirm, renderCompact, renderResumeMenu,
+// renderToolApprove, renderAskUser, renderThemePicker) already makes for its
+// own rule lines — and handed to both headings so they keep sharing one
+// width (TestHelpHeadingsShareOneWidth) without that width being a literal.
 func (m Root) renderHelp() string {
 	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
 	var b strings.Builder
-	b.WriteString(helpHeading(g, "ishakat "+g.dot+" comandos") + "\n\n")
+	b.WriteString(helpHeading(g, width, "ishakat "+g.dot+" comandos") + "\n\n")
 	for _, line := range m.commands.HelpLines() {
 		b.WriteString(" " + line + "\n")
 	}
-	b.WriteString("\n" + helpHeading(g, "atajos") + "\n\n")
+	b.WriteString("\n" + helpHeading(g, width, "atajos") + "\n\n")
 	for _, line := range m.helpShortcuts() {
 		b.WriteString(" " + line + "\n")
 	}
@@ -505,21 +515,24 @@ func padHelpChord(chord string) string {
 	return chord + " "
 }
 
-// helpWidth is how wide the help screen's rules are drawn. The screen is a
-// fixed list of short lines, so it does not follow the terminal width.
-const helpWidth = 38
-
-// helpHeading draws a section heading padded out to helpWidth with the rule
-// glyph.
+// helpHeading draws a section heading padded out to width with the rule
+// glyph. width is renderHelp's m.lay.ContentWidth(), not a literal: see
+// renderHelp's own comment for why (F14, roadmap W3).
 //
 // The headings used to be literal runs of U+2500 counted out by hand, which had
 // two problems: the two of them came out different lengths (visible on screen,
 // and impossible to keep aligned when either title is edited), and the box
 // drawing character is one more thing a legacy console renders as garbage.
-func helpHeading(g glyphs, title string) string {
+// Padding to a shared width fixed that; padding to a *fixed* 38 columns
+// regardless of the terminal was the next thing wrong with it — the help
+// screen stayed the same width whether the terminal was 40 columns (where it
+// used to overflow, silently clipped by clampFrameWidth) or 200 (where it
+// left most of the screen bare instead of using it, exactly the "does not
+// reflow" half of F14 the roadmap calls out by name for this literal).
+func helpHeading(g glyphs, width int, title string) string {
 	const lead = 2
 	prefix := strings.Repeat(g.rule, lead) + " " + title + " "
-	if fill := helpWidth - lipglossWidth(prefix); fill > 0 {
+	if fill := width - lipglossWidth(prefix); fill > 0 {
 		return prefix + strings.Repeat(g.rule, fill)
 	}
 	return prefix

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -73,6 +74,40 @@ func TestHelpHeadingsShareOneWidth(t *testing.T) {
 			}
 			if widths[0] != widths[1] {
 				t.Errorf("the headings measure %v columns; they should be equal", widths)
+			}
+		})
+	}
+}
+
+// F14 (roadmap W3): the headings used to be padded to a literal 38 columns no
+// matter how wide the terminal actually was — correct at the one width
+// anyone happened to test it at, and wrong (too narrow on a wide terminal,
+// silently clipped by clampFrameWidth on a narrow one) everywhere else. This
+// pins the fix: the rule has to track m.lay.ContentWidth() at each of §9.1's
+// four breakpoints, not just continue to agree with itself.
+func TestHelpHeadingsFollowTheRealWidth(t *testing.T) {
+	g := glyphsFor(theme.GlyphsASCII)
+	for _, width := range []int{40, 60, 80, 120} {
+		t.Run(fmt.Sprintf("%dcols", width), func(t *testing.T) {
+			var m tea.Model = newRootWithGlyphs(theme.GlyphsASCII)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+			r := m.(Root)
+			out := r.renderHelp()
+
+			var widths []int
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, g.rule) {
+					widths = append(widths, lipglossWidth(line))
+				}
+			}
+			if len(widths) != 2 {
+				t.Fatalf("expected two ruled headings, found %d:\n%s", len(widths), out)
+			}
+			want := r.lay.ContentWidth()
+			for i, got := range widths {
+				if got != want {
+					t.Errorf("heading %d measures %d columns at a %d-column terminal, want %d (lay.ContentWidth())", i, got, width, want)
+				}
 			}
 		})
 	}
