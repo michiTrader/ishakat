@@ -597,7 +597,18 @@ platform default.
 
 **Closes:** B4, F14, F16, F3 fully.
 
-> **Status (2026-08-20): W3 in progress, not closed — parts 1-3 landed.**
+> **Status (2026-08-20): W3 in progress, not closed — parts 1-4 landed.**
+> Part 4: F14 closes — `helpHeading`'s `const helpWidth = 38` is gone;
+> `renderHelp` now measures `m.lay.ContentWidth()` once and hands it to both
+> headings, the same call every other overlay already makes for its own
+> rule lines. F16 was investigated and found **already closed** by earlier,
+> unattributed work: `SetInputWidth`/`InputBox` (`internal/tui/input.go`)
+> have been `lay.ContentWidth()`-driven, not a literal, since the commit
+> that introduced them. F3 was investigated and deliberately **not**
+> started this slice: it needs a genuinely new `slash.Kind`, `Mode`,
+> renderer and dropdown row — a self-contained diff of its own, not a
+> byproduct of F14's width fix — and is left for its own slice rather than
+> risk landing half-wired. See `docs/PLAN.md` §17, 2026-08-20 "W3 (part 4)".
 > `internal/termenv` (the detection package `docs/DESIGN-tui-mode.md` §2
 > specifies) was already built and merged as part of W0, fully passing its
 > own 12+-scenario table from §3.4. Part 1 wired it into config and
