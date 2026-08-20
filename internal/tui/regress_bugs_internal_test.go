@@ -23,6 +23,7 @@ package tui
 // occur in. So these tests build a TTY root instead.
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -314,6 +315,17 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	}
 }
 
+// hhmmRE matches the "HH:MM" timestamp renderTranscriptLine stamps onto every
+// bubble header (chat.go's ts.Format("15:04")). Two Root sessions started a
+// few hundred milliseconds apart normally land in the same minute, but not
+// always — the exact failure a real CI run hit: "11:20" vs "11:21", a false
+// diff with no bearing on the thing being tested. maskClock exists so tests
+// that compare two independently-timestamped renders assert on layout, not
+// on which wall-clock minute the test happened to run in.
+var hhmmRE = regexp.MustCompile(`\d{2}:\d{2}`)
+
+func maskClock(s string) string { return hhmmRE.ReplaceAllString(s, "--:--") }
+
 // B4: a resize must not corrupt or duplicate what is already on screen.
 //
 // The constraint was explicit: both render paths must share one logical
@@ -322,7 +334,8 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 // content the terminal already has, and any state the renderer keeps about
 // "what is on screen" that survives a width change is wrong from that moment on.
 //
-// Byte-identical to a fresh render at the same size is the right assertion
+// Byte-identical (modulo the HH:MM header timestamp, via maskClock — see its
+// own comment) to a fresh render at the same size is the right assertion
 // because it is the only one that cannot be satisfied by accident: a duplicated
 // line, a lost line and a stale wrap all break it.
 func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
@@ -331,7 +344,7 @@ func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
 	// Reference: a session that was this size all along.
 	fresh := testterm.Start(t, newScreenRoot(t), 60, 14)
 	askAndWait(fresh, prompt)
-	want := strings.Join(fresh.Lines(), "\n")
+	want := maskClock(strings.Join(fresh.Lines(), "\n"))
 
 	// Subject: the same content through a resize cycle back to the same size.
 	got := testterm.Start(t, newScreenRoot(t), 60, 14)
@@ -341,7 +354,7 @@ func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
 	got.Resize(45, 14)
 	got.Resize(60, 14)
 
-	if g := strings.Join(got.Lines(), "\n"); g != want {
+	if g := maskClock(strings.Join(got.Lines(), "\n")); g != want {
 		t.Errorf("B4: after 60→40→30→45→60 the screen is not what a fresh render "+
 			"at 60x14 produces.\nContent was duplicated, lost or left wrapped for a "+
 			"width that no longer applies.\n--- want ---\n%s\n--- got ---\n%s",
