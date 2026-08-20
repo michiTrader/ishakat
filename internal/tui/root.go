@@ -262,9 +262,10 @@ type Root struct {
 
 	animOffset int
 
-	// pendingQuit es true entre el primer ctrl+c en ModeBusy/ModeChat y la
-	// ventana de gracia: el segundo ctrl+c dentro de ese margen sí cierra.
-	pendingQuit bool
+	// quitPresses is how many times Quit has been pressed inside the current
+	// grace window (§7.4, RC-1). Reset to 0 by quitConfirmMsg when the
+	// window expires. handleGlobalKey quits when this reaches keys.QuitRepeat.
+	quitPresses int
 
 	quitting bool
 
@@ -1293,7 +1294,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.drainStream()
 
 	case quitConfirmMsg:
-		m.pendingQuit = false
+		m.quitPresses = 0
 		return m, nil
 
 	case modelChosenMsg:
@@ -1421,9 +1422,9 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleGlobalKey resuelve ctrl+c (con la ventana de doble pulsación de
-// §7.4) y ctrl+l, que funcionan en cualquier modo. Devuelve handled=false
-// para que el switch de modo procese cualquier otra tecla.
+// handleGlobalKey resuelve Quit (con la ventana de N pulsaciones de
+// §7.4 / keys.QuitRepeat) y ctrl+l, que funcionan en cualquier modo.
+// Devuelve handled=false para que el switch de modo procese cualquier otra tecla.
 func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	key := keyPressString(msg)
 
@@ -1463,12 +1464,22 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 			next, cmd := m.cancelAgentTurn()
 			return true, next, cmd
 		}
-		if m.pendingQuit {
+		need := m.keys.QuitRepeat
+		if need < 1 {
+			need = 2 // shipped default if a Map was built without NewMap
+		}
+		m.quitPresses++
+		if m.quitPresses >= need {
 			m.quitting = true
 			return true, m, tea.Quit
 		}
-		m.pendingQuit = true
-		return true, m, tea.Tick(time.Second, func(time.Time) tea.Msg { return quitConfirmMsg{} })
+		// Arm the grace window on the first press only. Later presses
+		// inside it just count; a new timer per press would race the
+		// previous one's quitConfirmMsg and reset the count.
+		if m.quitPresses == 1 {
+			return true, m, tea.Tick(time.Second, func(time.Time) tea.Msg { return quitConfirmMsg{} })
+		}
+		return true, m, nil
 
 	case m.keys.ClearScreen:
 		m.transcript = nil

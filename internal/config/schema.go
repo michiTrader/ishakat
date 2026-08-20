@@ -102,10 +102,17 @@ type Footer struct {
 }
 
 type Keys struct {
-	Submit      string `toml:"submit"`
-	Newline     string `toml:"newline"`
-	Cancel      string `toml:"cancel"`
-	Quit        string `toml:"quit"`
+	Submit  string `toml:"submit"`
+	Newline string `toml:"newline"`
+	Cancel  string `toml:"cancel"`
+	Quit    string `toml:"quit"`
+	// QuitRepeat is how many times Quit must be pressed inside the grace
+	// window to actually exit (§7.4, RC-1). The double-press semantic used
+	// to be written as quit = "ctrl+c ctrl+c", which can never match
+	// tea.KeyPressMsg.String() — a single chord. A number is data a
+	// keypress can satisfy. 0 is treated as unset and filled by NewMap /
+	// validateKeys; the shipped default is 2.
+	QuitRepeat  int    `toml:"quit_repeat"`
 	ClearScreen string `toml:"clear_screen"`
 	ModelPicker string `toml:"model_picker"`
 	ModelCycle  string `toml:"model_cycle"`

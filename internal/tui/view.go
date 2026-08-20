@@ -228,20 +228,49 @@ func (m Root) renderHelp() string {
 		b.WriteString(" " + line + "\n")
 	}
 	b.WriteString("\n" + helpHeading(g, "atajos") + "\n\n")
-	for _, line := range []string{
-		"ctrl+p   selector de modelos",
-		"ctrl+o   rotar favoritos",
-		"ctrl+t   selector de temas",
-		"ctrl+j   salto de línea",
-		"esc      cancelar generación",
-		"ctrl+c×2 salir",
-		"ctrl+l   limpiar pantalla",
-		"ctrl+y   copiar última respuesta",
-	} {
+	for _, line := range m.helpShortcuts() {
 		b.WriteString(" " + line + "\n")
 	}
 	b.WriteString(fmt.Sprintf("\n %s desplazar %s esc volver", g.scrollHint, g.dot))
 	return b.String()
+}
+
+// helpShortcuts builds the shortcut list from the loaded Map (RC-1).
+// Hardcoded chords drifted from defaults.toml once already — quit was
+// advertised as "ctrl+c×2" while the shipped binding was a two-word string
+// that could never match. Generating the list from the same Map handleGlobalKey
+// compares against is the audit the report asked for.
+func (m Root) helpShortcuts() []string {
+	k := m.keys
+	if k.Quit == "" {
+		k = defaultMap
+	}
+	quit := k.Quit
+	if k.QuitRepeat > 1 {
+		quit = fmt.Sprintf("%s×%d", k.Quit, k.QuitRepeat)
+	}
+	return []string{
+		padHelpChord(k.ModelPicker) + "selector de modelos",
+		padHelpChord(k.ModelCycle) + "rotar favoritos",
+		padHelpChord(k.ThemePicker) + "selector de temas",
+		padHelpChord(k.Newline) + "salto de línea",
+		padHelpChord(k.Cancel) + "cancelar generación",
+		padHelpChord(quit) + "salir",
+		padHelpChord(k.ClearScreen) + "limpiar pantalla",
+		padHelpChord(k.CopyLast) + "copiar última respuesta",
+	}
+}
+
+// helpChordWidth is the column the descriptions start at. "ctrl+c×2" is 8
+// runes; a space after the padded chord keeps the list aligned the way the
+// hand-written lines used to be.
+const helpChordWidth = 9
+
+func padHelpChord(chord string) string {
+	if n := helpChordWidth - len([]rune(chord)); n > 0 {
+		return chord + strings.Repeat(" ", n)
+	}
+	return chord + " "
 }
 
 // helpWidth is how wide the help screen's rules are drawn. The screen is a

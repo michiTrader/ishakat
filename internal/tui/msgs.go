@@ -21,8 +21,8 @@ type streamTickMsg struct{}
 // ModeBusy: la app en reposo consume 0% de CPU (§14).
 type animTickMsg struct{ t time.Time }
 
-// quitConfirmMsg se dispara si el segundo ctrl+c no llega dentro de la
-// ventana de gracia: cancela el estado de "un ctrl+c ya armado" (§7.4).
+// quitConfirmMsg fires if Quit is not pressed enough times inside the
+// grace window: it clears quitPresses (§7.4, RC-1).
 type quitConfirmMsg struct{}
 
 // modelChosenMsg is the model picker's only output (§9.4/Step 10): the

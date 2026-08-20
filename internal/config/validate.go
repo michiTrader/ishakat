@@ -36,6 +36,9 @@ func Validate(c *Config) error {
 	if err := validateTools(c); err != nil {
 		return err
 	}
+	if err := validateKeys(c); err != nil {
+		return err
+	}
 	validateServe(c)
 	return nil
 }

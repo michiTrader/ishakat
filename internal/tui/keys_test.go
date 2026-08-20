@@ -53,3 +53,48 @@ func TestNewMapToggleFoldRespectsConfiguration(t *testing.T) {
 		t.Errorf("ToggleFold = %q, want the configured %q", m.ToggleFold, "ctrl+g")
 	}
 }
+
+// TestNewMapQuitRepeatDefaultsToTwo is RC-1's safety net when Load is
+// skipped: an empty Keys (what newTestRoot used to feed, and what a
+// caller that never set Cfg still does) must still require two presses.
+func TestNewMapQuitRepeatDefaultsToTwo(t *testing.T) {
+	m := tui.NewMap(config.Keys{})
+	if m.Quit != "ctrl+c" {
+		t.Errorf("Quit default = %q, want %q", m.Quit, "ctrl+c")
+	}
+	if m.QuitRepeat != 2 {
+		t.Errorf("QuitRepeat default = %d, want 2", m.QuitRepeat)
+	}
+}
+
+// TestNewMapRewritesLegacyMultiWordQuit is the last-resort parse that
+// NewMap keeps even without going through validateKeys: the form that
+// used to ship in defaults.toml must become a single chord plus a count.
+func TestNewMapRewritesLegacyMultiWordQuit(t *testing.T) {
+	m := tui.NewMap(config.Keys{Quit: "ctrl+c ctrl+c"})
+	if m.Quit != "ctrl+c" {
+		t.Errorf("Quit = %q, want the rewritten single chord %q", m.Quit, "ctrl+c")
+	}
+	if m.QuitRepeat != 2 {
+		t.Errorf("QuitRepeat = %d, want 2 (token count of the legacy form)", m.QuitRepeat)
+	}
+}
+
+// TestNewMapQuitRepeatOneQuitsOnFirstPress pins the data representation:
+// a number of 1 is a first-press quit, not a special case.
+func TestNewMapQuitRepeatOneQuitsOnFirstPress(t *testing.T) {
+	m := tui.NewMap(config.Keys{Quit: "ctrl+c", QuitRepeat: 1})
+	if m.QuitRepeat != 1 {
+		t.Errorf("QuitRepeat = %d, want the configured 1", m.QuitRepeat)
+	}
+}
+
+func TestNewMapQuitRepeatThreeIsHonored(t *testing.T) {
+	m := tui.NewMap(config.Keys{QuitRepeat: 3})
+	if m.Quit != "ctrl+c" {
+		t.Errorf("Quit = %q, want the default %q", m.Quit, "ctrl+c")
+	}
+	if m.QuitRepeat != 3 {
+		t.Errorf("QuitRepeat = %d, want the configured 3", m.QuitRepeat)
+	}
+}

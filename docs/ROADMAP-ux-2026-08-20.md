@@ -1,6 +1,6 @@
 # Roadmap · the 2026-08-20 UX report, triaged and sequenced
 
-**Status: planning only. Nothing here is implemented.** This document exists to
+**Status: W0 in progress.** The harness (#183) and B1–B4 regressions (#184) are in; RC-1 is implemented; B2b and B3 remain expected-fail pins (not silent). W1–W6 are still planning only. This document exists to
 be argued with before a line of code is written, the same way
 `docs/DESIGN-model-curation.md` was written to be argued with first.
 
@@ -94,7 +94,12 @@ These are findings, not guesses. Each one was read out of the current tree.
 
 ### RC-1 · `ctrl+c` ×2 is dead in any real run (explains **F19**)
 
-`internal/config/defaults.toml:67` ships `quit = "ctrl+c ctrl+c"`, and
+**Fixed 2026-08-20 (W0).** `quit = "ctrl+c"` + `quit_repeat = 2`; `validateKeys`
+rejects chords this build cannot produce; `handleGlobalKey` counts presses
+against that number; help is generated from the loaded Map. The diagnosis
+below is the record of what was wrong.
+
+`internal/config/defaults.toml` used to ship `quit = "ctrl+c ctrl+c"`, and
 `internal/tui/keys.go`'s `NewMap` copies that string verbatim into `Map.Quit`.
 `handleGlobalKey` (`internal/tui/root.go:1431`) compares it against
 `keyPressString(msg)`, which is `tea.KeyPressMsg.String()`
@@ -506,7 +511,9 @@ a renderer bug by reading upstream source.
 - Fix RC-1 (`[keys]` chord validation + an explicit repeat-count representation
   for double-press) and audit every chord advertised in `renderHelp` against
   the map that is actually loaded — the report's "y claro los comandos que
-  hagan falta" is exactly this audit.
+  hagan falta" is exactly this audit. **Done 2026-08-20:** `quit_repeat`,
+  `validateKeys`, press counting, help generated from the Map. B2b and B3
+  are expected-fail pins, not silent, and are not part of this fix.
 - Fix RC-2 (the cursor always resolves to a real position inside the input).
 
 **Closes:** F19, half of B1. **Invariant:** every render claim in this document
