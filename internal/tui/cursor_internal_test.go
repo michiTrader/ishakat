@@ -127,6 +127,58 @@ func TestManyShortTurnsKeepTheFrameWithinTheTerminalHeight(t *testing.T) {
 	}
 }
 
+// TestCursorStaysInsideTheInputWhileBusy is RC-2's unit half: ModeBusy still
+// draws the input box, so the hardware cursor has to sit in that box rather
+// than being left on the bottom border. It does not enable typing — that is
+// W2 — and overlays that replace the chat frame still hide the cursor.
+func TestCursorStaysInsideTheInputWhileBusy(t *testing.T) {
+	var m tea.Model = newVisibleRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeInto(m, "hola")
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.(Root).mode != ModeBusy {
+		t.Fatal("enter with text typed must enter ModeBusy")
+	}
+
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("ModeBusy must expose a terminal cursor inside the still-drawn input (RC-2)")
+	}
+	lines := strings.Split(v.Content, "\n")
+	y := v.Cursor.Position.Y
+	if y < 0 || y >= len(lines) {
+		t.Fatalf("cursor row %d is outside the %d rendered rows", y, len(lines))
+	}
+	line := lines[y]
+	if strings.Contains(line, "hola") {
+		t.Errorf("cursor row %d still holds the submitted text %q; submit resets the input", y, line)
+	}
+	if strings.Contains(line, "pensando") {
+		t.Errorf("cursor row %d is the busy line %q, not the input", y, line)
+	}
+	if strings.ContainsAny(line, "└┘") || strings.HasPrefix(strings.TrimLeft(line, " "), "+-") {
+		t.Errorf("cursor is on the box bottom border %q — that is RC-2", line)
+	}
+	if !strings.ContainsAny(line, "›>") {
+		t.Errorf("cursor row %d is %q, which is not the input line", y, line)
+	}
+
+	help := m.(Root)
+	help.mode = ModeHelp
+	if help.View().Cursor != nil {
+		t.Error("ModeHelp must not expose a chat-input cursor")
+	}
+
+	// W2 is not this change: printable keys in ModeBusy are still swallowed.
+	m, _ = m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	if m.(Root).mode != ModeBusy {
+		t.Fatal("a printable key in ModeBusy must stay in ModeBusy")
+	}
+	if got := m.(Root).input.Value(); got != "" {
+		t.Errorf("ModeBusy must not feed keystrokes to the textarea (that is W2), got %q", got)
+	}
+}
+
 func assertCursorOnInputLine(t *testing.T, m tea.Model, typed string) {
 	t.Helper()
 	v := m.View()

@@ -23,6 +23,7 @@ package tui
 // occur in. So these tests build a TTY root instead.
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -290,8 +291,10 @@ func TestCommittedEntriesGoThroughTheSameFoldAsTheLiveRegion(t *testing.T) {
 // The grid keeps 2J and 3J distinct precisely so this is checkable; that
 // distinction is not a detail of the emulator, it *is* this bug.
 //
-// Deferred to W1: W0 only keeps the pin. When the marker disappears the pin
-// fails, which is the signal to promote this back to a hard assertion.
+// Fixed in W1: ctrl+l/`/clear`/`/new` now also send ESC[3J
+// (wipeScrollbackCmd, root.go), so the marker must be gone from both the
+// screen and the scrollback once /clear has run. Promoted from W0's
+// deferred pin to a hard assertion.
 func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	const marker = "ANTESDELCLEAR"
 	s := testterm.Start(t, newScreenRoot(t), 60, 10)
@@ -306,13 +309,22 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 	s.Send("\x0c") // ctrl+l
 
 	if n := s.Count(marker); n != 0 {
-		t.Logf("B3 still present (deferred to W1): %q is still on the terminal after /clear (%d occurrences).\n%s",
+		t.Fatalf("B3: %q is still on the terminal after /clear (%d occurrences); "+
+			"ctrl+l must erase real scrollback (ESC[3J), not just repaint the screen.\n%s",
 			marker, n, s.Dump("screen+scrollback:"))
-		return
 	}
-	t.Fatal("B3 appears fixed: /clear now also erases the scrollback. " +
-		"Promote this test to a hard assertion.")
 }
+
+// hhmmRE matches the "HH:MM" timestamp renderTranscriptLine stamps onto every
+// bubble header (chat.go's ts.Format("15:04")). Two Root sessions started a
+// few hundred milliseconds apart normally land in the same minute, but not
+// always — the exact failure a real CI run hit: "11:20" vs "11:21", a false
+// diff with no bearing on the thing being tested. maskClock exists so tests
+// that compare two independently-timestamped renders assert on layout, not
+// on which wall-clock minute the test happened to run in.
+var hhmmRE = regexp.MustCompile(`\d{2}:\d{2}`)
+
+func maskClock(s string) string { return hhmmRE.ReplaceAllString(s, "--:--") }
 
 // B4: a resize must not corrupt or duplicate what is already on screen.
 //
@@ -322,7 +334,8 @@ func TestB3ClearAlsoClearsScrollback(t *testing.T) {
 // content the terminal already has, and any state the renderer keeps about
 // "what is on screen" that survives a width change is wrong from that moment on.
 //
-// Byte-identical to a fresh render at the same size is the right assertion
+// Byte-identical (modulo the HH:MM header timestamp, via maskClock — see its
+// own comment) to a fresh render at the same size is the right assertion
 // because it is the only one that cannot be satisfied by accident: a duplicated
 // line, a lost line and a stale wrap all break it.
 func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
@@ -331,7 +344,7 @@ func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
 	// Reference: a session that was this size all along.
 	fresh := testterm.Start(t, newScreenRoot(t), 60, 14)
 	askAndWait(fresh, prompt)
-	want := strings.Join(fresh.Lines(), "\n")
+	want := maskClock(strings.Join(fresh.Lines(), "\n"))
 
 	// Subject: the same content through a resize cycle back to the same size.
 	got := testterm.Start(t, newScreenRoot(t), 60, 14)
@@ -341,7 +354,7 @@ func TestB4ResizeCycleDoesNotCorruptTheScreen(t *testing.T) {
 	got.Resize(45, 14)
 	got.Resize(60, 14)
 
-	if g := strings.Join(got.Lines(), "\n"); g != want {
+	if g := maskClock(strings.Join(got.Lines(), "\n")); g != want {
 		t.Errorf("B4: after 60→40→30→45→60 the screen is not what a fresh render "+
 			"at 60x14 produces.\nContent was duplicated, lost or left wrapped for a "+
 			"width that no longer applies.\n--- want ---\n%s\n--- got ---\n%s",
@@ -409,6 +422,74 @@ func TestRC2CursorResolvesInsideTheInput(t *testing.T) {
 	}
 }
 
+// TestRC2CursorStaysInsideTheInputWhileBusy is the half of RC-2 that the idle
+// test above cannot see. cursorFor used to return nil in every mode except
+// ModeChat; Bubble Tea then left the hardware cursor on the input box's
+// bottom border the moment a turn started. The witness is the busy line:
+// this assertion is only meaningful while "pensando" is still on screen.
+//
+// The engine is gated so the turn cannot finish under us — an ungated echo
+// of a short prompt can drain between WaitFor and Cursor, and the test
+// would then pass for the ModeChat path instead of the ModeBusy one.
+//
+// Typing while busy is W2 and is not enabled here.
+func TestRC2CursorStaysInsideTheInputWhileBusy(t *testing.T) {
+	const w, h = 60, 20
+	root := NewRoot(Options{
+		Version: "0.0.0-test",
+		CWD:     "/home/user/projects/ishakat",
+		Theme:   theme.Load(""),
+		Cap:     theme.CapNone,
+		Glyphs:  theme.GlyphsASCII,
+		NoTTY:   false,
+	})
+	eng, _ := echoEngine(true)
+	s := testterm.Start(t, withEngine(root, eng), w, h)
+
+	s.Type("hola")
+	s.Enter()
+	s.WaitFor("busy line on screen", func(g *testterm.Grid) bool {
+		return g.Contains(busyWitness)
+	})
+
+	if !strings.Contains(strings.Join(s.Lines(), "\n"), busyWitness) {
+		t.Fatalf("RC-2 busy: the turn finished before the cursor could be checked; "+
+			"this test is only meaningful while %q is on screen.\n%s",
+			busyWitness, s.Dump("screen:"))
+	}
+
+	cx, cy := s.Cursor()
+	lines := s.Lines()
+	if cy < 0 || cy >= len(lines) {
+		t.Fatalf("RC-2 busy: cursor row %d is outside the %d-row screen.\n%s",
+			cy, len(lines), s.Dump("screen:"))
+	}
+	if cx < 0 || cx >= w {
+		t.Fatalf("RC-2 busy: cursor column %d is outside the %d-column screen.\n%s",
+			cx, w, s.Dump("screen:"))
+	}
+	line := lines[cy]
+	if strings.Contains(line, busyWitness) {
+		t.Errorf("RC-2 busy: the cursor is on the busy line %q, not the input.\n%s",
+			line, s.Dump("screen:"))
+	}
+	if strings.Contains(line, "hola") {
+		t.Errorf("RC-2 busy: the cursor is on row %d (%q), which still holds the "+
+			"submitted text.\n%s", cy, line, s.Dump("screen:"))
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "+-") {
+		t.Errorf("RC-2 busy: the cursor is on the box border %q.\n"+
+			"That is the reported └──❚────┘: Bubble Tea left it where the last write ended.\n%s",
+			line, s.Dump("screen:"))
+	}
+	if !strings.Contains(line, ">") {
+		t.Errorf("RC-2 busy: the cursor is on row %d (%q), which is not the input line.\n"+
+			"The cursor was taken away the moment the task started.\n%s",
+			cy, line, s.Dump("screen:"))
+	}
+}
+
 // TestTheEchoEngineActuallyAnswers is a guard for the tests above rather than a
 // bug regression. Every one of them depends on the echo double actually
 // answering; if it stopped being wired in, or if the wait stopped waiting for
@@ -429,6 +510,4 @@ func TestTheEchoEngineActuallyAnswers(t *testing.T) {
 	}
 }
 
-// Root must still satisfy tea.Model for testterm.Start to accept it, as a build
-// error rather than a confusing runtime failure.
 var _ tea.Model = Root{}

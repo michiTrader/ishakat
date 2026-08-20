@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/config"
@@ -1484,7 +1485,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case m.keys.ClearScreen:
 		m.transcript = nil
 		m.printedUpTo = 0
-		return true, m, clearScreenCmd
+		return true, m, clearAndWipeCmd()
 
 	case m.keys.ModelPicker:
 		// Only opens from ModeChat: ModeBusy is generating (§7.4 already
@@ -1919,6 +1920,40 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 // above, a user-requested clear has no "print it to scrollback first" option
 // — the whole point of ctrl+l is discarding the transcript, not archiving it.
 func clearScreenCmd() tea.Msg { return tea.ClearScreen() }
+
+// wipeScrollbackCmd sends ESC[3J directly, in addition to whatever
+// tea.ClearScreen() already does. tea.ClearScreen (and the renderer's
+// pendingErase it sets) only erases the visible screen buffer — real
+// terminal scrollback survives it untouched, which is B3: ctrl+l/`/clear`
+// looked like they wiped the pane, but scrolling up still showed the old
+// conversation. ansi.EraseEntireDisplay is ESC[3J, the xterm extension that
+// also drops scrollback; charmbracelet/x/ansi is already a direct
+// dependency (picker.go, slashmenu.go, wrap.go), so this adds nothing new
+// to the module graph — a real requirement on Termux, per
+// docs/DESIGN-tui-mode.md. tea.Raw is already a tea.Cmd (func() Msg) that
+// yields a RawMsg; it is used directly as the Cmd rather than wrapped in
+// another function, because wrapping it here would hand the event loop a
+// Cmd value where it expects the Msg the Cmd produces, which type-checks
+// (Msg is `any`) but never matches `case RawMsg:` — a real mistake made
+// and caught while writing this fix. RawMsg hands the bytes straight to
+// the program's output stream (p.execute), bypassing the renderer
+// entirely, which is correct here: this is not a screen *repaint*, it's a
+// side-channel terminal control sequence the renderer has no model for.
+var wipeScrollbackCmd tea.Cmd = tea.Raw(ansi.EraseEntireDisplay)
+
+// clearAndWipeCmd is what every user-requested "start this pane over"
+// action (ctrl+l, /clear, /new) should return: both the erase-visible-
+// screen command bubbletea already understood, and the erase-scrollback
+// sequence it didn't. Order does not matter to the terminal (both are
+// unconditional erases) but tea.Batch does not guarantee ordering anyway,
+// so nothing here should ever come to depend on it.
+//
+// applySessionChosen (post-/resume redraw) deliberately does NOT use this:
+// loading a different session is not the user asking to discard scrollback
+// — the previous session's transcript is still information they might
+// scroll back to, not clutter to erase — so it keeps using bare
+// clearScreenCmd.
+func clearAndWipeCmd() tea.Cmd { return tea.Batch(clearScreenCmd, wipeScrollbackCmd) }
 
 // drainStream moves whatever the engine's goroutine has produced since the
 // last tick into the live turn, and decides whether the turn is still running
