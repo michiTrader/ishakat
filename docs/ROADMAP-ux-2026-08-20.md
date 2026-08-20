@@ -597,22 +597,28 @@ platform default.
 
 **Closes:** B4, F14, F16, F3 fully.
 
-> **Status (2026-08-20): W3 in progress, not closed — part 1 landed.**
+> **Status (2026-08-20): W3 in progress, not closed — parts 1-2 landed.**
 > `internal/termenv` (the detection package `docs/DESIGN-tui-mode.md` §2
 > specifies) was already built and merged as part of W0, fully passing its
-> own 12+-scenario table from §3.4; what part 1 adds is wiring it in: new
-> `[ui] tui_mode`/`fullscreen_exit_transcript` config keys
-> (`internal/config/schema.go`, `defaults.toml`, both `example.toml`
+> own 12+-scenario table from §3.4. Part 1 wired it into config and
+> `ishakat doctor`: new `[ui] tui_mode`/`fullscreen_exit_transcript` config
+> keys (`internal/config/schema.go`, `defaults.toml`, both `example.toml`
 > copies), and `ishakat doctor` now prints a `tui_mode` line — value, reason,
 > its own signals, advice — the same contract `theme.Diagnosis` already
-> honours for `color`/`glyphs`. **Deliberately not done yet:** `view.go`'s
-> `View()` still hardcodes `AltScreen = false` unconditionally; flipping it
-> without first building the render/emit seam (§4 Rule 2) would silently
-> break DECISION-1b's exit-transcript promise the moment eviction met the
+> honours for `color`/`glyphs`. Part 2 threaded the resolved `Mode` the rest
+> of the way to the running interface: `internal/app.Run` now calls
+> `termenv.Detect` once (reusing the same TTY answer `NoTTY` already
+> computed) and hands the result into a new `tui.Options.TUIMode` field,
+> wired into `Root.tuiMode` and surfaced by `/debug`'s `[terminal]` section
+> for in-session confirmation. **Deliberately not done yet:** `view.go`'s
+> `View()` still hardcodes `AltScreen = false` unconditionally; `tuiMode`
+> has no reader that changes what gets drawn. Flipping `AltScreen` without
+> first building the render/emit seam (§4 Rule 2) would silently break
+> DECISION-1b's exit-transcript promise the moment eviction met the
 > alternate screen's own non-persistent buffer — exactly the "second
-> half-correct renderer" the wave's own kill criterion forbids. `internal/app`
-> does not call `termenv.Detect` yet either, and F14/F16/F3 are untouched.
-> See `docs/PLAN.md` §17, 2026-08-20 "W3 (part 1)" for the full detail.
+> half-correct renderer" the wave's own kill criterion forbids. F14/F16/F3
+> are untouched. See `docs/PLAN.md` §17, 2026-08-20 "W3 (part 2)" (and
+> "W3 (part 1)" below it) for the full detail.
 
 ### W4 · The model surface stops being noise
 

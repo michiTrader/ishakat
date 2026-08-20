@@ -18,6 +18,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/mission"
 	"github.com/MichiTrader/ishakat/internal/permissions"
+	"github.com/MichiTrader/ishakat/internal/termenv"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tools"
 	"github.com/MichiTrader/ishakat/internal/tui"
@@ -65,6 +66,25 @@ func Run(version string, resume bool) int {
 	noTTY := !term.IsTerminal(os.Stdout.Fd())
 	cap := theme.Detect(cfg.UI.Color)
 	th := theme.Load(cfg.UI.Theme, xdg.ThemesDir())
+
+	// tuiDetection is DECISION-1(d)'s render-mode verdict (W3, gated by
+	// docs/DESIGN-tui-mode.md): the same termenv.Detect call
+	// cmd/ishakat/doctor_terminal.go already makes, run once here so
+	// tui.Options carries an already-resolved Mode the same way Cap/Glyphs
+	// above do — this package is the one place §6.1 trusts to call both
+	// internal/termenv and internal/tui, exactly as it is already the one
+	// place trusted to call both internal/config and internal/tui (this
+	// file's own package comment). !noTTY, not term.IsTerminal a second
+	// time: noTTY is already the answer to the identical question, and
+	// asking the terminal twice for one fact is how two call sites drift.
+	//
+	// Only .Mode is consumed for now — Detection.Reason/.Signals/.Advice
+	// are `doctor`'s job, not the running interface's — because the only
+	// consumer that exists yet is Options.TUIMode, and that field has no
+	// reader inside internal/tui either (see its own doc comment for why:
+	// the render/emit seam this mode will actually change is still W3's
+	// open work, not this slice's).
+	tuiDetection := termenv.Detect(cfg.UI.TUIMode, !noTTY)
 
 	// Colour and repertoire are two independent questions about the same
 	// terminal (see theme.GlyphSet), so they are resolved side by side and
@@ -339,7 +359,11 @@ func Run(version string, resume bool) int {
 		// override would have read the same false that a phone should, and the
 		// key would have had no effect for the one host it names.
 		Termux: xdg.IsTermux(),
-		Engine: eng,
+		// TUIMode is tuiDetection.Mode, resolved above — see that field's
+		// own doc comment (internal/tui/root.go) for why nothing inside
+		// internal/tui reads it yet.
+		TUIMode: tuiDetection.Mode,
+		Engine:  eng,
 		// The factory re-decides Caps per destination model (see its own
 		// comment), so switching models with ctrl+p keeps tool calling
 		// working — or correctly stops offering tools to a model the

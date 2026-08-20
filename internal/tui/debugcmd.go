@@ -76,6 +76,14 @@ func (m Root) runDebugCommand() (tea.Model, tea.Cmd) {
 	fmt.Fprintf(&b, "\n  cwd             %s", m.cwd)
 	fmt.Fprintf(&b, "\n  color           %s", m.cap)
 	fmt.Fprintf(&b, "\n  glyphs          %s", m.lay.Glyphs)
+	// tui_mode is DECISION-1(d)'s already-resolved verdict (m.tuiMode,
+	// Options.TUIMode, termenv.Detect run once by internal/app.Run) — shown
+	// here for visibility only, ahead of the render/emit seam that will
+	// eventually act on it (see Options.TUIMode's own doc comment). Full
+	// reason/signals/advice already live in `ishakat doctor` (W3 part 1);
+	// this line is the in-session confirmation that Root actually received
+	// the same value doctor reports, not a second detection.
+	fmt.Fprintf(&b, "\n  tui_mode        %s", m.tuiMode)
 
 	fmt.Fprintf(&b, "\n\n  (dump completo de errores: aun no implementado — ver docs/PLAN.md §9.8)")
 
