@@ -23,6 +23,13 @@ import (
 // test counts characters rather than inspecting rows, because "how many rows
 // it took" is a wrapping detail and "every character I sent is on screen" is
 // the property that matters.
+//
+// The terminal is deliberately tall (30 rows, not the usual 24): RC-3 gives
+// the frame its own, separate height invariant, and a terminal too short to
+// hold both echoed copies of this test's worst-case message would legitimately
+// clip it — that is RC-3 working as intended, not this test's property. Using
+// a terminal tall enough that RC-3 never has to clip keeps the two invariants
+// from being tested by, and possibly fighting inside, the same assertion.
 func TestALongMessageIsWrappedInsteadOfClipped(t *testing.T) {
 	// One unbreakable word longer than any terminal tested, then ordinary
 	// words: the first forces a break inside a word, the second must break
@@ -33,7 +40,7 @@ func TestALongMessageIsWrappedInsteadOfClipped(t *testing.T) {
 	for _, width := range []int{120, 60, 40} {
 		t.Run(fmt.Sprintf("%dcols", width), func(t *testing.T) {
 			var m tea.Model = newVisibleRoot()
-			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 			m = playTurn(m, text)
 
 			content := m.View().Content
@@ -61,6 +68,11 @@ func TestALongMessageIsWrappedInsteadOfClipped(t *testing.T) {
 // "how many characters driveEcho has released so far" independently, from
 // echoChunkSize, is the only way to know what the screen owes at each tick
 // regardless of which side of finishTurn it lands on.
+//
+// The terminal is 30 rows tall for the same reason TestALongMessageIsWrapped-
+// InsteadOfClipped is: tall enough that RC-3's height invariant never has to
+// clip this test's own worst-case message, so this test keeps measuring only
+// the width invariant it names.
 func TestTheLiveTurnWrapsWhileItStreams(t *testing.T) {
 	const width = 40
 	const n = 300 // strings.Repeat("z", n) below; keep the two in sync
@@ -69,7 +81,7 @@ func TestTheLiveTurnWrapsWhileItStreams(t *testing.T) {
 	eng, advance := echoEngine(true)
 	root = withEngine(root, eng)
 	var m tea.Model = root
-	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 	m = typeInto(m, strings.Repeat("z", n))
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 

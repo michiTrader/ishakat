@@ -1905,14 +1905,33 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
-	if bannerText != "" {
-		// The trailing "\n" is the same blank separator line head() used to
-		// leave between the banner and whatever came after it (see the "\n\n"
-		// after Banner()'s call in head()); tea.Println already supplies the
-		// one line break that ends bannerText's own last line.
-		cmds = append(cmds, tea.Println(bannerText+"\n"))
-	}
+	cmds = append(cmds, printBannerCmd(bannerText))
 	return m, tea.Batch(cmds...)
+}
+
+// printBannerCmd is the one place that retires a startup banner to real
+// scrollback (§7.5). startEngineTurn and startAgentTurn each independently
+// did this inline (tea.Println(bannerText+"\n")) — same guard, same string,
+// same trailing separator, duplicated across two call sites. Only one of
+// them ever runs for a given turn (the tools-enabled fork in startEngineTurn
+// picks exactly one), so no live double-print was reachable and
+// TestBannerAppearsExactlyOnce already passed before this change — but the
+// duplication in source was exactly the shape the roadmap's RC-5 section
+// calls "two producers of the same rows," easy to drift apart the next time
+// one call site changes and its twin does not.
+//
+// Returns nil, not a no-op Cmd, when there is nothing to print: tea.Batch
+// already drops nil commands (see its own doc comment), so every caller can
+// unconditionally append this without its own bannerText != "" check.
+func printBannerCmd(bannerText string) tea.Cmd {
+	if bannerText == "" {
+		return nil
+	}
+	// The trailing "\n" is the same blank separator line head() used to
+	// leave between the banner and whatever came after it (see the "\n\n"
+	// after Banner()'s call in head()); tea.Println already supplies the
+	// one line break that ends bannerText's own last line.
+	return tea.Println(bannerText + "\n")
 }
 
 // clearScreenCmd is tea.ClearScreen wrapped as a tea.Cmd, the shape
@@ -2191,6 +2210,27 @@ func (m Root) cancelTurn() (tea.Model, tea.Cmd) {
 // point of view, gone anywhere yet.
 const keepInline = 2
 
+// frameBudget is RC-3/F20's shared height accounting: how many rows render()
+// is allowed to fill, out of the terminal's own m.lay.Height.
+//
+// It reserves exactly one row (F20, "one blank row between the footer and
+// the bottom edge"). That is not a separate feature bolted on next to the
+// height invariant — measuring it against a real terminal showed the frame
+// already fills every row of a short terminal with none left over (a
+// 60x15 session with a full live region produced 15 rows of content and 0
+// blank rows below them), so "leave one row of breathing room at the
+// bottom" and "the budget evictOverflow enforces is one row short of
+// lay.Height, not equal to it" are the same fix. Giving it its own name and
+// doc comment here, instead of writing "m.lay.Height-1" at each call site,
+// is what keeps that connection from being lost the next time either
+// number is touched.
+func (m Root) frameBudget() int {
+	if m.lay.Height <= 0 {
+		return 0
+	}
+	return m.lay.Height - 1
+}
+
 // evictOverflow keeps the live-managed region (banner/live turn/input/footer,
 // everything render() draws every frame) from ever growing taller than the
 // terminal by handing the oldest still-inline transcript entries to
@@ -2209,15 +2249,28 @@ const keepInline = 2
 // It runs from Update, not View, because printing is an I/O side effect and
 // View has to stay pure — cursorFor and render both call it, and calling it
 // twice cannot be allowed to print anything twice.
+//
+// This alone still has the two holes RC-3 names: it stops at keepInline, and
+// it can only evict whole transcript entries — a live turn's own growing
+// body is not one. head()'s own clipHead (view.go) is what actually closes
+// both, by clipping whatever is left once eviction has done all it can;
+// this function's job is to hand off as much as it safely can *before* that
+// clip has to draw its "…N rows above" affordance instead of real content.
+//
+// The overflow check below measures against frameRowsUnclipped, not
+// render()'s own (already clipped) output — see frameRowsUnclipped's and
+// headContent's doc comments (view.go) for why: this loop has to see the
+// overflow head() is about to hide, or it would never run.
 func (m Root) evictOverflow() (Root, tea.Cmd) {
 	if m.mode == ModeHelp || m.lay.Height <= 0 {
 		return m, nil
 	}
 	g := m.lay.glyphs()
 	width := m.lay.ContentWidth()
+	budget := m.frameBudget()
 	var cmds []tea.Cmd
 	for len(m.transcript)-m.printedUpTo > keepInline {
-		if strings.Count(m.renderRaw(), "\n")+1 <= m.lay.Height {
+		if m.frameRowsUnclipped() <= budget {
 			break
 		}
 		cmds = append(cmds, commitEntryCmd(m.styles, g, width, m.transcript[m.printedUpTo], m.cfgSyntax, m.cfgMarkdown, m.foldCode, m.cfgReasoning))

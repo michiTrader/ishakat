@@ -108,9 +108,10 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
-	if bannerText != "" {
-		cmds = append(cmds, tea.Println(bannerText+"\n"))
-	}
+	// printBannerCmd (root.go): the one shared banner-to-scrollback producer,
+	// so this fork and startEngineTurn's plain path can never drift apart on
+	// what "retire the banner" means (RC-5, "one banner producer").
+	cmds = append(cmds, printBannerCmd(bannerText))
 	return m, tea.Batch(cmds...)
 }
 

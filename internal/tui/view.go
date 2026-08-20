@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // View satisface tea.Model. En v2 View() devuelve tea.View, no un string
@@ -23,7 +24,35 @@ func (m Root) View() tea.View {
 // hay transcript todavía), transcript comprometido, turno vivo si lo hay, y
 // la caja de entrada con el footer.
 func (m Root) render() string {
-	return m.fold(m.renderRaw())
+	return clampFrameWidth(m.fold(m.renderRaw()), m.lay.Width)
+}
+
+// clampFrameWidth is RC-5's width invariant: no line render() returns is ever
+// wider than the terminal, full stop. It sits on render's own choke point,
+// the same way fold does, for the same reason: a rule enforced once here can
+// be checked, and a rule that depends on every component (wrapText, the
+// footer, the banner, the spinner strip, …) getting its own width budget
+// exactly right is a rule that only has to be wrong once.
+//
+// headRows/frameRows — and, one level up, evictOverflow's and cursorFor's
+// whole "N newlines is N rows" bookkeeping — only hold if this is true. A
+// single line wider than the terminal gets auto-wrapped by the terminal
+// itself into two or more real rows while this package's own count still
+// treats it as one, which is the "row accounting drifting" RC-5 names as the
+// actual cause behind B4's duplicated, six-times-printed banner: the
+// renderer's next up-move lands mid-frame and repaints over live text
+// instead of replacing it.
+func clampFrameWidth(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // fold is the single point where a restricted terminal gets a string it can
@@ -107,12 +136,40 @@ func (m Root) slashMenuBlock() string {
 
 // head is everything drawn above the input box: the start-up banner (only
 // while there is nothing in the transcript), the committed transcript and the
-// live turn.
+// live turn — clipped to headBudget() when it does not fit (RC-3's height
+// invariant).
 //
 // It is a method of its own because render and cursorFor must agree on its
 // height down to the row. Measuring one thing and drawing another is precisely
-// how the cursor ended up next to the banner.
+// how the cursor ended up next to the banner. That is also why the clip has
+// to live inside this method rather than only in renderRaw: cursorFor calls
+// head() directly (see its own comment), and if it saw the unclipped content
+// while renderRaw drew the clipped one, the two would disagree again — the
+// exact class of bug this method's own doc comment already warns about.
 func (m Root) head() string {
+	if m.lay.Height <= 0 {
+		// No terminal size known yet (a Root that has never seen a
+		// WindowSizeMsg): there is nothing to clip against, and clipping
+		// blind would just be a second way to get the arithmetic wrong.
+		return m.headContent()
+	}
+	return clipHead(m.headContent(), m.lay.glyphs(), m.headBudget())
+}
+
+// headContent builds head()'s full, unclipped content: the start-up banner,
+// every transcript entry evictOverflow has not yet retired to scrollback,
+// and the live turn.
+//
+// It exists separately from head() so evictOverflow can measure how tall the
+// *unclipped* region actually is (frameRowsUnclipped) without that
+// measurement being contaminated by head()'s own clip — eviction is the
+// preferred way to make room (it is permanent: the entry leaves the live
+// region for good), and clipHead is only the backstop for what eviction's
+// own keepInline floor and a still-growing live turn cannot reach. Measuring
+// the clipped string here would make evictOverflow see a frame that always
+// already fits and stop evicting anything, which defeats the point of
+// having both mechanisms.
+func (m Root) headContent() string {
 	g := m.lay.glyphs()
 	var b strings.Builder
 
@@ -146,6 +203,88 @@ func (m Root) head() string {
 // terminal width instead of wrapping it, so a long line still costs one row
 // and no wrap arithmetic is needed here.
 func headRows(head string) int { return strings.Count(head, "\n") }
+
+// restRows is every row render() draws *below* head(): the slash-menu
+// dropdown (if open), the input box, and the footer. head() and
+// evictOverflow both need "how much room is left once the rest of the frame
+// has taken its share" — this is the one place that arithmetic is done, so
+// headBudget (below) and evictOverflow's own budget check can never drift
+// apart on what "the rest of the frame" means.
+func (m Root) restRows() int {
+	inputBoxRows := strings.Count(InputBox(m.lay, m.styles, m.input.View()), "\n") + 1
+	footerRows := strings.Count(RenderFooter(m.lay, m.footerState(), m.footerItems), "\n") + 1
+	return headRows(m.slashMenuBlock()) + inputBoxRows + footerRows
+}
+
+// headBudget is the most rows head() is allowed to occupy: frameBudget
+// (root.go — the terminal's height, minus F20's one row of breathing room)
+// minus whatever the rest of the frame already spends. Never negative: a
+// terminal too short even for the input box and footer alone is a separate,
+// pre-existing problem (ShowBoxedInput/ShowBorders already degrade at
+// BPMinimo for exactly this reason) that clipping the empty head to 0 rows
+// cannot make any worse.
+func (m Root) headBudget() int {
+	budget := m.frameBudget() - m.restRows()
+	if budget < 0 {
+		budget = 0
+	}
+	return budget
+}
+
+// frameRowsUnclipped is how tall the live-managed region would be with no
+// clipping at all — headContent()'s real height plus everything below it.
+// evictOverflow measures against this, not against render()'s own (already
+// clipped) output, for the reason headContent's doc comment gives: eviction
+// has to see the overflow head() is about to hide, or it would never run.
+func (m Root) frameRowsUnclipped() int {
+	return headRows(m.headContent()) + m.restRows()
+}
+
+// clipHead is RC-3's actual height invariant, applied to head(): when raw is
+// taller than budget rows, the oldest rows (the top of head — the earliest
+// still-inline transcript entry, or the earliest lines of a live turn once
+// nothing else is left to drop) are hidden behind one "…N rows above" line
+// rather than left to overflow the terminal.
+//
+// This is deliberately a *visual* clip, not a second eviction path: the rows
+// it hides are still exactly where they were — in m.transcript, or in
+// m.live's own growing text — and reappear the moment something else
+// (another turn finishing, the window growing) gives them room again. That
+// is the difference from evictOverflow: evictOverflow's rows are gone for
+// good (printed to real scrollback); clipHead's are merely not drawn this
+// frame.
+//
+// budget <= 0 means there is no room for anything, not even the affordance
+// line — returns "" rather than a lone clip line that would itself overflow.
+func clipHead(raw string, g glyphs, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	rows := headRows(raw)
+	if rows <= budget {
+		return raw
+	}
+	// raw always ends in "\n" (every block headContent writes ends with
+	// one), so splitting on it yields exactly rows+1 elements, the last of
+	// which is the empty string after that final newline.
+	lines := strings.Split(raw, "\n")
+	content := lines[:len(lines)-1]
+	keep := budget - 1 // one row of the budget is spent on the affordance itself
+	if keep < 0 {
+		keep = 0
+	}
+	hidden := len(content) - keep
+	tail := content[len(content)-keep:]
+
+	out := make([]string, 0, budget)
+	unit := "row"
+	if hidden != 1 {
+		unit = "rows"
+	}
+	out = append(out, fmt.Sprintf("%s %d %s above", g.clipMark, hidden, unit))
+	out = append(out, tail...)
+	return strings.Join(out, "\n") + "\n"
+}
 
 // bannerText is the startup banner's rendered form, or "" once it should no
 // longer be part of the live-managed region — the same condition head() used
