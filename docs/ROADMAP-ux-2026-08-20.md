@@ -543,15 +543,24 @@ is falsifiable by a test that looks at a grid.
 
 **Closes:** B1, B2, B3, F20, part of F14.
 
-> **Status (2026-08-20), part 1 of W1 landed:** real clear (`ESC[3J` via
-> `wipeScrollbackCmd`/`clearAndWipeCmd`, `root.go`) for `ctrl+l`, `/clear`
-> and `/new` — closes **B3**. `TestB3ClearAlsoClearsScrollback` promoted
-> from a deferred pin to a hard assertion. See `docs/PLAN.md` §17,
-> 2026-08-20 "W1 (part 1)". **Still open in this wave, not yet started:**
-> RC-3's height invariant (B1/B2), RC-5's width invariant, the one-banner-
-> producer fix, F20, and RC-7's footer reflow — W1 is not closed until all
-> of them land and the whole wave's acceptance criteria pass together, per
-> this document's own "no wave starts/closes piecemeal" rule.
+> **Status (2026-08-20): W1 CLOSED, all five items landed.** Part 1: real
+> clear (`ESC[3J` via `wipeScrollbackCmd`/`clearAndWipeCmd`, `root.go`) for
+> `ctrl+l`, `/clear` and `/new` — closes **B3**.
+> `TestB3ClearAlsoClearsScrollback` promoted from a deferred pin to a hard
+> assertion. Part 2: RC-3's height invariant (closes B1/B2), RC-5's width
+> invariant, the one-banner-producer fix, and F20 (one blank row above the
+> bottom edge). Part 3: RC-7's footer reflow policy —
+> `RenderFooter` (`internal/tui/footer.go`) now wraps items into
+> `lay.FooterSections()` rows first, abbreviates (reusing path.go's own
+> `truncateRunes`/`ShortenPath`) any item that still does not fit, and only
+> drops items right-to-left as a last resort when neither wrapping nor
+> abbreviating a whole subset fits — closing the rest of **F14**. A
+> BPEstrecho terminal (40-59 columns, the project's own most common real
+> case) now keeps every configured footer item visible, wrapped across two
+> rows, instead of losing `context/tokens/cost/cwd` outright. See
+> `docs/PLAN.md` §17, 2026-08-20 "W1 (part 1)", "W1 (part 2)" and "W1 (part
+> 3, RC-7, closes the wave)". All acceptance criteria for the wave now pass
+> together, per this document's own "no wave starts/closes piecemeal" rule.
 
 ### W2 · The turn stops blocking
 

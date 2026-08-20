@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/MichiTrader/ishakat/internal/theme"
 	"github.com/MichiTrader/ishakat/internal/tui"
 )
@@ -27,7 +28,17 @@ func TestRenderFooterIncluyeItemsPedidos(t *testing.T) {
 	}
 }
 
-func TestRenderFooterRecortaDeDerechaAIzquierdaSiNoEntra(t *testing.T) {
+// TestRenderFooterNuncaExcedeElAnchoNiElNumeroDeFilas is RC-7's own width
+// invariant, kept from the pre-RC-7 test this replaces (the old name,
+// "RecortaDeDerechaAIzquierda", documented the drop-first behaviour that RC-7
+// retires — see TestRenderFooterEnvuelveEnVezDeSoltar below for the actual
+// policy this test now guards). No matter how narrow the layout or how much
+// text FooterState carries, every row RenderFooter returns has to fit inside
+// lay.ContentWidth() and there can never be more rows than
+// lay.FooterSections() allows, or the frame-geometry invariants RC-3/RC-5
+// already enforce for every other line would have a footer-shaped hole in
+// them.
+func TestRenderFooterNuncaExcedeElAnchoNiElNumeroDeFilas(t *testing.T) {
 	lay := tui.NewLayout(20, 40, 0, false, false) // ancho muy angosto
 	st := tui.FooterState{
 		Model:     "un-nombre-de-modelo-bastante-largo",
@@ -36,8 +47,114 @@ func TestRenderFooterRecortaDeDerechaAIzquierdaSiNoEntra(t *testing.T) {
 	}
 	line := tui.RenderFooter(lay, st, []string{"model", "context", "tokens", "cost", "git", "cwd"})
 
-	if len([]rune(line)) > 20 {
-		t.Errorf("RenderFooter() de %d runas excede el ancho de layout (20): %q", len([]rune(line)), line)
+	rows := strings.Split(line, "\n")
+	if got, want := len(rows), lay.FooterSections(); got > want {
+		t.Errorf("RenderFooter() devolvió %d filas, lay.FooterSections() permite %d: %q", got, want, line)
+	}
+	for i, row := range rows {
+		if got := len([]rune(row)); got > 20 {
+			t.Errorf("RenderFooter() fila %d de %d runas excede el ancho de layout (20): %q", i, got, row)
+		}
+	}
+}
+
+// TestRenderFooterEnvuelveEnVezDeSoltar is RC-7's own regression: a
+// BPEstrecho terminal (40-59 columns, "Termux en vertical", §9.1's own real
+// most-common case) used to lose context/tokens/cost/cwd entirely because
+// RenderFooter dropped items right-to-left the moment the single line did
+// not fit. lay.FooterSections() gives BPEstrecho two rows on purpose — this
+// pins that every item survives, wrapped across those two rows, instead of
+// the tail of footerItemOrder disappearing.
+func TestRenderFooterEnvuelveEnVezDeSoltar(t *testing.T) {
+	lay := tui.NewLayout(45, 40, 0, false, false) // BPEstrecho
+	if lay.Breakpoint != tui.BPEstrecho {
+		t.Fatalf("width 45 should classify as BPEstrecho, got breakpoint %v", lay.Breakpoint)
+	}
+	st := tui.FooterState{
+		Model:      "sonnet-4-5",
+		ContextPct: 0.18,
+		Tokens:     36000,
+		CostUSD:    0.04,
+		GitBranch:  "algo",
+		CWD:        "~/proyectos/api",
+	}
+	items := []string{"model", "context", "tokens", "cost", "git", "cwd"}
+	line := tui.RenderFooter(lay, st, items)
+
+	rows := strings.Split(line, "\n")
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("RenderFooter() en BPEstrecho devolvió %d filas, esperaba %d para envolver en vez de soltar: %q", got, want, line)
+	}
+	for _, want := range []string{"sonnet-4-5", "18%", "36k", "$0.04", "algo", "~/proyectos/api"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("RenderFooter() = %q, esperaba que el envoltorio conservara %q en vez de soltarlo", line, want)
+		}
+	}
+	for _, row := range rows {
+		if got := lipgloss.Width(row); got > lay.ContentWidth() {
+			t.Errorf("fila %q de %d columnas excede el ancho de contenido (%d)", row, got, lay.ContentWidth())
+		}
+	}
+}
+
+// TestRenderFooterAbreviaAntesDeSoltar checks the middle step of RC-7's
+// policy directly: an item just a little too wide to sit alongside the
+// others gets shortened (path.go's own truncateRunes/ShortenPath patterns —
+// an ellipsis, or a shrunk path) rather than being dropped outright the
+// moment it does not fit verbatim.
+func TestRenderFooterAbreviaAntesDeSoltar(t *testing.T) {
+	lay := tui.NewLayout(30, 40, 0, false, false) // BPEstrecho, 2 filas
+	st := tui.FooterState{
+		Model:     "sonnet-4-5",
+		GitBranch: "main",
+		CWD:       "~/una/ruta/muy/larga/que/no/entra/nunca",
+	}
+	line := tui.RenderFooter(lay, st, []string{"model", "git", "cwd"})
+
+	if strings.Contains(line, "una/ruta/muy/larga/que/no/entra/nunca") {
+		t.Fatalf("RenderFooter() = %q, esperaba el cwd abreviado, no intacto", line)
+	}
+	if !strings.Contains(line, "sonnet-4-5") || !strings.Contains(line, "main") {
+		t.Errorf("RenderFooter() = %q, abreviar el cwd no debería costar los otros ítems", line)
+	}
+	if !strings.HasSuffix(line, "nunca") {
+		t.Errorf("RenderFooter() = %q, esperaba el cwd abreviado (ShortenPath) terminando en su hoja \"nunca\"", line)
+	}
+}
+
+// TestRenderFooterSueltaSoloComoUltimoRecurso checks the last step: cuando
+// ni envolver en lay.FooterSections() filas ni abreviar (hasta
+// footerMinAbbrevWidth) alcanza, RenderFooter suelta ítems de derecha a
+// izquierda — pero solo entonces, y solo los que hacen falta, no todos a la
+// vez como hacía la versión pre-RC-7. A este ancho (16, BPMinimo, una sola
+// fila) ni "cost", "git" ni "cwd" abreviados alcanzan junto al resto, así
+// que se sueltan, pero "model", "context" y "tokens" — los primeros de
+// footerItemOrder — sobreviven abreviados.
+func TestRenderFooterSueltaSoloComoUltimoRecurso(t *testing.T) {
+	lay := tui.NewLayout(16, 40, 0, false, false) // BPMinimo, 1 fila, muy angosto
+	st := tui.FooterState{
+		Model:      "sonnet-4-5",
+		ContextPct: 0.18,
+		Tokens:     36000,
+		CostUSD:    0.04,
+		GitBranch:  "main",
+		CWD:        "~/proj",
+	}
+	items := []string{"model", "context", "tokens", "cost", "git", "cwd"}
+	line := tui.RenderFooter(lay, st, items)
+
+	if got := lipgloss.Width(line); got > lay.ContentWidth() {
+		t.Fatalf("RenderFooter() = %q, de %d columnas, excede el ancho de contenido (%d)", line, got, lay.ContentWidth())
+	}
+	for _, want := range []string{"36k"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("RenderFooter() = %q, esperaba que sobreviviera %q antes de soltar los últimos ítems", line, want)
+		}
+	}
+	for _, dropped := range []string{"$0.04", "main", "~/proj"} {
+		if strings.Contains(line, dropped) {
+			t.Errorf("RenderFooter() = %q, no esperaba encontrar %q intacto a este ancho", line, dropped)
+		}
 	}
 }
 
