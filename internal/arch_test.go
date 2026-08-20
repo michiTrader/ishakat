@@ -185,6 +185,40 @@ func TestAskStaysPresentationFree(t *testing.T) {
 // method is the exact coupling this test exists to catch early, the same
 // way TestAskStaysPresentationFree catches internal/ask reaching for a
 // door-specific type.
+// TestTermenvStaysPure fija la frontera del paquete de detección de terminal
+// (W0, DESIGN-tui-mode.md §2.1) antes de que exista una sola línea suya, que es
+// para lo que depsOpt está.
+//
+// La regla importa por dos razones distintas. La primera es transitiva:
+// internal/tui va a consumir termenv para decidir regular/fullscreen, así que
+// cualquier cosa que termenv importe la hereda el TUI y TestTUINoImportaHTTP se
+// cae — con el error apuntando al TUI y no a la causa. La segunda es que la
+// detección tiene que ser *pura* para poder probarse: las trece filas de §3.4
+// incluyen Termux, WSL y dos consolas de Windows, plataformas donde esta suite
+// no va a correr nunca. La única forma de tener esas reglas bajo test es que
+// DetectEnv reciba goos, env, tty y Probe como parámetros, igual que
+// theme.DiagnoseEnv, y un paquete que importa internal/config para "leer la
+// configuración él mismo" pierde exactamente esa propiedad.
+//
+// De ahí que config esté en la lista de prohibidos aunque suene razonable:
+// el override de [ui] tui_mode entra como el string que ya recibe, no como una
+// dependencia. Quien decide es la llamada, no el detector.
+func TestTermenvStaysPure(t *testing.T) {
+	list, ok := depsOpt(t, "internal/termenv", "termenv")
+	if !ok {
+		return
+	}
+	for _, mal := range []string{
+		"net/http", "lipgloss", "bubbletea", "bubbles", "colorprofile",
+		"ishakat/internal/tui", "ishakat/internal/theme", "ishakat/internal/config",
+		"ishakat/internal/engine", "ishakat/internal/provider",
+	} {
+		if strings.Contains(list, mal) {
+			t.Errorf("internal/termenv importa %s: la detección tiene que ser pura (goos/env/tty/Probe como parámetros) para que las reglas de Termux, WSL y las consolas de Windows se puedan ejercitar desde un test en Linux", mal)
+		}
+	}
+}
+
 func TestMissionStaysPureAndDoesNotImportPermissions(t *testing.T) {
 	list, ok := depsOpt(t, "internal/mission", "mission")
 	if !ok {
