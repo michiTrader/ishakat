@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/MichiTrader/ishakat/internal/config"
+import (
+	"strings"
+
+	"github.com/MichiTrader/ishakat/internal/config"
+)
 
 // Map es el keymap del TUI, cargado desde config.Keys (§13). Vive como
 // strings comparados contra tea.KeyPressMsg.String() en vez de un tipo con
@@ -29,6 +33,12 @@ type Map struct {
 	// package's own default keymap, defaults.toml and bubbles/v2's textarea
 	// bindings all touch (see this constant's own test).
 	ToggleFold string
+
+	// QuitRepeat is how many times Quit must be pressed inside the grace
+	// window to actually exit (§7.4, RC-1). 1 quits on the first press;
+	// 2 is the shipped double-press; N counts presses. 0 is treated as
+	// unset and filled from the default (2).
+	QuitRepeat int
 }
 
 // defaultMap es la red de seguridad si la configuración llega con teclas
@@ -46,16 +56,23 @@ var defaultMap = Map{
 	HistoryNext: "down",
 	CopyLast:    "ctrl+y",
 	ToggleFold:  "ctrl+r",
+	QuitRepeat:  2,
 }
 
 // NewMap construye el keymap desde la configuración cargada, rellenando con
 // el default cualquier campo que haya quedado vacío.
+//
+// Quit is special (RC-1): tea.KeyPressMsg.String() is one keystroke, so a
+// multi-word value like "ctrl+c ctrl+c" can never match. validateKeys
+// already rewrites that form, but NewMap does the same last-resort parse
+// so a Map built without going through Load still works.
 func NewMap(k config.Keys) Map {
+	quit, repeat := normalizeQuitBinding(k.Quit, k.QuitRepeat)
 	m := Map{
 		Submit:      or(k.Submit, defaultMap.Submit),
 		Newline:     or(k.Newline, defaultMap.Newline),
 		Cancel:      or(k.Cancel, defaultMap.Cancel),
-		Quit:        or(k.Quit, defaultMap.Quit),
+		Quit:        or(quit, defaultMap.Quit),
 		ClearScreen: or(k.ClearScreen, defaultMap.ClearScreen),
 		ModelPicker: or(k.ModelPicker, defaultMap.ModelPicker),
 		ModelCycle:  or(k.ModelCycle, defaultMap.ModelCycle),
@@ -64,8 +81,40 @@ func NewMap(k config.Keys) Map {
 		HistoryNext: or(k.HistoryNext, defaultMap.HistoryNext),
 		CopyLast:    or(k.CopyLast, defaultMap.CopyLast),
 		ToggleFold:  or(k.ToggleFold, defaultMap.ToggleFold),
+		QuitRepeat:  repeat,
 	}
 	return m
+}
+
+// normalizeQuitBinding returns a single chord and a press count. A
+// multi-word quit whose tokens are all the same chord is treated as that
+// chord pressed N times (the legacy "ctrl+c ctrl+c" form). An unset
+// repeat (0) becomes the shipped default of 2; a negative or absurd
+// value is clamped to the default rather than disabling quit.
+func normalizeQuitBinding(quit string, repeat int) (string, int) {
+	parts := strings.Fields(quit)
+	if len(parts) >= 2 {
+		first := parts[0]
+		same := true
+		for _, p := range parts[1:] {
+			if p != first {
+				same = false
+				break
+			}
+		}
+		if same {
+			quit = first
+			if repeat == 0 {
+				repeat = len(parts)
+			}
+		}
+		// A mixed sequence is left as-is so handleGlobalKey will not
+		// match it; validateKeys is the path that rejects it loudly.
+	}
+	if repeat <= 0 || repeat > 10 {
+		repeat = defaultMap.QuitRepeat
+	}
+	return quit, repeat
 }
 
 func or(s, def string) string {

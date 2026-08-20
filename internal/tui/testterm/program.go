@@ -160,6 +160,57 @@ func (s *Session) count() int {
 	return s.writes
 }
 
+// WaitFor blocks until pred is true of the terminal, or fails the test.
+//
+// Settle is not a substitute for this and cannot be. Settle waits for output to
+// go quiet, but a program can be quiet and still unfinished: ishakat drains its
+// stream on a 50ms tea.Tick, and the renderer diffs frames, so a repaint that
+// changes nothing emits *zero bytes*. Output therefore goes quiet in the gap
+// between ticks while the turn is still running, and a test that only settled
+// would look at a screen still reading "pensando" and conclude the answer never
+// came. That is not hypothetical — it made an entire regression file vacuous
+// before the engine-wiring guard caught it.
+//
+// So anything that depends on the program reaching a *state* waits for that
+// state. desc is what the caller was waiting for and appears in the failure
+// message: a timeout here usually means the state never arrived, which is the
+// bug rather than a slow machine, so the message has to be able to say which
+// state it was.
+func (s *Session) WaitFor(desc string, pred func(*Grid) bool) {
+	s.t.Helper()
+	const (
+		deadline = 5 * time.Second
+		tick     = 10 * time.Millisecond
+	)
+	start := time.Now()
+	for {
+		s.mu.Lock()
+		ok := pred(s.grid)
+		s.mu.Unlock()
+		if ok {
+			return
+		}
+		if time.Since(start) > deadline {
+			s.t.Fatalf("testterm: timed out after %v waiting for %s\n%s",
+				deadline, desc, s.Dump("screen when the wait expired:"))
+		}
+		time.Sleep(tick)
+	}
+}
+
+// WaitForText waits until sub appears on screen or in the scrollback.
+func (s *Session) WaitForText(sub string) {
+	s.t.Helper()
+	s.WaitFor("text \""+sub+"\"", func(g *Grid) bool { return g.ContainsAnywhere(sub) })
+}
+
+// WaitWhile waits until pred stops being true — for waiting out a transient
+// state such as the busy indicator.
+func (s *Session) WaitWhile(desc string, pred func(*Grid) bool) {
+	s.t.Helper()
+	s.WaitFor("NOT "+desc, func(g *Grid) bool { return !pred(g) })
+}
+
 // Send writes raw bytes to the program's input, as a terminal would.
 //
 // Raw bytes rather than tea.KeyPressMsg values, deliberately. Constructing the

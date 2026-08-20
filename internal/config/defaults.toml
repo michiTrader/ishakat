@@ -64,7 +64,11 @@ items = ["model", "autonomy", "context", "tokens", "cost", "git", "cwd"]
 submit = "enter"
 newline = "ctrl+j"
 cancel = "esc"
-quit = "ctrl+c ctrl+c"
+# A single chord. "Press twice to quit" is quit_repeat, not the same
+# chord written twice: tea.KeyPressMsg.String() is one keystroke, so
+# "ctrl+c ctrl+c" can never match (RC-1).
+quit = "ctrl+c"
+quit_repeat = 2
 clear_screen = "ctrl+l"
 model_picker = "ctrl+p"
 model_cycle = "ctrl+o"

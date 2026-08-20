@@ -591,6 +591,123 @@ func TestToolsDefaultsLoad(t *testing.T) {
 	}
 }
 
+// TestKeysDefaultsLoad is RC-1's counterpart to TestToolsDefaultsLoad: if
+// [keys] in defaults.toml drifted out of sync with the schema, Load would
+// emit "ignored key" warnings instead of populating QuitRepeat, and quit
+// would silently read as the zero value (one press — or none, depending on
+// the handler). Asserting on the concrete shipped chord and count is what
+// makes this test able to fail.
+func TestKeysDefaultsLoad(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "minimal.toml")
+	if err := os.WriteFile(p, []byte("schema = 1\n"), 0o600); err != nil {
+		t.Fatalf("could not write temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("embedded defaults failed Validate: %v", err)
+	}
+
+	if cfg.Keys.Quit != "ctrl+c" {
+		t.Errorf("Keys.Quit = %q, want %q (a single chord; RC-1)", cfg.Keys.Quit, "ctrl+c")
+	}
+	if cfg.Keys.QuitRepeat != 2 {
+		t.Errorf("Keys.QuitRepeat = %d, want 2", cfg.Keys.QuitRepeat)
+	}
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w.Msg, "ignored key") && strings.Contains(w.Msg, "quit_repeat") {
+			t.Errorf("quit_repeat was ignored (schema/defaults out of sync): [%s] %s", w.Where, w.Msg)
+		}
+		if strings.Contains(w.Where, "keys") || strings.Contains(w.Msg, "quit") {
+			t.Errorf("unexpected [keys] warning on the shipped defaults: [%s] %s", w.Where, w.Msg)
+		}
+	}
+}
+
+// TestKeysFatalErrors proves validateKeys actually rejects. Each case is a
+// value that can never match tea.KeyPressMsg.String(), so starting up with
+// it would silently disable the binding — the same class of bug as RC-1.
+func TestKeysFatalErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		toml      string
+		wantMatch string
+	}{
+		{
+			name:      "unknown_chord",
+			toml:      "schema=1\n[keys]\nquit=\"ctrl+foo\"\n",
+			wantMatch: "not a chord",
+		},
+		{
+			name:      "mixed_multi_word_quit",
+			toml:      "schema=1\n[keys]\nquit=\"ctrl+c esc\"\n",
+			wantMatch: "mixes different chords",
+		},
+		{
+			name:      "negative_quit_repeat",
+			toml:      "schema=1\n[keys]\nquit_repeat=-1\n",
+			wantMatch: "cannot be negative",
+		},
+		{
+			name:      "quit_repeat_too_large",
+			toml:      "schema=1\n[keys]\nquit_repeat=99\n",
+			wantMatch: "too large",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			p := filepath.Join(tmpDir, "invalid.toml")
+			if err := os.WriteFile(p, []byte(tt.toml), 0o600); err != nil {
+				t.Fatalf("could not write temp config: %v", err)
+			}
+			_, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+			if err == nil {
+				t.Fatal("expected error, but Load succeeded")
+			}
+			if !strings.Contains(err.Error(), tt.wantMatch) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantMatch)
+			}
+		})
+	}
+}
+
+// TestKeysLegacyMultiWordQuit is the last-resort rewrite: a user TOML that
+// still writes quit = "ctrl+c ctrl+c" (the pre-RC-1 form) must load as a
+// single chord plus a repeat of 2, and must warn rather than fail. Refusing
+// to start would punish every existing config for a bug that was ours.
+func TestKeysLegacyMultiWordQuit(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "legacy.toml")
+	body := "schema = 1\n[keys]\nquit = \"ctrl+c ctrl+c\"\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("could not write temp config: %v", err)
+	}
+
+	cfg, err := config.Load(config.Options{UserPath: p, SkipProject: true})
+	if err != nil {
+		t.Fatalf("legacy multi-word quit should load, got: %v", err)
+	}
+	if cfg.Keys.Quit != "ctrl+c" {
+		t.Errorf("Keys.Quit = %q, want rewritten %q", cfg.Keys.Quit, "ctrl+c")
+	}
+	if cfg.Keys.QuitRepeat != 2 {
+		t.Errorf("Keys.QuitRepeat = %d, want 2 (token count)", cfg.Keys.QuitRepeat)
+	}
+	found := false
+	for _, w := range cfg.Warnings {
+		if w.Where == "keys" && strings.Contains(w.Msg, "rewritten") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a keys warning about the rewrite; warnings = %+v", cfg.Warnings)
+	}
+}
+
 // TestToolsFatalErrors proves validateTools actually rejects. Each case is a
 // value that has no safe interpretation, so starting up with it would be worse
 // than refusing to start.
