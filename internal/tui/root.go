@@ -246,6 +246,16 @@ type Root struct {
 	// arrived after the turn already closed" from a real drain.
 	buf *engine.StreamBuf
 
+	// agentStream is buf's sibling for a tools-enabled turn (W2 item 2,
+	// docs/ROADMAP-ux-2026-08-20.md, agentstream.go): startAgentTurn's own
+	// agentTurnCmd goroutine writes into it via the AgentSink it builds
+	// (agentStreamBuf.sink), and streamTickMsg drains it the same way it
+	// drains buf. Exactly one of buf/agentStream is non-nil while a turn is
+	// live — the streamTickMsg dispatch below picks whichever is set — and
+	// it is also how drainAgentStream tells "the tick arrived after the
+	// turn already closed" from a real drain, mirroring buf's own comment.
+	agentStream *agentStreamBuf
+
 	// cancel closes the live turn's context. It is the entire implementation
 	// of esc/ctrl+c per §7.4: the engine's run loop notices ctx.Err() and
 	// calls buf.finish(nil, true), so cancellation travels the same path as a
@@ -1407,6 +1417,16 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickAnim(m.fps)
 
 	case streamTickMsg:
+		// agentStream is set exactly while a tools-enabled turn is live
+		// (startAgentTurn) and buf exactly while a plain streamed one is
+		// (startEngineTurn's own branch) — never both at once, since
+		// toolsEnabled picks one path per turn — so checking agentStream
+		// first and falling through to the plain m.live.active/drainStream
+		// check otherwise routes every tick to the one drain function that
+		// actually owns it, with no ambiguity between the two.
+		if m.agentStream != nil {
+			return m.drainAgentStream()
+		}
 		if !m.live.active {
 			return m, nil
 		}
@@ -2314,6 +2334,7 @@ func (m *Root) releaseTurn() {
 		m.cancel = nil
 	}
 	m.buf = nil
+	m.agentStream = nil
 }
 
 // cancelTurn implements §7.4: esc (or the first ctrl+c in ModeBusy) closes
