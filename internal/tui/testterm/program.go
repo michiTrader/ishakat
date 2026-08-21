@@ -28,11 +28,20 @@ type Session struct {
 	prog *tea.Program
 	in   io.WriteCloser
 
-	// mu guards the grid and the write counter. The program writes from its own
-	// goroutine while tests read from theirs, so every touch of either goes
-	// through here.
+	// mu guards the grid, the write counter and final. The program writes
+	// from its own goroutine while tests read from theirs, so every touch of
+	// any of the three goes through here.
 	mu     sync.Mutex
 	writes int
+
+	// final is the tea.Model p.Run() returned, set by the same goroutine that
+	// calls Run just before it reports completion on done. See FinalModel's
+	// own doc comment for why a caller needs this at all: it is what lets a
+	// test reach DECISION-1b's Root.ExitTranscript on the model the real
+	// program actually quit with, the same way internal/app.Run does, rather
+	// than asserting against a second, separately-driven Root that only
+	// resembles the one that was on screen.
+	final tea.Model
 
 	done chan error
 	once sync.Once
@@ -90,7 +99,10 @@ func Start(t *testing.T, model tea.Model, w, h int) *Session {
 	)
 
 	go func() {
-		_, err := s.prog.Run()
+		final, err := s.prog.Run()
+		s.mu.Lock()
+		s.final = final
+		s.mu.Unlock()
 		s.done <- err
 	}()
 
@@ -305,6 +317,26 @@ func (s *Session) Quit() {
 		// asynchronously in a future version.
 		s.Settle()
 	})
+}
+
+// FinalModel returns the tea.Model p.Run() returned, or nil if the program
+// has not finished yet (Quit was not called and the program is still
+// running).
+//
+// This exists for §4.1 assertion 6 (DECISION-1b's exit transcript): the
+// transcript is a plain method on Root (ExitTranscript, view.go),
+// deliberately not wired into Update/View — see that method's own doc
+// comment for why bubbletea v2's independent render ticker makes anything
+// sequenced from inside a running Program racy — so internal/app.Run calls
+// it on the model p.Run() itself returned, after p.Run() has already
+// returned. A test asserting the same contract has to reach the same model
+// the same way, rather than building a second Root by hand and hoping it
+// matches the one testterm actually drove: that would test ExitTranscript in
+// isolation, not the seam Quit/p.Run() forms with it.
+func (s *Session) FinalModel() tea.Model {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.final
 }
 
 // Screen returns the visible screen as one string.
