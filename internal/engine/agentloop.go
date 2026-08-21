@@ -160,6 +160,94 @@ type AgentResult struct {
 	Aborted bool
 }
 
+// AgentSink is RunAgentTurnStreaming's event surface (DECISION-2,
+// docs/ROADMAP-ux-2026-08-20.md's W2 section, item 1: "Streaming agent-turn
+// API in internal/engine, blocking form preserved for headless/serve").
+// Every field is optional — a nil field is simply never called, exactly
+// like AgentOptions.OnWait's existing contract — so the zero AgentSink
+// makes RunAgentTurnStreaming behave identically to RunAgentTurn.
+//
+// Every callback fires synchronously, on the same goroutine
+// RunAgentTurnStreaming itself runs on (the caller's own — nothing in this
+// package starts a goroutine for a turn; see RunAgentTurn's own doc
+// comment). An implementation MUST NOT block, for the same reason
+// AgentOptions.OnWait's own doc comment already gives: this goroutine is
+// mid-turn, and blocking it stalls the loop, not just the display. A
+// caller that wants to coalesce these into a repaint clock (§7.3's own
+// discipline — "the model for the buffering discipline" DECISION-2 names
+// StreamBuf as) should push into a buffer here and drain it on its own
+// tick, never do the repaint from inside the callback itself.
+type AgentSink struct {
+	// OnReasoningDelta fires for every EventReasoning delta, in arrival
+	// order, at the same point the loop's own per-iteration reasoning
+	// builder appends it — so a caller sees exactly the text
+	// AgentResult.Reasoning eventually carries, just live rather than only
+	// once the turn ends.
+	OnReasoningDelta func(delta string)
+
+	// OnTextDelta is OnReasoningDelta's sibling for EventDelta.
+	OnTextDelta func(delta string)
+
+	// OnToolCallStart fires once per tool call, right after that call has
+	// already passed the cap and loop-detection checks for this batch —
+	// never for a call the loop is about to refuse instead of running, so
+	// a caller can pair every Start it sees with exactly one End, never a
+	// Start with no matching End.
+	OnToolCallStart func(id, name string, args json.RawMessage)
+
+	// OnToolCallEnd fires once per tool call OnToolCallStart already
+	// announced, after that call's BlockToolResult/BlockToolErrorResult
+	// has already been appended to history — so a caller that reacts by
+	// reading history sees the result already there, never a call still
+	// in flight. result is the same text (already truncated per
+	// AgentOptions.MaxOutputBytes) the persisted block carries.
+	OnToolCallEnd func(id, name, result string, isError bool)
+
+	// OnUsage fires whenever the running Usage total changes, mirroring
+	// StreamBuf.setUsage's own "either call overwrites, both carry the
+	// provider's running total" contract — never a delta.
+	OnUsage func(usage *convo.Usage)
+
+	// OnPhase fires "exec" once per iteration (mirroring
+	// startAgentTurn's own footer.Phase = "exec", §21.1's vocabulary) so a
+	// caller's phase/footer display can be driven from a real event
+	// instead of an inferred one (W2 item 2). AgentOptions.OnWait remains
+	// the separate, existing source for the "wait <duration>" phase — this
+	// field is additive to it, not a replacement.
+	OnPhase func(phase string)
+
+	// Inject is the steering hook (DECISION-2 consequence 2, W2 item 4):
+	// if set, called once per iteration, right before that iteration's
+	// request is rebuilt from history.Active() — i.e. after the previous
+	// iteration's assistant/tool messages already landed in history, and
+	// before the next provider request is opened. Whatever messages it
+	// returns (nil or empty: nothing to add) are appended to history
+	// before that request is built, so the model's very next turn already
+	// sees them in context — the same "the request is the history"
+	// discipline root.go's submit already documents for the very first
+	// user message of a turn.
+	//
+	// Inject must not block: it is polled once per iteration, never
+	// awaited, so a caller wanting to inject a message typed a moment ago
+	// should keep it in a queue this callback drains, mirroring OnWait's
+	// own "must not block" requirement and for the identical reason.
+	//
+	// What Inject must NEVER be a path to (§21's own security property,
+	// DECISION-2 consequence 2, explicitly a W2 gate and not a
+	// code-review note): approving a pending tool call, changing
+	// autonomy, or lifting a §21.4 invariant. Those resolve exclusively
+	// through their own existing dialogs (ToolApproveRequestMsg,
+	// AskUserRequestMsg and their resolve* handlers), which this field has
+	// no path into — an injected message becomes an ordinary
+	// convo.RoleUser history entry the model reads on its next turn like
+	// any other user message, never consulted by
+	// permissions.Guard.Authorize. A test asserting the negative case (a
+	// steering message arriving while a tool call is pending must leave
+	// that call pending, unapproved) is required before the caller-side
+	// steering feature this hook enables can be considered closed.
+	Inject func() []convo.Message
+}
+
 // RunAgentTurn runs the tool-calling loop to completion (or until the cap, loop
 // detection, or cancellation stops it). It blocks: the TUI path that needs to
 // stream as it goes will wrap each iteration's channel drain around its own
@@ -171,7 +259,40 @@ type AgentResult struct {
 // BlockToolCall blocks) and each tool's BlockToolResult message are added to
 // *history before the next iteration, so the model sees the full loop in
 // context. The caller owns history and persists it; engine never does.
+//
+// This is DECISION-2's "blocking form... preserved for headless/serve" half
+// (docs/ROADMAP-ux-2026-08-20.md's W2 section, item 1): it is runAgentTurn
+// below with a nil sink, so every existing headless/serve call site
+// (internal/app/agentturn.go's runAgentTurnHeadless) sees byte-for-byte the
+// same behaviour it always has — no new field to set, no new import, no
+// new goroutine. RunAgentTurnStreaming, just below, is the exact same loop
+// with the event surface DECISION-2 asks for wired in.
 func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOptions, history *convo.Conversation) (AgentResult, error) {
+	return e.runAgentTurn(ctx, req, opts, history, nil)
+}
+
+// RunAgentTurnStreaming is RunAgentTurn's streaming sibling (DECISION-2,
+// docs/ROADMAP-ux-2026-08-20.md's W2 section, item 1): the same tool-calling
+// loop and the same blocking contract — it returns only once the turn is
+// over, exactly like RunAgentTurn; nothing here spawns a goroutine of its
+// own — but with sink's callbacks fired as the loop produces reasoning/text
+// deltas, starts and finishes tool calls, moves through phases, and reaches
+// the one point per iteration where a caller may inject a message into
+// history. A zero AgentSink (every field nil) makes this call identical to
+// RunAgentTurn, field for field.
+func (e *Engine) RunAgentTurnStreaming(ctx context.Context, req Request, opts AgentOptions, history *convo.Conversation, sink AgentSink) (AgentResult, error) {
+	return e.runAgentTurn(ctx, req, opts, history, &sink)
+}
+
+// runAgentTurn is RunAgentTurn's and RunAgentTurnStreaming's shared body —
+// one loop, not two copies of §12bis's six semantics (the hard cap, loop
+// detection, cancellation, error-is-data, output truncation, refusal-ends-
+// the-turn) to keep in sync, the same "no second copy" reasoning already
+// applied to e.open above. sink is nil for the blocking form; every site
+// below that reports an event guards on sink != nil, and per field on that
+// specific callback being non-nil, before calling it — a nil sink costs
+// this function nothing beyond those checks.
+func (e *Engine) runAgentTurn(ctx context.Context, req Request, opts AgentOptions, history *convo.Conversation, sink *AgentSink) (AgentResult, error) {
 	maxCalls := opts.MaxToolCalls
 	if maxCalls == 0 {
 		maxCalls = defaultMaxToolCalls
@@ -228,6 +349,32 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			return result, err
 		}
 
+		// §21.1's "exec" phase, once per iteration (W2 item 2: "phase/footer
+		// updates from real events rather than inferred ones"). This is a
+		// real per-iteration event, unlike root.go's startAgentTurn setting
+		// footer.Phase = "exec" once before the loop even starts — a caller
+		// wired to this can distinguish "iteration 1 of the loop is
+		// running" from "iteration 4 is", which the single pre-loop write
+		// never could.
+		if sink != nil && sink.OnPhase != nil {
+			sink.OnPhase("exec")
+		}
+
+		// The steering hook (DECISION-2 consequence 2, W2 item 4): polled
+		// once per iteration, right here — after the previous iteration's
+		// own messages already landed in history (or, on iteration 0,
+		// after the caller's own pre-turn history), and before iterReq
+		// below rebuilds the request from history.Active(). Whatever
+		// Inject returns joins history now, so the very next provider
+		// request already carries it in context, exactly like any other
+		// user message. See AgentSink.Inject's own doc comment for the
+		// hard security boundary this must never cross.
+		if sink != nil && sink.Inject != nil {
+			for _, injected := range sink.Inject() {
+				history.Add(injected)
+			}
+		}
+
 		if opts.MinInterval > 0 && !lastRequest.IsZero() {
 			if since := time.Since(lastRequest); since < opts.MinInterval {
 				// Interruptible: a user hitting esc during the floor must not
@@ -272,8 +419,14 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			switch ev.Kind {
 			case EventDelta:
 				text.WriteString(ev.Text)
+				if sink != nil && sink.OnTextDelta != nil {
+					sink.OnTextDelta(ev.Text)
+				}
 			case EventReasoning:
 				reasoning.WriteString(ev.Text)
+				if sink != nil && sink.OnReasoningDelta != nil {
+					sink.OnReasoningDelta(ev.Text)
+				}
 			case EventToolCall:
 				toolCalls = append(toolCalls, toolCallOut{
 					id:        ev.ID,
@@ -283,16 +436,25 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				})
 			case EventUsage:
 				iterUsage = ev.Usage
+				if sink != nil && sink.OnUsage != nil {
+					sink.OnUsage(ev.Usage)
+				}
 			case EventError:
 				if turnErr == nil {
 					turnErr = ev.Err
 				}
 				if ev.Usage != nil {
 					iterUsage = ev.Usage
+					if sink != nil && sink.OnUsage != nil {
+						sink.OnUsage(ev.Usage)
+					}
 				}
 			case EventDone:
 				if ev.Usage != nil {
 					iterUsage = ev.Usage
+					if sink != nil && sink.OnUsage != nil {
+						sink.OnUsage(ev.Usage)
+					}
 				}
 			}
 		}
@@ -450,6 +612,24 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 			lastToolName = tc.name
 			lastToolArgs = append(lastToolArgs[:0], tc.args...)
 
+			// toolCallEnd is this call's own OnToolCallEnd closure —
+			// tc is scoped to this exact iteration of the range (Go 1.22+
+			// per-iteration loop variables, matching go.mod's go 1.26.5),
+			// so capturing it here is safe. Every terminal outcome below
+			// (cancelled before starting, no runner bound, a runner
+			// failure of every kind, or the ordinary success/failure
+			// completion further down) calls this exactly once, pairing
+			// it with the OnToolCallStart just below — see AgentSink's
+			// own doc comment for why a Start always gets a matching End.
+			toolCallEnd := func(outText string, isError bool) {
+				if sink != nil && sink.OnToolCallEnd != nil {
+					sink.OnToolCallEnd(tc.id, tc.name, outText, isError)
+				}
+			}
+			if sink != nil && sink.OnToolCallStart != nil {
+				sink.OnToolCallStart(tc.id, tc.name, tc.args)
+			}
+
 			runErr := ctx.Err()
 			var outText string
 			var isError bool
@@ -462,6 +642,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				isError = true
 				result.Aborted = true
 				history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+				toolCallEnd(outText, isError)
 				notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 				return result, runErr
 			}
@@ -482,6 +663,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				isError = true
 				result.Calls++
 				history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+				toolCallEnd(outText, isError)
 				continue
 			}
 
@@ -498,6 +680,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					isError = true
 					result.Aborted = true
 					history.Add(convo.NewMessage(convo.RoleTool, convo.ToolErrorBlock(tc.id, tc.name, outText)))
+					toolCallEnd(outText, isError)
 					notExecuted(history, toolCalls[i+1:], "cancelled by the user")
 					return result, ctx.Err()
 				}
@@ -530,6 +713,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 					// an orphaned tool_call and the next request 400s (Bug 2).
 					history.Add(convo.NewMessage(convo.RoleTool,
 						convo.ToolErrorBlock(tc.id, tc.name, rerr.Error())))
+					toolCallEnd(rerr.Error(), true)
 					notExecuted(history, toolCalls[i+1:], "the turn ended when permission was refused")
 					return result, nil
 				}
@@ -551,6 +735,7 @@ func (e *Engine) RunAgentTurn(ctx context.Context, req Request, opts AgentOption
 				blk = convo.ToolResultBlock(tc.id, tc.name, outText)
 			}
 			history.Add(convo.NewMessage(convo.RoleTool, blk))
+			toolCallEnd(outText, isError)
 
 			// Futility (step 26, fix 3), evaluated here because this is the
 			// one place every outcome converges — a tool that ran and
