@@ -126,13 +126,12 @@ func TestBannerAppearsExactlyOnceInBothModes(t *testing.T) {
 
 // TestEmitIsTheOnlyModeAwareFunction checks Rule 2's other half directly:
 // build one Frame, call emit with both modes, and confirm the only thing
-// that is allowed to differ is exactly what emit's own doc comment says is
-// still unimplemented (AltScreen's fullscreen behaviour — today a
-// documented no-op, so it does not differ yet either). If render() ever
-// grows a mode parameter, or if some future change makes regular and
-// fullscreen disagree about MouseMode or the cursor, this is the test that
-// catches it: those are style-level policies, and unlike AltScreen there is
-// no design note anywhere permitting them to differ per mode.
+// that is allowed to differ is exactly what emit's own doc comment names as
+// the actual mode-aware decision — AltScreen. If render() ever grows a mode
+// parameter, or if some future change makes regular and fullscreen disagree
+// about MouseMode or the cursor, this is the test that catches it: those
+// are style-level policies, and unlike AltScreen there is no design note
+// anywhere permitting them to differ per mode.
 func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 	f := Frame{Content: "line one\nline two"}
 	var cursor *tea.Cursor
@@ -147,14 +146,10 @@ func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 	if regularView.MouseMode != fullscreenView.MouseMode {
 		t.Errorf("emit changed MouseMode based on mode: regular=%v fullscreen=%v", regularView.MouseMode, fullscreenView.MouseMode)
 	}
-	// AltScreen is documented as not yet wired for fullscreen (see emit's
-	// own comment in view.go): both must currently be false. This
-	// assertion is expected to need updating the moment the fullscreen
-	// emit path is actually implemented — that is the point of it.
 	if regularView.AltScreen {
 		t.Errorf("regular must never set AltScreen")
 	}
-	if fullscreenView.AltScreen {
-		t.Errorf("fullscreen's AltScreen is not implemented yet; got true. If this test is failing because the seam work landed, update this assertion (and the harness assertions in §4.1) rather than deleting it.")
+	if !fullscreenView.AltScreen {
+		t.Errorf("fullscreen must set AltScreen")
 	}
 }

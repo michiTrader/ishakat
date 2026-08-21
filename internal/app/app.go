@@ -360,10 +360,18 @@ func Run(version string, resume bool) int {
 		// key would have had no effect for the one host it names.
 		Termux: xdg.IsTermux(),
 		// TUIMode is tuiDetection.Mode, resolved above — see that field's
-		// own doc comment (internal/tui/root.go) for why nothing inside
-		// internal/tui reads it yet.
+		// own doc comment (internal/tui/root.go) for what actually reads
+		// it as of W3 part 6 (emit, view.go).
 		TUIMode: tuiDetection.Mode,
-		Engine:  eng,
+		// FullscreenExitTranscript is DECISION-1b, read directly from
+		// config rather than through termenv.Detect: unlike tui_mode it
+		// is not something the environment can override, it is only
+		// ever what the user's [ui] block says (default true). See
+		// tui.Options.FullscreenExitTranscript's own doc comment for why
+		// this package is the one that has to act on it (in Run's own
+		// post-p.Run() code below), not internal/tui.
+		FullscreenExitTranscript: cfg.UI.FullscreenExitTranscript,
+		Engine:                   eng,
 		// The factory re-decides Caps per destination model (see its own
 		// comment), so switching models with ctrl+p keeps tool calling
 		// working — or correctly stops offering tools to a model the
@@ -546,10 +554,37 @@ func Run(version string, resume bool) int {
 		}()
 	}
 
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Error running the interface: %v\n", err)
 		return 1
 	}
+
+	// DECISION-1b's exit transcript. This has to run here, after p.Run()
+	// has already returned — not from inside root's own Update/View, and
+	// not sequenced with tea.Quit via a Cmd — because bubbletea v2's
+	// renderer flushes bytes to the real terminal on an independent
+	// ticker, decoupled from the Update/View cycle any Cmd runs inside;
+	// p.Run() returning is the one point guaranteed (by
+	// Program.shutdown/stopRenderer/renderer.close(), see
+	// tui.Options.FullscreenExitTranscript's and tui.Root.ExitTranscript's
+	// own doc comments for the full trace through bubbletea's source) to
+	// happen after the real AltScreen-exit sequence is already on the
+	// wire — so it is finally safe to print the transcript with a plain
+	// fmt.Print. final.(tui.Root) mirrors every other non-fatal resolution
+	// in this function: p.Run() is documented to return the last
+	// tea.Model it held, which — barring some future wrapper this
+	// package does not currently install — is always the tui.Root NewRoot
+	// built above, but a failed assertion here degrades to "print
+	// nothing" rather than a panic, the same "nothing wired, nothing
+	// happens" shape this file already applies to every other optional
+	// seam.
+	if root, ok := final.(tui.Root); ok {
+		if transcript := root.ExitTranscript(); transcript != "" {
+			fmt.Print(transcript)
+		}
+	}
+
 	return 0
 }
 
