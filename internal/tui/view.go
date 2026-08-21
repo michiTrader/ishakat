@@ -74,37 +74,83 @@ type Frame struct {
 //     (chat.go) go on being what permanently commits a line via
 //     tea.Println. That is "printed means final" (§4, regular's own rule),
 //     and none of it changes here.
-//   - fullscreen: NOT YET IMPLEMENTED. Per docs/DESIGN-tui-mode.md §4, this
-//     branch is where AltScreen would become true and where this package
-//     would start owning its own scrollback/viewport instead of relying on
-//     tea.Println. That is real, unwritten behaviour — a resize-repair
-//     strategy, DECISION-1b's exit transcript, and the six §4.1 harness
-//     assertions in fullscreen all have to land together per the roadmap's
-//     "no wave closes piecemeal" rule — so for now this branch falls
-//     through to the exact same regular behaviour rather than flipping
-//     AltScreen on a renderer that cannot yet repaint what that implies.
-//     Landing the seam now and the fullscreen behaviour later, in that
-//     order, is what keeps that eventual change a diff confined to this one
-//     branch instead of a diff that also has to introduce the seam it
-//     needs. See Options.TUIMode's and Root.tuiMode's own doc comments
-//     (root.go) for the identical reasoning already applied to the
-//     detection wiring itself.
+//   - fullscreen: AltScreen becomes true — Bubble Tea's own alternate
+//     screen, with its own buffer the terminal restores on exit. This
+//     package needs no richer Frame type or cell-grid viewport to make
+//     that correct for Rule 3 ("fullscreen repairs everything, because it
+//     owns every visible cell"): render() (above) has no memoization
+//     anywhere in this package — every View() call re-derives the whole
+//     Frame from m.transcript/m.live/etc. from scratch — so the existing,
+//     unconditional "rebuild from state" already *is* the repair strategy;
+//     there is nothing a richer Frame would add that a fresh render()
+//     does not already give for free on every message, including a
+//     resize. What fullscreen actually changes elsewhere: evictOverflow
+//     (root.go) no-ops in this mode, because its tea.Println eviction
+//     mechanism has no valid destination once AltScreen is true — see its
+//     own doc comment. The exit-transcript half of DECISION-1b is
+//     deliberately out of scope for this function: Options.
+//     FullscreenExitTranscript's own doc comment (root.go) explains why
+//     that has to be handled entirely outside this package's Update/View
+//     loop, by Root.ExitTranscript (below) and internal/app.Run, not by
+//     anything emit or View could safely do here.
 func emit(f Frame, mode termenv.Mode, cursor *tea.Cursor) tea.View {
 	var v tea.View
 	v.SetContent(f.Content)
 	v.MouseMode = tea.MouseModeNone
 	v.Cursor = cursor
-	switch mode {
-	case termenv.ModeFullscreen:
-		// TODO(W3): own scrollback + AltScreen=true once the fullscreen
-		// resize-repair strategy exists. See this function's own doc
-		// comment for why that is a deliberate, separate slice and not an
-		// oversight.
-		v.AltScreen = false
-	default:
-		v.AltScreen = false
-	}
+	v.AltScreen = mode == termenv.ModeFullscreen
 	return v
+}
+
+// ExitTranscript is DECISION-1b's exit-transcript flush, for a caller
+// leaving fullscreen mode. It renders the *entire* transcript — every
+// entry, not just transcript[printedUpTo:] the way headContent draws the
+// live region, because printedUpTo never advances in fullscreen at all
+// (evictOverflow's own fullscreen guard, root.go) — at the frame's own
+// content width, ready to be written straight to the real terminal with a
+// plain fmt.Print.
+//
+// This is deliberately a plain method, not a tea.Cmd and not something
+// wired into Update/View: see Options.FullscreenExitTranscript's own doc
+// comment (root.go) for the full reasoning, in short, bubbletea v2's
+// renderer flushes bytes to the wire on an independent ticker, decoupled
+// from the Update/View cycle any Cmd runs inside, so any attempt to
+// sequence "print the transcript, then quit" from inside a running
+// tea.Program is provably racy — the print can land on either side of the
+// real AltScreen-exit write. The one deterministic point is Program.Run
+// itself returning, which is guaranteed (by Program.shutdown ->
+// stopRenderer -> renderer.close(), read from charm.land/bubbletea/v2's
+// own source) to happen strictly after the real terminal is already back
+// on the main screen. internal/app.Run is expected to call this on the
+// final tea.Model p.Run() itself returns (type-asserted to Root), after
+// p.Run() has already returned, and to fmt.Print the result directly —
+// never through tea.Println, since by then there is no running Program
+// left to hand a Cmd to.
+//
+// Returns "" — nothing to print — in every case that is not "fullscreen,
+// with the feature enabled, with an actual terminal size known, and with
+// at least one entry in the transcript": leaving regular mode never needed
+// this in the first place (its scrollback was always real), a Root that
+// never saw a WindowSizeMsg has no width to wrap against, and an empty
+// transcript has nothing worth printing.
+func (m Root) ExitTranscript() string {
+	if m.tuiMode != termenv.ModeFullscreen || !m.exitTranscript {
+		return ""
+	}
+	if m.lay.Height <= 0 {
+		return ""
+	}
+	if len(m.transcript) == 0 {
+		return ""
+	}
+	g := m.lay.glyphs()
+	width := m.lay.ContentWidth()
+	var b strings.Builder
+	for _, e := range m.transcript {
+		b.WriteString(renderTranscriptLine(m.styles, g, width, e.role, e.name, e.text, e.ts, m.cfgSyntax, m.cfgMarkdown, m.foldCode, e.reasoning, m.cfgReasoning))
+		b.WriteString("\n\n")
+	}
+	return b.String()
 }
 
 // clampFrameWidth is RC-5's width invariant: no line render() returns is ever

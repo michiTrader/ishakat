@@ -376,11 +376,20 @@ type Root struct {
 	animMode string
 	cap      theme.Capability
 
-	// tuiMode is Options.TUIMode, carried unchanged (see that field's own
-	// comment for why it has no reader yet as of W3 part 1: /debug is the
-	// first one, added below, purely as a visibility seam ahead of the
-	// render/emit work that will actually act on it).
+	// tuiMode is Options.TUIMode, carried unchanged. As of W3 part 6 this
+	// has a second reader beyond /debug: emit (view.go) is the one place
+	// that actually acts on it, setting AltScreen true in fullscreen —
+	// see emit's own doc comment.
 	tuiMode termenv.Mode
+
+	// exitTranscript is Options.FullscreenExitTranscript, carried
+	// unchanged. DECISION-1b ([ui] fullscreen_exit_transcript, default
+	// true): whether leaving fullscreen should print the whole
+	// conversation to the real terminal before handing the screen back.
+	// See ExitTranscript's own doc comment (view.go) for why this is read
+	// by internal/app.Run *after* p.Run() returns, not by anything inside
+	// this package's own Update/View loop.
+	exitTranscript bool
 
 	// footerItems is ui.footer.items: which footer items to draw and in which
 	// order. Empty means the default order of footerItemOrder.
@@ -768,17 +777,84 @@ type Options struct {
 	// default, so a bare Options (every test in this package) keeps
 	// today's inline behaviour with no caller having to think about it.
 	//
-	// Deliberately unused by View()/render() as of W3 part 1: reading it
-	// here is one line, but the line that would actually act on it —
-	// v.AltScreen in view.go — is not written yet, because doing that
-	// before the render/emit seam (docs/DESIGN-tui-mode.md §4) exists would
-	// silently break DECISION-1b's exit-transcript guarantee (see W3 part
-	// 1's own docs/PLAN.md §17 entry for the Bubble Tea insertAbove
-	// mechanics that make this concrete, not hypothetical). Landing the
-	// plumbing now and the behaviour later, in that order, is what keeps
-	// the eventual AltScreen change a one-line, reviewable diff instead of
-	// a change that also has to introduce the field it depends on.
+	// As of W3 part 6 this is actually acted on: emit (view.go), the one
+	// function docs/DESIGN-tui-mode.md §4 Rule 2 allows to be mode-aware,
+	// sets v.AltScreen = (mode == termenv.ModeFullscreen). Landing the
+	// plumbing in W3 part 1 and the behaviour here, in that order, is what
+	// kept this a one-line, reviewable diff confined to emit's own branch
+	// instead of a change that also had to introduce the seam it depends
+	// on — see emit's own doc comment for the render/emit split, and
+	// Options.FullscreenExitTranscript below for the exit-transcript half
+	// of what fullscreen needs that AltScreen alone does not give it.
 	TUIMode termenv.Mode
+
+	// FullscreenExitTranscript is DECISION-1b ([ui] fullscreen_exit_transcript,
+	// config/schema.go, default true): whether leaving fullscreen mode
+	// should print the whole conversation to the real terminal — into
+	// persistent scrollback — before handing the screen back to whatever
+	// was on it before. The zero value is false, which is *not* the
+	// configured default (true) — every real caller is expected to pass
+	// cfg.UI.FullscreenExitTranscript unchanged, the same "resolved
+	// elsewhere, carried here as-is" rule TUIMode above already follows;
+	// false is what a bare Options (every test in this package that never
+	// sets this) gets, which is the correct "do not print anything extra"
+	// behaviour for a test that is not exercising this feature at all.
+	//
+	// Why this needs its own field, its own method (Root.ExitTranscript,
+	// view.go), and — critically — a caller *outside* this package's own
+	// tea.Model loop:
+	//
+	// The naive design is a Cmd that runs tea.Println(transcript) followed
+	// by tea.Quit, sequenced with tea.Sequence, fired from whatever
+	// Update case is about to leave fullscreen (a quit key, /clear, a mode
+	// switch — anywhere AltScreen would flip back to false). That design
+	// is not merely inelegant, it is provably racy, for a reason specific
+	// to how charm.land/bubbletea/v2 is actually built (read from source,
+	// not inferred): cursedRenderer.render(v) (cursed_renderer.go:581-586)
+	// does nothing but s.view = v — it performs no I/O at all. The bytes
+	// that make up a frame only reach the real terminal on an independent
+	// clock: Program.startRenderer (tea.go:1391-1417) starts a
+	// time.NewTicker(framerate) loop that calls p.flush() then
+	// renderer.flush(false) on every tick, completely decoupled from
+	// Update/View's own message-processing cycle. Meanwhile
+	// insertAbove — what tea.Println actually calls
+	// (cursed_renderer.go:711) — writes synchronously, immediately, into
+	// whichever screen buffer the renderer's own bookkeeping currently
+	// says is active. There is no message, channel, or other
+	// synchronization primitive anywhere in this path that means "the
+	// alt-screen-exit ANSI sequence this Update call is about to cause is
+	// already on the wire" — so a Println sequenced before a Quit can
+	// legitimately land on either side of the real AltScreen-exit write,
+	// non-deterministically, depending on ticker timing that this
+	// package has no way to observe or control. On the losing order, the
+	// transcript is written into the doomed alternate-screen buffer
+	// instead of real scrollback, and is lost the instant the terminal
+	// switches back — silently defeating this very feature.
+	//
+	// The one place with no such race is Program.Run itself
+	// (tea.go:1144-1171): after eventLoop returns, Run unconditionally
+	// calls p.shutdown(killed), which calls p.stopRenderer(kill)
+	// (tea.go:1427) — which, unless killed, calls renderer.flush(true)
+	// and then unconditionally renderer.close() (cursed_renderer.go:144),
+	// the exact function that synchronously writes and flushes
+	// ansi.ResetModeAltScreenSaveCursor when the last View had
+	// AltScreen == true — followed by p.restoreTerminalState()
+	// (tty.go:33), which flushes any remaining queued output. All of that
+	// happens strictly before shutdown, and therefore Run itself, returns
+	// control to the caller. So: by the time internal/app.Run's own
+	// p.Run() call returns, the real terminal is provably already back on
+	// the main screen with the alt-screen-exit sequence already on the
+	// wire, and it is safe to print the exit transcript there with a
+	// plain fmt.Print — no tea.Println, because there is no running
+	// Program left to hand a Cmd to.
+	//
+	// This is why Root.ExitTranscript() is a plain (String, no tea.Cmd,
+	// no side effect) method, never called by anything inside this
+	// package's own Update/View, and why internal/app.Run — not this
+	// package — is the one that calls it, on the final tea.Model p.Run()
+	// itself returns, after the error check and after p.Run() has
+	// unambiguously returned.
+	FullscreenExitTranscript bool
 
 	// Engine is the turn runner (§7.3), already built over a concrete
 	// provider by internal/app.BuildEngine. nil is a supported value and
@@ -1125,6 +1201,7 @@ func NewRoot(o Options) Root {
 		animMode:        anim.Mode,
 		cap:             o.Cap,
 		tuiMode:         o.TUIMode,
+		exitTranscript:  o.FullscreenExitTranscript,
 		eng:             engineOr(o.Engine),
 		engineFor:       o.EngineFor,
 		loginFor:        o.LoginFor,
@@ -2317,7 +2394,24 @@ func (m Root) frameBudget() int {
 // headContent's doc comments (view.go) for why: this loop has to see the
 // overflow head() is about to hide, or it would never run.
 func (m Root) evictOverflow() (Root, tea.Cmd) {
-	if m.mode == ModeHelp || m.lay.Height <= 0 {
+	// Fullscreen never evicts to real scrollback. commitEntryCmd's whole
+	// mechanism is tea.Println/insertAbove — regular mode's "permanently
+	// commit this line to the terminal's own scrollback" — and in
+	// fullscreen there is no real scrollback to commit it to: AltScreen's
+	// buffer is the alternate screen, which is transient and gets wiped
+	// the moment the program exits (or draws over it), so anything
+	// printed there today is invisible tomorrow. Evicting in fullscreen
+	// would silently lose content instead of relocating it — exactly what
+	// §4.1 assertion 3 ("no content loss after resize") exists to catch,
+	// and precisely the accepted trade-off docs/DESIGN-tui-mode.md §7's
+	// open question 2 already names for the exit transcript itself:
+	// keep everything in m.transcript (printedUpTo stays 0 forever in
+	// fullscreen) and rely on clipHead's pre-existing *visual* clip
+	// (view.go) as fullscreen's sole backstop past frameBudget — unbounded
+	// in-memory growth for a very long fullscreen session, revisited only
+	// if it is reported, the same call §7's own comment already makes for
+	// "print it all" on the way out.
+	if m.mode == ModeHelp || m.lay.Height <= 0 || m.tuiMode == termenv.ModeFullscreen {
 		return m, nil
 	}
 	g := m.lay.glyphs()
