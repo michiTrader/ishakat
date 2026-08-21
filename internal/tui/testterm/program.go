@@ -176,10 +176,35 @@ func (s *Session) count() int {
 // message: a timeout here usually means the state never arrived, which is the
 // bug rather than a slow machine, so the message has to be able to say which
 // state it was.
+//
+// deadline was 5s until §17's 2026-08-21 entry: that was too tight for a
+// CPU-contended runner. Diagnosed there with goroutine dumps taken every
+// 500ms across several reproduced stalls — every goroutine was idle in
+// select/chan receive the whole time, never spinning, never blocked on a
+// lock, so this is not a deadlock. Tracing Root.View() showed the correct
+// post-turn frame is computed and its bytes reach sink.Write well inside
+// the old 5s window; what stalls is bubbletea's own event/render goroutines
+// getting their next scheduling slice, which can take many seconds under
+// contention (a property of the Go scheduler starving background goroutines
+// behind a hot test-runner loop, not a bug in this package or in root.go).
+// Contention this bad is not just an artificial GOMAXPROCS=1 stress case:
+// `go test ./...` on a 2-vCPU box reproduces it too, because every package's
+// test binary runs concurrently and starves the others — exactly
+// `go test ./...`'s own shape in CI, and GitHub's standard ubuntu-latest
+// runners are themselves only 2 vCPUs, so this is not a worst case that is
+// harsher than CI. 20s cuts the observed failure rate sharply but, per this
+// investigation's own repeated runs, does not reach zero under full-suite
+// contention on 2 vCPUs — so an occasional CI flake here even at 20s would
+// not be surprising. If it recurs, the honest next fix is not a bigger
+// number but addressing the scheduling starvation directly (e.g. a
+// GOMAXPROCS floor, splitting this package into its own CI job so it is not
+// contending with every other package's tests, or a bounded retry around
+// the busy-witness check) — bumping deadline again only buys time, it does
+// not close the gap.
 func (s *Session) WaitFor(desc string, pred func(*Grid) bool) {
 	s.t.Helper()
 	const (
-		deadline = 5 * time.Second
+		deadline = 20 * time.Second
 		tick     = 10 * time.Millisecond
 	)
 	start := time.Now()
