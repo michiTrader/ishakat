@@ -91,6 +91,31 @@ type UI struct {
 	// scrollback away in the first place.
 	FullscreenExitTranscript bool `toml:"fullscreen_exit_transcript"`
 
+	// SteeringMode is DECISION-2 consequence 3 (docs/ROADMAP-ux-2026-08-20.md,
+	// W2 item 4, F13): "one-at-a-time" | "batch". Governs how many queued
+	// steering messages (ordinary text submitted with Submit while ModeBusy
+	// and a tools-enabled turn is running, engine.AgentSink.Inject's own
+	// hook) are handed to the running loop per Inject() poll.
+	// "one-at-a-time" (the default, matching the value the original report's
+	// own settings dump showed hard-coded) delivers exactly the oldest
+	// queued message on each poll, leaving the rest queued for the next
+	// iteration; "batch" delivers everything queued at once. Either way
+	// every steering message still becomes its own convo.RoleUser history
+	// entry (DECISION-2 consequence 2) — this key only decides the
+	// batching, never anything about what a steering message may do.
+	SteeringMode string `toml:"steering_mode"`
+
+	// FollowupMode is SteeringMode's sibling for the *other* queue F13 asks
+	// for: alt+enter-queued follow-ups, meant to run once the current turn
+	// ends rather than be injected into it. "one-at-a-time" (the default)
+	// submits only the oldest queued follow-up as the next turn, leaving
+	// the rest queued; "batch" joins every queued follow-up into a single
+	// next-turn message. A follow-up queued while no turn is running (or
+	// against a plain-streaming turn, which has no Inject seam at all —
+	// see SteeringMode's own comment) is simply the next thing submitted
+	// once the current turn, if any, finishes.
+	FollowupMode string `toml:"followup_mode"`
+
 	Animations Animations `toml:"animations"`
 	Footer     Footer     `toml:"footer"`
 }
@@ -140,6 +165,18 @@ type Keys struct {
 	// See tui.Map.ToggleFold's own comment for why the default is ctrl+r
 	// rather than ctrl+o.
 	ToggleFold string `toml:"toggle_fold"`
+
+	// QueueFollowup is W2 item 4's own chord (F13, docs/ROADMAP-ux-2026-08-20.md):
+	// "alt+enter queues follow-ups" instead of submitting the input box's
+	// text immediately. See tui.Map.QueueFollowup's own comment for why
+	// this is a distinct chord from Submit rather than a modifier read out
+	// of Submit's own keypress.
+	QueueFollowup string `toml:"queue_followup"`
+
+	// EditQueue is F13's other chord: "alt+up edits the queue" the
+	// follow-up queue QueueFollowup fills. See tui.Map.EditQueue's own
+	// comment.
+	EditQueue string `toml:"edit_queue"`
 }
 
 type Catalog struct {

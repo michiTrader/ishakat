@@ -54,6 +54,42 @@ func TestNewMapToggleFoldRespectsConfiguration(t *testing.T) {
 	}
 }
 
+// TestNewMapQueueFollowupDefaultsToAltEnter and
+// TestNewMapEditQueueDefaultsToAltUp pin W2 item 4's own chords (F13,
+// docs/ROADMAP-ux-2026-08-20.md): "alt+enter queues follow-ups, alt+up
+// edits the queue", exactly the report's own wording.
+func TestNewMapQueueFollowupDefaultsToAltEnter(t *testing.T) {
+	m := tui.NewMap(config.Keys{})
+	if m.QueueFollowup != "alt+enter" {
+		t.Errorf("QueueFollowup default = %q, want %q", m.QueueFollowup, "alt+enter")
+	}
+}
+
+func TestNewMapEditQueueDefaultsToAltUp(t *testing.T) {
+	m := tui.NewMap(config.Keys{})
+	if m.EditQueue != "alt+up" {
+		t.Errorf("EditQueue default = %q, want %q", m.EditQueue, "alt+up")
+	}
+}
+
+// TestNewMapQueueFollowupRespectsConfiguration and
+// TestNewMapEditQueueRespectsConfiguration are ToggleFold's own
+// TestNewMapToggleFoldRespectsConfiguration pattern, mirrored for the two
+// new chords: a configured value must survive unchanged.
+func TestNewMapQueueFollowupRespectsConfiguration(t *testing.T) {
+	m := tui.NewMap(config.Keys{QueueFollowup: "ctrl+g"})
+	if m.QueueFollowup != "ctrl+g" {
+		t.Errorf("QueueFollowup = %q, want the configured %q", m.QueueFollowup, "ctrl+g")
+	}
+}
+
+func TestNewMapEditQueueRespectsConfiguration(t *testing.T) {
+	m := tui.NewMap(config.Keys{EditQueue: "ctrl+g"})
+	if m.EditQueue != "ctrl+g" {
+		t.Errorf("EditQueue = %q, want the configured %q", m.EditQueue, "ctrl+g")
+	}
+}
+
 // TestNewMapQuitRepeatDefaultsToTwo is RC-1's safety net when Load is
 // skipped: an empty Keys (what newTestRoot used to feed, and what a
 // caller that never set Cfg still does) must still require two presses.

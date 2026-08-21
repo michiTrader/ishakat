@@ -40,7 +40,38 @@ func Validate(c *Config) error {
 		return err
 	}
 	validateServe(c)
+	validateSteering(c)
 	return nil
+}
+
+// validateSteering checks the two W2 item 4 config keys (F13,
+// docs/ROADMAP-ux-2026-08-20.md, DECISION-2 consequence 3):
+// ui.steering_mode and ui.followup_mode, each "one-at-a-time" | "batch".
+// Unlike validateTools's permission modes, an unrecognised value here has
+// a safe interpretation — deliver one at a time is always the more
+// conservative reading of an unknown value than deliver everything queued
+// at once — so, like validateServe's own clamp-and-warn style, this warns
+// and falls back rather than refusing to start. ui.reasoning (schema.go's
+// UI.Reasoning) has no equivalent check at all; these two get one because,
+// unlike Reasoning's purely cosmetic "collapsed"/"full" split, a typo'd
+// steering/followup mode changes how many of a user's own messages the
+// running loop acts on per iteration, so it gets its own explicit check
+// and warning rather than silently falling through to whatever the
+// zero-value reader (internal/tui's steeringModeOr/followupModeOr,
+// mirroring chat.go's own reasoningModeOr) treats an unrecognised string
+// as.
+func validateSteering(c *Config) {
+	u := &c.UI
+	if u.SteeringMode != "" && u.SteeringMode != "one-at-a-time" && u.SteeringMode != "batch" {
+		c.Warnings = append(c.Warnings, Warning{"ui",
+			fmt.Sprintf("steering_mode = %q is not \"one-at-a-time\" or \"batch\"; using \"one-at-a-time\"", u.SteeringMode)})
+		u.SteeringMode = "one-at-a-time"
+	}
+	if u.FollowupMode != "" && u.FollowupMode != "one-at-a-time" && u.FollowupMode != "batch" {
+		c.Warnings = append(c.Warnings, Warning{"ui",
+			fmt.Sprintf("followup_mode = %q is not \"one-at-a-time\" or \"batch\"; using \"one-at-a-time\"", u.FollowupMode)})
+		u.FollowupMode = "one-at-a-time"
+	}
 }
 
 // validateServe checks docs/PLAN.md §11 Step 23's [serve] section. Unlike
