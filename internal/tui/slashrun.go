@@ -22,6 +22,13 @@ import (
 // dropdown. Any other key returns handled=false so the caller's normal
 // dispatch — and the textarea underneath it — still sees it, which is what
 // keeps the list narrowing as more of the name is typed.
+//
+// Submit's own case is the one branch shared with updateBusy (W2 item 3,
+// docs/ROADMAP-ux-2026-08-20.md): while ModeBusy, the highlighted command
+// still has to pass busyAllowedSlashKind's own allow-list — the dropdown
+// itself does not know it is being driven from a running turn, so this is
+// the one place that check has to live for the accept-the-selection path,
+// mirroring runBusySlashLine's identical check for a fully typed line.
 func (m Root) updateSlashMenu(key string) (bool, tea.Model, tea.Cmd) {
 	switch key {
 	case "up":
@@ -39,7 +46,16 @@ func (m Root) updateSlashMenu(key string) (bool, tea.Model, tea.Cmd) {
 		m.menu = slashMenu{}
 		return true, m, nil
 	case m.keys.Submit:
-		next, cmd := m.runSlashCommand(m.menu.Selected(), "")
+		sel := m.menu.Selected()
+		if m.mode == ModeBusy && !busyAllowedSlashKind(sel.Kind) {
+			m = m.recordHistory(strings.TrimSpace(m.input.Value()))
+			m.input.Reset()
+			m.menu = slashMenu{}
+			g := m.lay.glyphs()
+			next, cmd := m.slashNotice(g.warnMark + " " + sel.Usage() + " no esta disponible mientras el turno trabaja")
+			return true, next, cmd
+		}
+		next, cmd := m.runSlashCommand(sel, "")
 		return true, next, cmd
 	}
 	return false, m, nil
