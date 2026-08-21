@@ -3,16 +3,25 @@ package tui
 // Tests for docs/DESIGN-tui-mode.md §4's render/emit seam: render() is the
 // mode-blind half (Rule 2), emit() is the only mode-aware function, and
 // resize (Rule 3) has to be the same operation — rebuild from state — in
-// both modes. These are the harness assertions from §4.1 that are already
-// checkable with today's code: assertion 1 (mode-invariant content) and
-// assertion 4 (one banner, ever) are exercised directly against a
-// regular/fullscreen pair below. Assertion 2's B4 resize-idempotence case
-// already has its own dedicated regression,
-// TestB4ResizeCycleDoesNotCorruptTheScreen (regress_bugs_internal_test.go),
-// so it is not duplicated here. Assertions 3 and 6 need the fullscreen emit
-// path itself — a scrollback fullscreen owns and an exit transcript to
-// flush it — neither of which exists yet (see emit's own doc comment in
-// view.go), so they are not claimed here.
+// both modes. These are the harness assertions from §4.1:
+//
+//   - assertion 1 (mode-invariant content) and assertion 4 (one banner,
+//     ever) are exercised directly against a regular/fullscreen pair below.
+//   - assertion 2's B4 resize-idempotence case already has its own
+//     dedicated regression, TestB4ResizeCycleDoesNotCorruptTheScreen
+//     (regress_bugs_internal_test.go), so it is not duplicated here.
+//   - assertion 3 (no content loss after resize) is
+//     TestB4bFullscreenLosesNoContentAcrossAResizeCycle, below — the
+//     fullscreen counterpart of B4, using testterm's real program/grid
+//     harness (not render() strings) because "findable on the grid" is a
+//     terminal question, not a string one.
+//   - assertion 6 (exit transcript, DECISION-1b) is
+//     TestFullscreenExitFlushesTheWholeTranscriptToScrollback, below.
+//
+// Both landed once emit's fullscreen branch (AltScreen=true), Root.
+// ExitTranscript and evictOverflow's fullscreen guard existed — see W3 part
+// 6's docs/PLAN.md entry — closing the two assertions this file's own
+// comment used to list as unclaimed.
 
 import (
 	"strings"
@@ -22,6 +31,7 @@ import (
 
 	"github.com/MichiTrader/ishakat/internal/termenv"
 	"github.com/MichiTrader/ishakat/internal/theme"
+	"github.com/MichiTrader/ishakat/internal/tui/testterm"
 )
 
 // newScreenRootWithMode is newScreenRoot (regress_bugs_internal_test.go)
@@ -151,5 +161,246 @@ func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 	}
 	if !fullscreenView.AltScreen {
 		t.Errorf("fullscreen must set AltScreen")
+	}
+}
+
+// newFullscreenScreenRoot is newScreenRootWithMode's fullscreen case,
+// wrapped in a *testterm.Session driving the real tea.Program — needed for
+// the two tests below because §4.1 assertions 3 and 6 are both questions
+// about a real terminal (what a grid shows, what its scrollback holds after
+// the alt screen closes), the same reason regress_bugs_internal_test.go's
+// B1-B4 use testterm instead of calling Update/View directly. See that
+// file's own "Why these roots are not the existing test roots" comment for
+// why NoTTY has to be false here too.
+func newFullscreenScreenRoot(t *testing.T, exitTranscript bool) Root {
+	t.Helper()
+	root := NewRoot(Options{
+		Version:                  "0.0.0-test",
+		CWD:                      "/home/user/projects/ishakat",
+		Theme:                    theme.Load(""),
+		Cap:                      theme.CapNone,
+		Glyphs:                   theme.GlyphsASCII,
+		NoTTY:                    false,
+		TUIMode:                  termenv.ModeFullscreen,
+		FullscreenExitTranscript: exitTranscript,
+	})
+	eng, _ := echoEngine(false)
+	return withEngine(root, eng)
+}
+
+// TestB4bFullscreenLosesNoContentAcrossAResizeCycle is §4.1 assertion 3 —
+// "after any resize sequence, every committed entry is still findable ...
+// on the grid in fullscreen" — the fullscreen sibling of
+// TestB4ResizeCycleDoesNotCorruptTheScreen (regress_bugs_internal_test.go),
+// which only ever drove `regular`.
+//
+// The mechanism under test is evictOverflow's fullscreen guard (root.go):
+// regular permanently commits old entries to real scrollback via
+// commitEntryCmd and then stops redrawing them, so a resize cycle only has
+// to not corrupt whatever is still in the live region. Fullscreen has no
+// real scrollback to commit to — see evictOverflow's own comment — so it
+// never evicts at all; every entry stays in m.transcript forever and
+// render() redraws all of it on every frame, including every resize. That
+// makes this assertion almost definitionally true given Rule 3 ("resize
+// rebuilds from state") plus the no-eviction guard, but almost is not
+// tested, and B4 itself was exactly this kind of "should be true by
+// construction" bug that shipped anyway.
+//
+// The terminal is tall enough (h=24) that clipHead's own *visual* clip
+// (view.go) never engages at any width this resize cycle passes through —
+// deliberately, because that clip is a separate, already-accepted
+// mechanism (docs/DESIGN-tui-mode.md §7's "print it all... revisit only if
+// reported" trade-off, restated in evictOverflow's own comment) that hides
+// rows without discarding them, and content clipHead is merely not
+// currently drawing is not what assertion 3 is about. Conflating the two
+// would make this test fail on a symptom §4.1 does not name as a defect,
+// exactly the "not the question under test" trap B1's own doc comment
+// warns about for a different mechanism (evictOverflow's offset
+// arithmetic). What this test isolates is the other mechanism — permanent
+// data loss from evictOverflow evicting content fullscreen has nowhere to
+// put it — which is why the fullscreen guard (root.go) exists at all.
+func TestB4bFullscreenLosesNoContentAcrossAResizeCycle(t *testing.T) {
+	const w, h = 70, 24
+	markers := []string{"UNOMARCA", "DOSMARCA"}
+
+	s := testterm.Start(t, newFullscreenScreenRoot(t, false), w, h)
+	for _, marker := range markers {
+		askAndWait(s, marker)
+	}
+
+	// The same shrink/grow cycle B4's own regression puts a `regular` root
+	// through, driven here against a `fullscreen` one instead.
+	s.Resize(40, h)
+	s.Resize(25, h)
+	s.Resize(45, h)
+	s.Resize(w, h)
+
+	for _, marker := range markers {
+		if !s.Grid().ContainsAnywhere(marker) {
+			t.Errorf("assertion 3: %q is nowhere on the fullscreen terminal after "+
+				"a resize cycle (%d→40→25→45→%d).\nevictOverflow's fullscreen "+
+				"guard is supposed to keep every entry in m.transcript forever, "+
+				"so render() should still be redrawing it after every resize.\n%s",
+				marker, w, w, s.Dump("screen (fullscreen has no scrollback to fall back to):"))
+		}
+	}
+
+	// Fullscreen has no real scrollback at all (evictOverflow's own
+	// comment); confirming that here is what makes "still findable"
+	// actually mean "on the grid", not "we got lucky and it also landed in
+	// scrollback the way regular's B4 counterpart would".
+	if sb := s.Grid().Scrollback(); len(sb) != 0 {
+		t.Errorf("fullscreen must never populate real scrollback (AltScreen's "+
+			"buffer is transient and evictOverflow no-ops in this mode), but "+
+			"got %d scrollback rows: %v", len(sb), sb)
+	}
+}
+
+// TestFullscreenExitFlushesTheWholeTranscriptToScrollback is §4.1 assertion
+// 6 — "after quitting from fullscreen, the scrollback contains the whole
+// conversation, in order, wrapped to the final width" — DECISION-1b.
+//
+// This drives the real seam internal/app.Run itself relies on: quit the
+// real tea.Program (testterm.Session.Quit, called by t.Cleanup or directly
+// here), take the tea.Model p.Run() returned (testterm.Session.FinalModel),
+// and call Root.ExitTranscript on it exactly the way app.go does — then
+// print the result with a plain fmt.Print-equivalent (s.Grid().Write) and
+// assert against the grid's scrollback, the same "screen+scrollback" shape
+// every other regression in this package already reads through testterm.
+// Calling ExitTranscript directly on a second, independently-built Root
+// would test the method in isolation; this test is about the seam Quit/
+// p.Run()/FinalModel/ExitTranscript forms together, which is the actual
+// correctness requirement DECISION-1b's approval note names.
+func TestFullscreenExitFlushesTheWholeTranscriptToScrollback(t *testing.T) {
+	const w, h = 60, 10
+	// Single words, deliberately: Grid.Count/Contains match per row (their
+	// own doc comments, testterm/grid.go), on purpose, so that a match
+	// cannot be manufactured by spanning a line break. A marker with
+	// spaces would itself wrap across rows at this width and could never
+	// satisfy an exact-count assertion regardless of whether the transcript
+	// dump is correct — that would be testing wrapText, not ExitTranscript.
+	prompts := []string{"UNOMARCA", "DOSMARCA"}
+	// longPrompt is the separate witness for the width invariant below: it
+	// has to actually be wider than w once rendered, unlike the markers.
+	const longPrompt = "una pregunta con bastante texto para forzar el wrap del ancho final"
+
+	s := testterm.Start(t, newFullscreenScreenRoot(t, true), w, h)
+	for _, p := range prompts {
+		askAndWait(s, p)
+	}
+	askAndWait(s, longPrompt)
+
+	// Quit is what makes FinalModel non-nil: it waits for p.Run() to return
+	// (Session.Quit's own doc comment) which — per ExitTranscript's own doc
+	// comment — is the one point bubbletea v2 guarantees the real
+	// AltScreen-exit sequence is already on the wire, so it is finally safe
+	// to ask for the transcript.
+	s.Quit()
+
+	final := s.FinalModel()
+	if final == nil {
+		t.Fatalf("testterm: FinalModel() is nil after Quit; p.Run() did not " +
+			"report a final model")
+	}
+	root, ok := final.(Root)
+	if !ok {
+		t.Fatalf("testterm: FinalModel() is a %T, not tui.Root", final)
+	}
+
+	transcript := root.ExitTranscript()
+	if transcript == "" {
+		t.Fatalf("assertion 6: ExitTranscript() returned \"\" after a real "+
+			"fullscreen session with %d turns; DECISION-1b's exit dump did "+
+			"not fire.\n%s", len(prompts), s.Dump("screen at quit:"))
+	}
+
+	// internal/app.Run's own contract: fmt.Print the transcript straight to
+	// whatever real terminal is left once the alt screen has already
+	// closed. Feeding it to the same grid Quit already settled models that
+	// exactly — the alt screen is gone (setAltScreen's own restore path,
+	// testterm/grid.go) and s.grid.Write is the same io.Writer sink.Write
+	// wraps, so what lands is what a real terminal's scrollback would hold.
+	if _, err := s.Grid().Write([]byte(transcript)); err != nil {
+		t.Fatalf("testterm: writing the exit transcript to the grid: %v", err)
+	}
+
+	// Exactly two: the echo engine double answers with the prompt text
+	// itself (echoEngine's own doc comment), so one exchange is the user's
+	// line plus the assistant's echo of it — the same accounting
+	// TestB2bAnEntryIsCommittedExactlyOnce already uses for the identical
+	// reason. "Every committed turn appears... exactly once" (§4.1's own
+	// wording) is a claim about ExitTranscript not silently dropping or
+	// duplicating a *turn*, not a claim that echoEngine's reply happens to
+	// repeat the prompt only once — this is why B2b itself only pins two
+	// as a ceiling until the owner promotes it, and why this test counts
+	// the fixed number the echo double is documented to produce rather
+	// than asserting flatly ==1.
+	for _, p := range prompts {
+		if n := s.Grid().Count(p); n != 2 {
+			t.Errorf("assertion 6: prompt %q appears %d times in the exit "+
+				"transcript, want exactly 2 (the user's line plus the echo "+
+				"engine's reply).\nDECISION-1b requires every committed turn "+
+				"to appear, in order, exactly once — a count other than 2 "+
+				"here means a turn was dropped or duplicated.\n%s",
+				p, n, s.Dump("after writing the transcript:"))
+		}
+	}
+
+	// "in order": the second prompt's row must come after the first's, and
+	// both before the third (long) prompt's.
+	lines := s.Grid().All()
+	firstAt, secondAt, thirdAt := -1, -1, -1
+	for i, ln := range lines {
+		if firstAt < 0 && strings.Contains(ln, prompts[0]) {
+			firstAt = i
+		}
+		if secondAt < 0 && strings.Contains(ln, prompts[1]) {
+			secondAt = i
+		}
+		if thirdAt < 0 && strings.Contains(ln, "una pregunta con bastante") {
+			thirdAt = i
+		}
+	}
+	if firstAt < 0 || secondAt < 0 || thirdAt < 0 {
+		t.Fatalf("assertion 6: could not locate all three prompts' rows after "+
+			"writing the transcript (first=%d, second=%d, third=%d).\n%s",
+			firstAt, secondAt, thirdAt, s.Dump("after writing the transcript:"))
+	}
+	if secondAt < firstAt || thirdAt < secondAt {
+		t.Errorf("assertion 6: the exit transcript did not print the three "+
+			"turns in conversation order (rows %d, %d, %d); DECISION-1b "+
+			"requires order to be preserved.\n%s", firstAt, secondAt, thirdAt,
+			s.Dump("after writing the transcript:"))
+	}
+
+	// "wrapped to the final width": clampFrameWidth/wrapText's own
+	// invariant (RC-5) — the same rule render() enforces on every live
+	// frame — must also hold for ExitTranscript's output, since it is
+	// built from the same renderTranscriptLine/width machinery (see its
+	// own doc comment). A transcript line wider than the terminal would
+	// auto-wrap on a real terminal exactly the way B4's own bug did.
+	if width, row := s.Grid().Widest(); width > w {
+		t.Errorf("assertion 6: the exit transcript wrote a line %d columns "+
+			"wide (row %d) on a %d-column terminal.\n%s", width, row, w,
+			s.Dump("after writing the transcript:"))
+	}
+}
+
+// TestFullscreenExitTranscriptDisabledPrintsNothing confirms the other half
+// of DECISION-1b's config surface: fullscreen_exit_transcript = false must
+// make ExitTranscript a no-op, the same "config key actually gates the
+// behaviour, not just documents it" check every other [ui] flag in this
+// package already gets.
+func TestFullscreenExitTranscriptDisabledPrintsNothing(t *testing.T) {
+	s := testterm.Start(t, newFullscreenScreenRoot(t, false), 60, 10)
+	askAndWait(s, "una pregunta cualquiera")
+	s.Quit()
+
+	root, ok := s.FinalModel().(Root)
+	if !ok {
+		t.Fatalf("testterm: FinalModel() is a %T, not tui.Root", s.FinalModel())
+	}
+	if got := root.ExitTranscript(); got != "" {
+		t.Errorf("ExitTranscript() = %q, want \"\" when FullscreenExitTranscript is false", got)
 	}
 }

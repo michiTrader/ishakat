@@ -598,6 +598,29 @@ platform default.
 **Closes:** B4, F14, F16, F3 (dedicated-overlay half only — see part 5 status
 below; F3's "opens while the agent works" half is W2's, not W3's).
 
+> **Status (2026-08-21): W3 CLOSED — parts 1-6 landed.**
+> Part 6 closes the wave: `emit`'s `fullscreen` branch now sets
+> `AltScreen = true` (the documented stub from part 3 is gone),
+> `Root.ExitTranscript` implements DECISION-1b's exit-transcript flush
+> (called by `internal/app.Run` only after `p.Run()` returns — bubbletea
+> v2's renderer flushes bytes on an independent ticker decoupled from
+> Update/View, so that is the one point guaranteed to be safe), and
+> `evictOverflow` no-ops entirely in `fullscreen` (no real scrollback to
+> evict into; unbounded in-memory transcript growth is the accepted
+> trade-off, mirroring `docs/DESIGN-tui-mode.md` §7's "print it all... 
+> revisit only if reported" call for the same reason). §4.1's two
+> previously-unclaimed harness assertions now have dedicated tests:
+> assertion 3 (`TestB4bFullscreenLosesNoContentAcrossAResizeCycle`) and
+> assertion 6 (`TestFullscreenExitFlushesTheWholeTranscriptToScrollback`,
+> plus `TestFullscreenExitTranscriptDisabledPrintsNothing` for the config
+> gate) — both in `internal/tui/renderemit_internal_test.go`, both driven
+> through the real `testterm` harness (a new `Session.FinalModel()` was
+> added so a test can call `ExitTranscript()` on the actual model
+> `p.Run()` returned, the same seam `internal/app.Run` uses, rather than a
+> second Root built by hand). All six §4.1 assertions now pass in both
+> modes; F14/F16/F3 (dedicated-overlay half) closed in parts 4-5. See
+> `docs/PLAN.md` §17, 2026-08-21 "W3 (part 6, closing)".
+>
 > **Status (2026-08-20): W3 in progress, not closed — parts 1-5 landed.**
 > Part 5: F3's own row has two halves — "a shortcuts screen" and "overlays
 > must open while the agent is working, without blocking input" — and the
