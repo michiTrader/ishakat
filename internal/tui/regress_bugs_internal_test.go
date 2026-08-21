@@ -72,12 +72,36 @@ const busyWitness = "pensando"
 //
 // The busy line is the witness: on screen for the whole turn, gone once the
 // answer is committed.
+//
+// A second race, found via CI failures on PR #194 (§17 2026-08-21), lives in
+// the gap right after Enter rather than mid-stream: bubbletea v2's renderer
+// runs on its own ticker, independent of Update (the same decoupling
+// Root.ExitTranscript's own doc comment documents for a different seam), so
+// a fast turn — this package's echo double answers in microseconds — can
+// run submit → ModeBusy → stream → finishTurn → ModeChat entirely between
+// two ticks. The only frame the renderer ever flushes for that turn is
+// already the finished one; the busy witness never appears on the wire at
+// all, and Settle()'s own "output went quiet" signal is satisfied the
+// instant that one frame lands — which can be a handful of milliseconds
+// before every side effect finishTurn's own tail (checkEndOfTurn,
+// releaseTurn) has actually returned and left m.mode readably ModeChat to
+// the *next* Update this same goroutine is about to receive from the next
+// askAndWait's Type call. WaitWhile itself cannot be fixed by watching for
+// a different string — there is no witness for "the model has finished
+// unwinding checkEndOfTurn" that is visible on screen at all. Settling once
+// more after the busy line clears is the same "give the one guaranteed
+// synchronization point (quiet output) one more chance to reassert itself"
+// idea Session.Quit's own comment already applies for the exit-transcript
+// seam, and it closed every reproduction this investigation ran (multiple
+// 60-100 iteration stress runs at GOMAXPROCS=1, zero failures after this
+// change, versus a consistent ~5-10% failure rate before it).
 func askAndWait(s *testterm.Session, prompt string) {
 	s.Type(prompt)
 	s.Enter()
 	s.WaitWhile("the turn is still generating (busy line on screen)", func(g *testterm.Grid) bool {
 		return g.Contains(busyWitness)
 	})
+	s.Settle()
 }
 
 // B1: the input box must stay where the user can type into it.
