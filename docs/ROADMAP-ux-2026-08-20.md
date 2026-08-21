@@ -595,9 +595,23 @@ platform default.
 - `/hotkeys` (**F3**) ships as its own overlay, generated from the loaded
   keymap so it can never drift from reality again (RC-1's second lesson).
 
-**Closes:** B4, F14, F16, F3 fully.
+**Closes:** B4, F14, F16, F3 (dedicated-overlay half only — see part 5 status
+below; F3's "opens while the agent works" half is W2's, not W3's).
 
-> **Status (2026-08-20): W3 in progress, not closed — parts 1-4 landed.**
+> **Status (2026-08-20): W3 in progress, not closed — parts 1-5 landed.**
+> Part 5: F3's own row has two halves — "a shortcuts screen" and "overlays
+> must open while the agent is working, without blocking input" — and the
+> roadmap names F3 under *both* W2's closes list (the non-modal half) and
+> W3's (the dedicated-overlay half). Since the approved order runs W3 before
+> W2, only the dedicated-overlay half can close here. It does: `/hotkeys`
+> (`ModeHotkeys`, `internal/tui/hotkeys.go`) is now its own overlay — its own
+> `slash.Kind`, `Mode`, renderer, and `Commands` row — reachable the same way
+> `/help` already is, dismissed by any key. Its renderer deliberately does
+> not duplicate `/help`'s shortcut list: both call the same
+> `m.helpShortcuts()`, so the two screens can never drift from each other or
+> from the loaded keymap. F3's "opens while working" half remains open,
+> waiting on W2's non-modal `ModeBusy` eventing. See `docs/PLAN.md` §17,
+> 2026-08-20 "W3 (part 5)".
 > Part 4: F14 closes — `helpHeading`'s `const helpWidth = 38` is gone;
 > `renderHelp` now measures `m.lay.ContentWidth()` once and hands it to both
 > headings, the same call every other overlay already makes for its own

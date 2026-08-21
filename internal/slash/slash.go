@@ -26,6 +26,17 @@ type Kind int
 const (
 	// KindHelp opens the help screen (§9.7).
 	KindHelp Kind = iota
+	// KindHotkeys opens the roadmap-F3 dedicated shortcuts overlay
+	// (internal/tui.ModeHotkeys, hotkeys.go): the same shortcut list
+	// /help's own "atajos" section shows (both read
+	// Root.helpShortcuts()), but as its own screen rather than folded
+	// into /help — the roadmap's F3 row asks for "a shortcuts screen" of
+	// its own, distinct from /help's combined commands+shortcuts
+	// listing. Only F3's "dedicated overlay generated from the keymap"
+	// half; F3's other half ("opens while the agent is working, without
+	// blocking input") needs W2's non-modal ModeBusy infrastructure,
+	// which has not landed yet.
+	KindHotkeys
 	// KindClear wipes the screen, exactly like ctrl+l — the conversation
 	// itself (and what the next request sends the model) is untouched.
 	KindClear
@@ -188,6 +199,7 @@ func (c Command) Usage() string {
 // order and Filter's tie-break both follow this order.
 var Commands = []Command{
 	{Name: "help", Describe: "esta pantalla", Kind: KindHelp},
+	{Name: "hotkeys", Describe: "atajos de teclado", Kind: KindHotkeys},
 	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
 	{Name: "models", Describe: "explorar catalogo", Kind: KindModels},
 	{Name: "skills", Describe: "capacidades cargadas", Kind: KindSkills},

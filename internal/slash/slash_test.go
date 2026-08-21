@@ -37,11 +37,12 @@ func TestLookupResolvesNameAndAliasCaseInsensitively(t *testing.T) {
 }
 
 func TestDefaultRegistryCoversTheFullPlanTable(t *testing.T) {
-	// §13 names sixteen commands by name, plus /permissions (Step 32) and
-	// /trust (Step 30 part 2); every one of them has to resolve, or /help
-	// and the dropdown would silently disagree with the PLAN.
+	// §13 names sixteen commands by name, plus /permissions (Step 32),
+	// /trust (Step 30 part 2), and /hotkeys (roadmap-2026-08-20 W3, F3's
+	// dedicated shortcuts overlay); every one of them has to resolve, or
+	// /help and the dropdown would silently disagree with the PLAN.
 	want := []string{
-		"help", "model", "models", "skills", "theme", "compact", "new", "resume",
+		"help", "hotkeys", "model", "models", "skills", "theme", "compact", "new", "resume",
 		"clear", "copy", "retry", "stats", "config", "debug", "tools", "permissions",
 		"trust", "login", "exit",
 	}

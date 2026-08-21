@@ -38,6 +38,18 @@ const (
 	ModeConfirm
 	// ModeHelp: pantalla de ayuda (§9.7).
 	ModeHelp
+	// ModeHotkeys: the §13/roadmap-F3 dedicated shortcuts overlay
+	// (hotkeys.go), reached with /hotkeys or the same key ModeHelp's own
+	// screen advertises. It exists as a Mode of its own — not a flag on
+	// ModeHelp, and not folded into /help's own screen — because the
+	// roadmap's F3 row asks for it as "its own overlay" distinct from
+	// /help: two commands, two dropdown rows, two renderers, so a future
+	// edit to one can never silently also change the other. Like
+	// ModeHelp it always returns to ModeChat on any key (updateHotkeys),
+	// never to ModeBusy: unlike ModeToolApprove/ModeAskUser there is no
+	// turn underneath it to resume, the same reasoning ModeHelp's own
+	// comment on updateHelp already gives.
+	ModeHotkeys
 	// ModeCompact: /compact resumiendo con compact_model (§9.8, Paso 12).
 	ModeCompact
 	// ModeResume: the §13 /resume overlay, a flat list of previously saved
@@ -1421,6 +1433,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case ModeHelp:
 		return m.updateHelp(msg)
+	case ModeHotkeys:
+		return m.updateHotkeys(msg)
 	case ModeBusy:
 		return m.updateBusy(msg)
 	case ModePicker:
@@ -1817,6 +1831,18 @@ func (m Root) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.mode = ModeChat
 		m.help = false
+	}
+	return m, nil
+}
+
+// updateHotkeys maneja ModeHotkeys exactamente como updateHelp maneja
+// ModeHelp: cualquier tecla cierra el overlay y vuelve a ModeChat. F3's own
+// ask ("keep our ESC-dismissable overlay style") is honoured the same way
+// ModeHelp already honours it — any key, not only Esc, since there is
+// nothing else to do on this screen.
+func (m Root) updateHotkeys(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		m.mode = ModeChat
 	}
 	return m, nil
 }

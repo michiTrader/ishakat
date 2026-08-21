@@ -38,6 +38,28 @@ func TestSlashHelpEntersHelpModeAndListsTheRegistry(t *testing.T) {
 	}
 }
 
+// TestSlashHotkeysEntersHotkeysModeAndListsTheShortcuts pins F3's dedicated
+// overlay: it must be its own Mode (not a flag on ModeHelp), and its
+// shortcut list must come from the exact same helpShortcuts() /help's own
+// "atajos" section reads, so the two screens can never drift from each
+// other or from the loaded keymap.
+func TestSlashHotkeysEntersHotkeysModeAndListsTheShortcuts(t *testing.T) {
+	var m tea.Model = newHeadlessRoot()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/hotkeys")
+
+	root := m.(Root)
+	if root.mode != ModeHotkeys {
+		t.Fatalf("mode = %v, want ModeHotkeys", root.mode)
+	}
+	content := m.View().Content
+	for _, want := range root.helpShortcuts() {
+		if !strings.Contains(content, want) {
+			t.Errorf("hotkeys screen should contain shortcut line %q, got:\n%s", want, content)
+		}
+	}
+}
+
 func TestSlashClearWipesTheScreenButKeepsTheConversation(t *testing.T) {
 	root := newHeadlessRoot()
 	root.transcript = []transcriptEntry{{role: "user", name: "tu", text: "hola"}}

@@ -169,6 +169,12 @@ func TestCursorStaysInsideTheInputWhileBusy(t *testing.T) {
 		t.Error("ModeHelp must not expose a chat-input cursor")
 	}
 
+	hotkeys := m.(Root)
+	hotkeys.mode = ModeHotkeys
+	if hotkeys.View().Cursor != nil {
+		t.Error("ModeHotkeys must not expose a chat-input cursor (roadmap F3)")
+	}
+
 	// W2 is not this change: printable keys in ModeBusy are still swallowed.
 	m, _ = m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	if m.(Root).mode != ModeBusy {
