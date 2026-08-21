@@ -1899,12 +1899,59 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateBusy maneja ModeBusy: solo esc/ctrl+c cancelan (ctrl+c ya se atendió
-// en la capa global), el resto de teclas se ignora porque el input no tiene
-// sentido mientras el maniquí "genera".
+// updateBusy implements W2 item 3's non-modal ModeBusy (docs/ROADMAP-ux-
+// 2026-08-20.md, F7/F3, DECISION-2 consequence 1): the input stays focused
+// and editable, the §9.6 dropdown and a conservative allow-list of
+// read-only slash commands work exactly as they do in ModeChat, and
+// cancellation moves off plain Esc.
+//
+// Esc's new meaning (DECISION-2 consequence 1, ANSWERED): "keeps meaning
+// cancel only while the input is empty — otherwise esc clears the editor".
+// With text in the box, Esc clears it and stays in ModeBusy — the same
+// "nothing left to lose by pressing it" safety a shell's own line editor
+// gives an accidental keypress. With an empty box, Esc still cancels the
+// turn exactly as before. ctrl+c is untouched: handleGlobalKey's own
+// ModeBusy branch already special-cases it to the identical cancelTurn/
+// cancelAgentTurn call, so no new chord had to be invented for "a chord
+// that cannot be typed by accident mid-sentence" — ctrl+c already was one.
+//
+// The §9.6 dropdown and a fixed allow-list of Kinds are wired through the
+// same runSlashLine/runSlashCommand/updateSlashMenu machinery updateChat
+// already uses. The allow-list is deliberately narrow for this first
+// slice: every Kind on it only ever calls slashNotice (theme.go/stats.go/
+// configcmd.go/debugcmd.go/models.go/skills.go) and never changes m.mode,
+// so none of them need a "return to ModeBusy, not ModeChat" mechanism —
+// they simply never leave ModeBusy in the first place. Kinds that mutate
+// turn-critical state (KindModel, KindNew, KindClear, KindCompact,
+// KindResume, KindLogin, KindTrust, KindTools, KindPermissions, KindRetry,
+// KindCopy, KindExit) or open a dedicated overlay Mode (KindHelp,
+// KindHotkeys) stay out of this slice on purpose — see busyAllowedSlashKind's
+// own doc comment for why each of those is deferred rather than folded in
+// here.
+//
+// Printable keys, backspace, paste and the rest of what updateChat's own
+// textarea.Update tail handles are fed into m.input unconditionally,
+// mirroring updateChat's own tail. Submit (enter) with non-empty input
+// that is not a recognised, allowed slash command reports an honest "not
+// wired yet" notice instead of silently discarding what was typed or
+// improvising W2 item 4's real steering queue.
 func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if keyPressString(key) == m.keys.Cancel {
+		text := keyPressString(key)
+
+		if m.menu.Active() {
+			if handled, next, cmd := m.updateSlashMenu(text); handled {
+				return next, cmd
+			}
+		}
+
+		switch text {
+		case m.keys.Cancel:
+			if strings.TrimSpace(m.input.Value()) != "" {
+				m.input.Reset()
+				m.menu = slashMenu{}
+				return m, nil
+			}
 			// agentTurn.hist is only non-nil between startAgentTurn and
 			// finishAgentTurn (see its own comment) — the same "is a
 			// tools-enabled turn actually the one running" test
@@ -1915,10 +1962,92 @@ func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.cancelAgentTurn()
 			}
 			return m.cancelTurn()
+
+		case m.keys.Submit:
+			typed := strings.TrimSpace(m.input.Value())
+			if typed == "" {
+				return m, nil
+			}
+			if slash.IsCommand(typed) {
+				return m.runBusySlashLine(typed)
+			}
+			// Ordinary chat text submitted mid-turn is W2 item 4's job
+			// (the steering queue, engine.AgentSink.Inject), not this
+			// item's — see this function's own doc comment. Reporting
+			// that honestly, rather than silently eating the draft or
+			// wiring a half wing of item 4 ahead of its own slice, is
+			// the same "point at the remedy instead of a silent gap"
+			// rule unimplementedNotice already follows.
+			m.input.Reset()
+			m.menu = slashMenu{}
+			g := m.lay.glyphs()
+			return m.slashNotice(g.warnMark + " el turno todavia no acepta mensajes mientras trabaja (steering: W2, siguiente parte)")
+
+		case m.keys.Newline:
+			m.input.InsertRune('\n')
+			return m, nil
 		}
-		return m, nil
 	}
-	return m, nil
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.menu = slashMenuFor(m.input.Value(), m.commands, m.menu)
+	return m, cmd
+}
+
+// busyAllowedSlashKind reports whether cmd may run while ModeBusy, for this
+// first slice of W2 item 3. Every Kind on the list is a pure slashNotice
+// call (theme.go/stats.go/configcmd.go/debugcmd.go/models.go/skills.go):
+// none of them ever change m.mode, so allowing them here needs no "return
+// to ModeBusy, not ModeChat" mechanism — they simply never leave ModeBusy.
+//
+// Deliberately NOT on this list, and why:
+//   - KindHelp/KindHotkeys: both switch to a dedicated overlay Mode
+//     (ModeHelp/ModeHotkeys), whose own updateHelp/updateHotkeys
+//     unconditionally return to ModeChat on close — opening either mid-turn
+//     would silently drop back to ModeChat under a still-running turn.
+//     Deferred to a follow-up slice that gives them their own "was this
+//     opened from ModeBusy" fix, not folded in here.
+//   - KindModel/KindCompact/KindNew/KindClear/KindResume/KindLogin/
+//     KindTrust: each starts a new async flow, opens an overlay, or
+//     mutates the conversation/session itself — exactly the turn-critical
+//     state a non-modal ModeBusy must not let a second action race against
+//     the one already running.
+//   - KindTools/KindPermissions: their write halves (create/edit/delete a
+//     tool; change autonomy) are governance actions, not read-only
+//     reports; kept out entirely for this slice rather than splitting the
+//     read/write halves of one Kind onto different allow-lists.
+//   - KindRetry/KindCopy: KindRetry drops the assistant response and
+//     resubmits — nonsensical while one is still being produced. KindCopy
+//     copies "the last response", which is ambiguous mid-turn (the one
+//     before this turn, or this turn's still-incomplete draft?).
+//   - KindExit: quitting mid-turn is unrelated to this item's scope.
+func busyAllowedSlashKind(k slash.Kind) bool {
+	switch k {
+	case slash.KindStats, slash.KindTheme, slash.KindConfig, slash.KindDebug,
+		slash.KindModels, slash.KindSkills:
+		return true
+	default:
+		return false
+	}
+}
+
+// runBusySlashLine is updateBusy's own counterpart to runSlashLine: it
+// parses exactly the same way, but a command that resolves to a Kind
+// outside busyAllowedSlashKind's list reports that explicitly rather than
+// running it — the same "point at the remedy instead of a silent gap"
+// honesty runSlashLine's own unknown-command case already follows.
+func (m Root) runBusySlashLine(text string) (tea.Model, tea.Cmd) {
+	p := slash.Parse(text, m.commands)
+	if !p.Found {
+		m = m.recordHistory(text)
+		return m.slashNotice(m.lay.glyphs().warnMark + " comando desconocido: /" + p.Raw)
+	}
+	if !busyAllowedSlashKind(p.Command.Kind) {
+		m = m.recordHistory(text)
+		g := m.lay.glyphs()
+		return m.slashNotice(g.warnMark + " " + p.Command.Usage() + " no esta disponible mientras el turno trabaja")
+	}
+	return m.runSlashCommand(p.Command, p.Args)
 }
 
 // updateHelp maneja ModeHelp: cualquier tecla vuelve a ModeChat, tal como

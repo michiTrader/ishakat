@@ -454,7 +454,10 @@ func TestRC2CursorResolvesInsideTheInput(t *testing.T) {
 // of a short prompt can drain between WaitFor and Cursor, and the test
 // would then pass for the ModeChat path instead of the ModeBusy one.
 //
-// Typing while busy is W2 and is not enabled here.
+// Typing while busy is now enabled (W2 item 3, docs/ROADMAP-ux-2026-08-20.md)
+// and asserted at the end of this same test, over the real grid harness
+// rather than a second, separate test — both need the identical
+// still-gated-and-busy setup above.
 func TestRC2CursorStaysInsideTheInputWhileBusy(t *testing.T) {
 	const w, h = 60, 20
 	root := NewRoot(Options{
@@ -509,6 +512,31 @@ func TestRC2CursorStaysInsideTheInputWhileBusy(t *testing.T) {
 		t.Errorf("RC-2 busy: the cursor is on row %d (%q), which is not the input line.\n"+
 			"The cursor was taken away the moment the task started.\n%s",
 			cy, line, s.Dump("screen:"))
+	}
+
+	// W2 item 3: typing a printable key while ModeBusy now reaches the
+	// textarea instead of being swallowed. "xyz" cannot collide with any
+	// digit/word this screen already draws (cwd, footer, busy line), so its
+	// mere appearance on the cursor's own row is unambiguous proof it went
+	// into the input, not somewhere else on screen.
+	s.Type("xyz")
+	s.WaitFor("typed text visible in the input while busy", func(g *testterm.Grid) bool {
+		return g.Contains("xyz")
+	})
+	cx2, cy2 := s.Cursor()
+	lines2 := s.Lines()
+	if cy2 < 0 || cy2 >= len(lines2) {
+		t.Fatalf("RC-2 busy typing: cursor row %d is outside the %d-row screen.\n%s",
+			cy2, len(lines2), s.Dump("screen:"))
+	}
+	if !strings.Contains(lines2[cy2], "xyz") {
+		t.Errorf("RC-2 busy typing: cursor row %d is %q, which does not hold the "+
+			"just-typed text — W2 item 3 must feed keystrokes to the textarea while busy.\n%s",
+			cy2, lines2[cy2], s.Dump("screen:"))
+	}
+	if cx2 < 0 || cx2 >= w {
+		t.Fatalf("RC-2 busy typing: cursor column %d is outside the %d-column screen.\n%s",
+			cx2, w, s.Dump("screen:"))
 	}
 }
 

@@ -129,8 +129,10 @@ func TestManyShortTurnsKeepTheFrameWithinTheTerminalHeight(t *testing.T) {
 
 // TestCursorStaysInsideTheInputWhileBusy is RC-2's unit half: ModeBusy still
 // draws the input box, so the hardware cursor has to sit in that box rather
-// than being left on the bottom border. It does not enable typing — that is
-// W2 — and overlays that replace the chat frame still hide the cursor.
+// than being left on the bottom border. RC-2 itself only proved the cursor
+// stayed put; W2 item 3 (docs/ROADMAP-ux-2026-08-20.md) is what makes typing
+// there actually work, asserted at the tail of this same test — overlays
+// that replace the chat frame still hide the cursor either way.
 func TestCursorStaysInsideTheInputWhileBusy(t *testing.T) {
 	var m tea.Model = newVisibleRoot()
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -175,13 +177,25 @@ func TestCursorStaysInsideTheInputWhileBusy(t *testing.T) {
 		t.Error("ModeHotkeys must not expose a chat-input cursor (roadmap F3)")
 	}
 
-	// W2 is not this change: printable keys in ModeBusy are still swallowed.
+	// W2 item 3: a printable key in ModeBusy now feeds the textarea, the
+	// same as ModeChat, instead of being swallowed.
 	m, _ = m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	if m.(Root).mode != ModeBusy {
 		t.Fatal("a printable key in ModeBusy must stay in ModeBusy")
 	}
+	if got := m.(Root).input.Value(); got != "x" {
+		t.Errorf("ModeBusy must feed keystrokes to the textarea (W2 item 3), got %q, want %q", got, "x")
+	}
+
+	// Esc with non-empty input clears the draft and stays in ModeBusy —
+	// DECISION-2 consequence 1's re-scoping of Esc — rather than cancelling
+	// the turn.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.(Root).mode != ModeBusy {
+		t.Fatal("esc with text in the box must clear it, not cancel the turn")
+	}
 	if got := m.(Root).input.Value(); got != "" {
-		t.Errorf("ModeBusy must not feed keystrokes to the textarea (that is W2), got %q", got)
+		t.Errorf("esc with non-empty input must clear the textarea, got %q", got)
 	}
 }
 
