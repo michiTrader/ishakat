@@ -20,7 +20,7 @@ func TestAgentTurnCmdReturnsTheEngineResult(t *testing.T) {
 	}
 	eng := engine.New(stream, 0)
 	history := &convo.Conversation{}
-	cmd := agentTurnCmd(context.Background(), eng, engine.Request{Model: "test/model"}, engine.AgentOptions{}, history)
+	cmd := agentTurnCmd(context.Background(), eng, engine.Request{Model: "test/model"}, engine.AgentOptions{}, history, engine.AgentSink{})
 
 	value := cmd()
 	msg, ok := value.(agentTurnDoneMsg)
@@ -60,7 +60,7 @@ func TestAgentTurnCmdRunsToolCallsBeforeReturningFinalAnswer(t *testing.T) {
 			return engine.ToolResult{Text: "file contents"}, nil
 		},
 	}
-	cmd := agentTurnCmd(context.Background(), eng, engine.Request{Model: "test/model"}, opts, history)
+	cmd := agentTurnCmd(context.Background(), eng, engine.Request{Model: "test/model"}, opts, history, engine.AgentSink{})
 
 	value := cmd()
 	msg, ok := value.(agentTurnDoneMsg)

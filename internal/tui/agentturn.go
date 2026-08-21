@@ -56,14 +56,23 @@ type agentTurnState struct {
 	before int
 }
 
-// agentTurnCmd wraps engine.RunAgentTurn as a tea.Cmd, the same shape
-// summarizeCmd already establishes for engine.Summarize: Bubble Tea's own
-// goroutine (started for us the moment this Cmd is returned from Update)
-// is where the blocking call actually happens, so nothing here needs `go`
-// of its own.
-func agentTurnCmd(ctx context.Context, eng *engine.Engine, req engine.Request, opts engine.AgentOptions, hist *convo.Conversation) tea.Cmd {
+// agentTurnCmd wraps engine.RunAgentTurnStreaming as a tea.Cmd, the same
+// shape summarizeCmd already establishes for engine.Summarize: Bubble Tea's
+// own goroutine (started for us the moment this Cmd is returned from
+// Update) is where the blocking call actually happens, so nothing here
+// needs `go` of its own.
+//
+// W2 item 2 (docs/ROADMAP-ux-2026-08-20.md): this used to call the plain
+// blocking eng.RunAgentTurn; it now calls RunAgentTurnStreaming with sink,
+// the AgentSink startAgentTurn builds from its own agentStreamBuf
+// (agentstream.go). A zero AgentSink makes RunAgentTurnStreaming identical
+// to RunAgentTurn field for field (RunAgentTurnStreaming's own doc
+// comment), so agentTurnCmdTests that pass engine.AgentSink{} keep passing
+// unchanged — this is purely an additive event surface, not a behaviour
+// change to the loop itself.
+func agentTurnCmd(ctx context.Context, eng *engine.Engine, req engine.Request, opts engine.AgentOptions, hist *convo.Conversation, sink engine.AgentSink) tea.Cmd {
 	return func() tea.Msg {
-		result, err := eng.RunAgentTurn(ctx, req, opts, hist)
+		result, err := eng.RunAgentTurnStreaming(ctx, req, opts, hist, sink)
 		return agentTurnDoneMsg{result: result, err: err}
 	}
 }
@@ -96,6 +105,15 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	hist := &m.conv
 	m.agentTurn = agentTurnState{hist: hist, before: len(hist.Messages)}
 
+	// agentStream is agentTurnCmd's own goroutine's landing zone for live
+	// events (W2 item 2, docs/ROADMAP-ux-2026-08-20.md; agentstream.go):
+	// mirrors startEngineTurn's plain-path m.buf = &engine.StreamBuf{}
+	// immediately below, just on the tools-enabled fork. Its .sink() is
+	// what actually reaches RunAgentTurnStreaming below; drainAgentStream
+	// (root.go's streamTickMsg dispatch) is the only reader.
+	streamBuf := &agentStreamBuf{}
+	m.agentStream = streamBuf
+
 	req := engine.Request{
 		Model:  wireModel(m.cat, m.model),
 		System: m.system,
@@ -104,7 +122,12 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 		// so nothing set here would ever reach the wire.
 	}
 
-	cmds := []tea.Cmd{agentTurnCmd(ctx, m.eng, req, m.agentOpts, hist)}
+	// tickStream() (root.go) arms the same 50ms repaint clock the plain
+	// path uses (StreamIntervalMS, layout.go) — reused rather than a
+	// second ticker of its own, keeping §14's "zero CPU at idle" test
+	// suite (idle_internal_test.go) satisfied with no new ticker kind to
+	// account for.
+	cmds := []tea.Cmd{agentTurnCmd(ctx, m.eng, req, m.agentOpts, hist, streamBuf.sink()), tickStream()}
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
