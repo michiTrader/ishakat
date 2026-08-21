@@ -51,6 +51,14 @@ tui_mode = "auto"
 # scrollback on exit, so nothing said while the alternate screen was up is
 # lost. Ignored in "regular".
 fullscreen_exit_transcript = true
+# W2 item 4 (F13, docs/ROADMAP-ux-2026-08-20.md, DECISION-2 consequence 3):
+# "one-at-a-time" | "batch". steering_mode governs how many queued
+# mid-turn steering messages engine.AgentSink.Inject hands the running
+# loop per poll; followup_mode governs how many queued alt+enter
+# follow-ups become the next turn once the current one ends. Matches the
+# original report's own "one-at-a-time" default for both.
+steering_mode = "one-at-a-time"
+followup_mode = "one-at-a-time"
 
 [ui.animations]
 mode = "auto"
@@ -85,6 +93,10 @@ history_prev = "up"
 history_next = "down"
 copy_last = "ctrl+y"
 toggle_fold = "ctrl+r"
+# W2 item 4 (F13): alt+enter queues the input box as a follow-up instead
+# of submitting it now; alt+up re-opens that queue for editing.
+queue_followup = "alt+enter"
+edit_queue = "alt+up"
 
 [catalog]
 sources = ["provider", "modelsdev", "config"]

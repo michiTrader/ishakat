@@ -34,6 +34,28 @@ type Map struct {
 	// bindings all touch (see this constant's own test).
 	ToggleFold string
 
+	// QueueFollowup is W2 item 4's own chord (F13, docs/ROADMAP-ux-
+	// 2026-08-20.md, DECISION-2 consequence 3): pressed instead of Submit
+	// while typing a follow-up meant for *after* the current turn, not
+	// injected into it. It has to be a distinct chord, not a modifier read
+	// off Submit's own keypress, because a tools-enabled turn's ModeBusy
+	// input already treats plain Submit as "steer this turn now" for
+	// ordinary text (updateBusy) — the whole point of F13's second queue
+	// is a second, unambiguous gesture for "not now, after". alt+enter is
+	// the report's own chord and, per this file's own diagnostic-tested
+	// precedent (tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}),
+	// renders as exactly "alt+enter" through keyPressString/.String(),
+	// the same string-comparison dispatch every other binding here uses —
+	// no special-casing needed.
+	QueueFollowup string
+
+	// EditQueue is F13's other chord: re-opens the follow-up queue
+	// QueueFollowup fills, so its contents can be edited or reordered
+	// before the turn that will eventually submit them. alt+up, like
+	// QueueFollowup's alt+enter, needs no special dispatch handling: it
+	// renders as exactly "alt+up".
+	EditQueue string
+
 	// QuitRepeat is how many times Quit must be pressed inside the grace
 	// window to actually exit (§7.4, RC-1). 1 quits on the first press;
 	// 2 is the shipped double-press; N counts presses. 0 is treated as
@@ -44,19 +66,21 @@ type Map struct {
 // defaultMap es la red de seguridad si la configuración llega con teclas
 // vacías: nunca dejamos al usuario sin forma de salir o de enviar.
 var defaultMap = Map{
-	Submit:      "enter",
-	Newline:     "ctrl+j",
-	Cancel:      "esc",
-	Quit:        "ctrl+c",
-	ClearScreen: "ctrl+l",
-	ModelPicker: "ctrl+p",
-	ModelCycle:  "ctrl+o",
-	ThemePicker: "ctrl+t",
-	HistoryPrev: "up",
-	HistoryNext: "down",
-	CopyLast:    "ctrl+y",
-	ToggleFold:  "ctrl+r",
-	QuitRepeat:  2,
+	Submit:        "enter",
+	Newline:       "ctrl+j",
+	Cancel:        "esc",
+	Quit:          "ctrl+c",
+	ClearScreen:   "ctrl+l",
+	ModelPicker:   "ctrl+p",
+	ModelCycle:    "ctrl+o",
+	ThemePicker:   "ctrl+t",
+	HistoryPrev:   "up",
+	HistoryNext:   "down",
+	CopyLast:      "ctrl+y",
+	ToggleFold:    "ctrl+r",
+	QueueFollowup: "alt+enter",
+	EditQueue:     "alt+up",
+	QuitRepeat:    2,
 }
 
 // NewMap construye el keymap desde la configuración cargada, rellenando con
@@ -69,19 +93,21 @@ var defaultMap = Map{
 func NewMap(k config.Keys) Map {
 	quit, repeat := normalizeQuitBinding(k.Quit, k.QuitRepeat)
 	m := Map{
-		Submit:      or(k.Submit, defaultMap.Submit),
-		Newline:     or(k.Newline, defaultMap.Newline),
-		Cancel:      or(k.Cancel, defaultMap.Cancel),
-		Quit:        or(quit, defaultMap.Quit),
-		ClearScreen: or(k.ClearScreen, defaultMap.ClearScreen),
-		ModelPicker: or(k.ModelPicker, defaultMap.ModelPicker),
-		ModelCycle:  or(k.ModelCycle, defaultMap.ModelCycle),
-		ThemePicker: or(k.ThemePicker, defaultMap.ThemePicker),
-		HistoryPrev: or(k.HistoryPrev, defaultMap.HistoryPrev),
-		HistoryNext: or(k.HistoryNext, defaultMap.HistoryNext),
-		CopyLast:    or(k.CopyLast, defaultMap.CopyLast),
-		ToggleFold:  or(k.ToggleFold, defaultMap.ToggleFold),
-		QuitRepeat:  repeat,
+		Submit:        or(k.Submit, defaultMap.Submit),
+		Newline:       or(k.Newline, defaultMap.Newline),
+		Cancel:        or(k.Cancel, defaultMap.Cancel),
+		Quit:          or(quit, defaultMap.Quit),
+		ClearScreen:   or(k.ClearScreen, defaultMap.ClearScreen),
+		ModelPicker:   or(k.ModelPicker, defaultMap.ModelPicker),
+		ModelCycle:    or(k.ModelCycle, defaultMap.ModelCycle),
+		ThemePicker:   or(k.ThemePicker, defaultMap.ThemePicker),
+		HistoryPrev:   or(k.HistoryPrev, defaultMap.HistoryPrev),
+		HistoryNext:   or(k.HistoryNext, defaultMap.HistoryNext),
+		CopyLast:      or(k.CopyLast, defaultMap.CopyLast),
+		ToggleFold:    or(k.ToggleFold, defaultMap.ToggleFold),
+		QueueFollowup: or(k.QueueFollowup, defaultMap.QueueFollowup),
+		EditQueue:     or(k.EditQueue, defaultMap.EditQueue),
+		QuitRepeat:    repeat,
 	}
 	return m
 }

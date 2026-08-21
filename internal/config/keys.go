@@ -49,6 +49,8 @@ func validateKeys(c *Config) error {
 		{"history_next", k.HistoryNext},
 		{"copy_last", k.CopyLast},
 		{"toggle_fold", k.ToggleFold},
+		{"queue_followup", k.QueueFollowup},
+		{"edit_queue", k.EditQueue},
 	} {
 		if f.value == "" {
 			continue

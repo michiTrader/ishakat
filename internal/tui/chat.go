@@ -187,6 +187,30 @@ func reasoningModeOr(cfg *config.Config) string {
 	return cfg.UI.Reasoning
 }
 
+// steeringModeOr and followupModeOr mirror reasoningModeOr's own "cfg-or-
+// documented-default" shape for the two W2 item 4 config keys (F13,
+// docs/ROADMAP-ux-2026-08-20.md, DECISION-2 consequence 3): ui.steering_mode
+// and ui.followup_mode, defaults.toml's own "one-at-a-time" for both.
+// validateSteering (internal/config/validate.go) already rejects any value
+// that is neither "one-at-a-time" nor "batch" before a *config.Config ever
+// reaches this package, but cfg == nil (this package's own tests building a
+// Root with no real *config.Config, same as reasoningModeOr's own comment)
+// and a Config built by hand rather than through Load — bypassing that
+// validation — both still need a safe fallback here.
+func steeringModeOr(cfg *config.Config) string {
+	if cfg == nil || cfg.UI.SteeringMode == "" {
+		return "one-at-a-time"
+	}
+	return cfg.UI.SteeringMode
+}
+
+func followupModeOr(cfg *config.Config) string {
+	if cfg == nil || cfg.UI.FollowupMode == "" {
+		return "one-at-a-time"
+	}
+	return cfg.UI.FollowupMode
+}
+
 // reasoningPreviewLines is "~2 lines" from the report, taken literally: the
 // point was a short glance at what the model was doing, not a second reading
 // pane competing with the answer for the screen's own limited height (§2).
