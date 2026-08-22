@@ -461,17 +461,17 @@ tolerated. Two independent things need clearing, and each has its own fix:
    by default; run `ishakat doctor` to see the exact path on your system).
 
 **Google Gemini free-tier verification fails with `HTTP 429` during
-`provider add`.**
-`provider add`'s verification step sends one real, minimal request to
-confirm the key works before saving anything. Google's free tier applies a
-requests-per-minute cap independent of any billing status; a `429` there
-means the *verification probe itself* got rate-limited, not that the key is
-invalid or that a paid plan is required — direct Gemini API access works
-fully on the free tier. If you hit this, wait a few seconds and retry, or
-save the key without the live check: `ishakat provider add gemini
---no-verify` (the message printed on failure already says this). The key is
-stored either way; `--no-verify` only skips the one-token probe, it does
-not weaken how the key itself is used afterwards.
+`ishakat provider add gemini --verify`.**
+`--verify` sends one real, minimal request to confirm the key works before
+saving anything (this is opt-in; plain `provider add` no longer verifies by
+default). Google's free tier applies a requests-per-minute cap independent
+of any billing status; a `429` there means the *verification probe itself*
+got rate-limited, not that the key is invalid or that a paid plan is
+required — direct Gemini API access works fully on the free tier. If you
+hit this, wait a few seconds and retry, or just drop `--verify` and save the
+key without the live check (the default). The key is stored either way;
+`--verify` only adds the one-token probe, it does not change how the key
+itself is used afterwards.
 
 **How do I point a provider at a different API path (e.g. Gemini's native
 `v1beta/models` instead of the OpenAI-compatible `v1beta/openai` ishakat's
