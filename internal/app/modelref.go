@@ -24,7 +24,8 @@ type ModelRef struct {
 	WireID   string // "anthropic/claude-sonnet-4-5"
 
 	// Via records where the reference came from, so it can be reported
-	// honestly: "" (literal), "default", "alias" or "implicit-provider".
+	// honestly: "" (literal), "default", "alias", "implicit-provider" or
+	// "bracket-provider" (the `-m id[provider]` sugar below).
 	Via string
 }
 
@@ -136,6 +137,19 @@ func lookupModelProvider(cfg *config.Config, text string) (pc config.Provider, w
 		return config.Provider{}, "", "", fmt.Errorf("alias %q points to an empty reference", strings.TrimSpace(text))
 	}
 
+	// F11's `-m id[provider]` CLI sugar (DECISION-3): rewrite to the
+	// ordinary `provider/wire_id` form before the parsing below ever runs,
+	// so this really is sugar and not a second resolution path — exactly
+	// DECISION-3's own words, "sugar resolved through the same
+	// catalog.Resolve path as everything else, with provider/model still
+	// valid". Applied after alias expansion (above), not before: an alias
+	// whose own value happens to use the bracket form gets the same
+	// rewrite an inline `-m` argument would.
+	if rewritten, ok := stripBracketProvider(q); ok {
+		q = rewritten
+		via = "bracket-provider"
+	}
+
 	// Only the first slash separates provider from wire_id (§4.2).
 	head, tail, hasSlash := strings.Cut(q, "/")
 
@@ -171,6 +185,40 @@ func lookupModelProvider(cfg *config.Config, text string) (pc config.Provider, w
 			"provider (example: %s/auto/coding)", q, pc.ID)
 	}
 	return pc, wire, via, nil
+}
+
+// stripBracketProvider recognizes F11's `id[provider]` CLI sugar
+// (docs/ROADMAP-ux-2026-08-20.md's DECISION-3, `-m gemini-3.6-flash[omniroute]`)
+// and rewrites it to the ordinary `provider/id` form lookupModelProvider
+// already parses a few lines below — it does not resolve or validate
+// anything itself, on purpose: an unknown bracket content still reaches
+// isProviderID's existing check the normal way and gets the normal
+// "no recognizable prefix" or error behavior, rather than a second,
+// bracket-specific notion of what a valid provider is.
+//
+// Only the LAST "[...]" pair is treated as the provider suffix, found by
+// scanning for the rightmost "[" that pairs with a trailing "]": a wire id
+// is free to contain its own brackets (however unlikely) without this
+// misfiring on them, since only a suffix anchored at the very end of the
+// string counts. Both halves must be non-empty after trimming, or the
+// input is returned unchanged and ok is false — an empty id ("[omniroute]")
+// or an empty provider ("gpt-4o-mini[]") is not sugar for anything, and
+// silently swallowing the brackets would hide a typo instead of surfacing
+// it through the ordinary resolution error.
+func stripBracketProvider(q string) (string, bool) {
+	if !strings.HasSuffix(q, "]") {
+		return q, false
+	}
+	i := strings.LastIndex(q, "[")
+	if i < 0 {
+		return q, false
+	}
+	id := strings.TrimSpace(q[:i])
+	provider := strings.TrimSpace(q[i+1 : len(q)-1])
+	if id == "" || provider == "" {
+		return q, false
+	}
+	return provider + "/" + id, true
 }
 
 // lookupAlias looks up an alias case-insensitively. Returns false if it

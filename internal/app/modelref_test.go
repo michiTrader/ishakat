@@ -53,6 +53,13 @@ func TestResolveModel(t *testing.T) {
 			"omniroute/gpt-4o-mini", "omniroute", "gpt-4o-mini", "implicit-provider"},
 		{"uppercase provider", "OMNIROUTE/auto/fast",
 			"omniroute/auto/fast", "omniroute", "auto/fast", ""},
+		// F11's `-m id[provider]` CLI sugar (DECISION-3): rewritten to
+		// "provider/id" before the ordinary parsing runs, so it resolves
+		// through the exact same path as "provider/id" typed directly.
+		{"bracket provider form", "auto/coding[omniroute]",
+			"omniroute/auto/coding", "omniroute", "auto/coding", "bracket-provider"},
+		{"bracket form with a slash in the wire id", "anthropic/claude-sonnet-4-5[omniroute]",
+			"omniroute/anthropic/claude-sonnet-4-5", "omniroute", "anthropic/claude-sonnet-4-5", "bracket-provider"},
 	}
 
 	for _, c := range cases {
@@ -74,6 +81,60 @@ func TestResolveModel(t *testing.T) {
 				t.Errorf("Via = %q, expected %q", got.Via, c.via)
 			}
 		})
+	}
+}
+
+// TestStripBracketProvider pins the F11 CLI sugar's own rewrite rule in
+// isolation, independent of ResolveModel's other stages: only a
+// non-empty-id, non-empty-provider "id[provider]" suffix is sugar at all,
+// and only the rightmost "[...]" pair anchored at the very end counts, so a
+// wire id containing its own literal brackets is never misread.
+func TestStripBracketProvider(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{"simple", "gpt-4o-mini[openai]", "openai/gpt-4o-mini", true},
+		{"wire id with a slash", "anthropic/claude-sonnet-4-5[omniroute]", "omniroute/anthropic/claude-sonnet-4-5", true},
+		{"no brackets at all", "gpt-4o-mini", "gpt-4o-mini", false},
+		{"empty provider", "gpt-4o-mini[]", "gpt-4o-mini[]", false},
+		{"empty id", "[openai]", "[openai]", false},
+		{"unclosed bracket", "gpt-4o-mini[openai", "gpt-4o-mini[openai", false},
+		{"plain provider/id form is untouched", "openai/gpt-4o-mini", "openai/gpt-4o-mini", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := stripBracketProvider(c.input)
+			if ok != c.ok {
+				t.Fatalf("stripBracketProvider(%q) ok = %v, want %v", c.input, ok, c.ok)
+			}
+			if got != c.want {
+				t.Errorf("stripBracketProvider(%q) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
+
+// TestResolveModelBracketProviderUnknownProviderFallsThroughNormally proves
+// the CLI sugar is genuinely sugar, not a second validation path: an unknown
+// bracket content still reaches ResolveModel's ordinary
+// "no recognizable prefix" handling — the rewritten string just becomes an
+// unrecognized "head/tail", which the existing default branch treats as a
+// literal wire_id sent to the first enabled provider, exactly as
+// "made-up-provider/gpt-4o-mini" typed directly would.
+func TestResolveModelBracketProviderUnknownProviderFallsThroughNormally(t *testing.T) {
+	cfg := cfgWithProviders()
+	got, err := ResolveModel(cfg, "gpt-4o-mini[does-not-exist]")
+	if err != nil {
+		t.Fatalf("ResolveModel returned an error: %v", err)
+	}
+	if got.Provider != "omniroute" {
+		t.Errorf("Provider = %q, want the first enabled provider (omniroute)", got.Provider)
+	}
+	if got.WireID != "does-not-exist/gpt-4o-mini" {
+		t.Errorf("WireID = %q, want the rewritten (but unrecognized) string verbatim", got.WireID)
 	}
 }
 
