@@ -136,7 +136,7 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 	case slash.KindResume:
 		return m.runResumeCommand()
 	case slash.KindModels:
-		return m.runModelsCommand()
+		return m.runModelsCommand(args)
 	case slash.KindSkills:
 		return m.runSkillsCommand()
 	case slash.KindLogin:
@@ -180,23 +180,94 @@ func unimplementedNotice(cmd slash.Command) string {
 	}
 }
 
-// runModelCommand implements /model's three closing behaviors (§12, Step
-// 10): no argument opens the picker unfiltered; an argument that §4.5
-// resolves unambiguously switches straight away with the §4.6 confirmation
-// line, with no overlay ever drawn; anything else opens the picker
-// prefiltered with what the user typed, exactly like an ambiguous /model
-// query already does for the command line's own error message (there isn't
-// one — §4.5 forbids a bare "model not found").
+// runModelCommand implements /model's closing behaviors (§12, Step 10;
+// design doc §2.1 for the two sub-verbs added alongside PR #210's picker
+// UI): a leading "hide "/"keep " word routes to runModelHide (which
+// dispatches on the verb itself) before any of the rest of this runs;
+// otherwise, no argument opens the picker unfiltered; an argument that
+// §4.5 resolves unambiguously switches straight away with the §4.6
+// confirmation line, with no overlay ever drawn; anything else opens the
+// picker prefiltered with what the user typed, exactly like an ambiguous
+// /model query already does for the command line's own error message
+// (there isn't one — §4.5 forbids a bare "model not found").
+//
+// "hide"/"keep" are recognised as literal leading words, not a new
+// slash.Kind: internal/slash's own Command table already routes every
+// argument this command takes through Kind == KindModel and hands the rest
+// of the line to this function unparsed (the same shape /tools's own
+// no-arg-vs-an-arg split already uses without a second Kind) — adding
+// KindModelHide/KindModelKeep would just move this same strings.Cut one
+// layer up for no benefit, since only this function ever needs to know
+// the difference.
 func (m Root) runModelCommand(args string) (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(args)
 	if text == "" {
 		return m.openPicker("")
+	}
+	if verb, rest, ok := cutModelVerb(text, "hide"); ok {
+		return m.runModelHide(verb, rest)
+	}
+	if verb, rest, ok := cutModelVerb(text, "keep"); ok {
+		return m.runModelHide(verb, rest)
 	}
 	res := m.cat.Resolve(text, m.resolveOptions())
 	if res.Outcome.Decided() {
 		return m.applyModelChosen(res.Model.Ref)
 	}
 	return m.openPicker(res.Query)
+}
+
+// cutModelVerb reports whether text starts with verb as its own leading
+// word (case-insensitive, followed by whitespace or the end of the
+// string — "hidex" is a query, not the verb "hide") and, if so, returns
+// verb and whatever follows it, trimmed. This is deliberately narrower
+// than strings.Cut(text, " "): "hide" alone (no query yet) still has to
+// count as the verb, not fall through to catalog.Resolve("hide") and try
+// to switch to a model literally named "hide".
+func cutModelVerb(text, verb string) (matchedVerb, rest string, ok bool) {
+	if !strings.EqualFold(text, verb) && !strings.HasPrefix(strings.ToLower(text), strings.ToLower(verb)+" ") {
+		return "", "", false
+	}
+	rest = strings.TrimSpace(text[len(verb):])
+	return verb, rest, true
+}
+
+// runModelHide implements "/model hide <query>" and "/model keep <query>"
+// (design doc §2.1's first table row and its inverse): resolve query with
+// the exact same §4.5 resolver /model's own bare form uses, so the two
+// never disagree about which model a given piece of text names. An
+// ambiguous query opens the picker prefiltered rather than reporting a
+// bare "not found" — §4.5's own rule, which this sub-verb inherits rather
+// than re-deciding. verb is "hide" or "keep", read back in the notice so
+// the two share one implementation without the message losing which one
+// actually ran.
+func (m Root) runModelHide(verb, query string) (tea.Model, tea.Cmd) {
+	g := m.lay.glyphs()
+	if m.curationStore == nil {
+		return m.slashNotice(g.warnMark + " no hay almacen de curacion configurado; /model " + verb + " no puede persistir nada esta sesion")
+	}
+	if query == "" {
+		return m.slashNotice(g.warnMark + " uso: /model " + verb + " <texto>")
+	}
+	res := m.cat.Resolve(query, m.resolveOptions())
+	if !res.Outcome.Decided() {
+		return m.openPicker(res.Query)
+	}
+	ref := res.Model.Ref
+	var err error
+	if verb == "keep" {
+		err = m.curationStore.Keep(ref)
+	} else {
+		err = m.curationStore.Hide(ref)
+	}
+	if err != nil {
+		return m.slashNotice(g.warnMark + " no se pudo " + verb + " " + ref + ": " + err.Error())
+	}
+	past := "escondido"
+	if verb == "keep" {
+		past = "mantenido"
+	}
+	return m.slashNotice(g.assistantMark + " " + past + " " + ref)
 }
 
 // slashNotice appends text as a transcript entry without adding anything to
