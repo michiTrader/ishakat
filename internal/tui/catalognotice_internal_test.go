@@ -97,3 +97,64 @@ func TestCatalogNoticeNilCatalogIsSilent(t *testing.T) {
 		t.Fatalf("catalogNotice(nil) = %q, want empty", got)
 	}
 }
+
+// TestCatalogNoticeReportsPendingProviders is F11's "catalogs refreshed /
+// N pending" notice: a catalog that is neither Seeded nor Stale (an
+// ordinary, freshly-built snapshot — see catalog.Build's own doc comment
+// on PendingProviders) but still carries PendingProviders > 0 must say so,
+// through the picker's own View() and not just the helper in isolation.
+func TestCatalogNoticeReportsPendingProviders(t *testing.T) {
+	cat := catalogWithModels("omniroute/auto/coding")
+	cat.PendingProviders = 2
+
+	root := rootWithCatalog(cat)
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model")
+
+	view := m.View().Content
+	if !strings.Contains(view, "catalogs refreshed") {
+		t.Errorf("picker view should mention the refresh when PendingProviders > 0, got:\n%s", view)
+	}
+	if !strings.Contains(view, "2 providers pending") {
+		t.Errorf("picker view should report the pending count, got:\n%s", view)
+	}
+}
+
+// TestCatalogNoticePendingProvidersSingular pins pendingProvidersLabel's
+// singular wording: "1 provider pending", never "1 providers pending".
+func TestCatalogNoticePendingProvidersSingular(t *testing.T) {
+	cat := &catalog.Catalog{PendingProviders: 1}
+	got := catalogNotice(cat)
+	if !strings.Contains(got, "1 provider pending") {
+		t.Fatalf("catalogNotice(PendingProviders=1) = %q, want singular \"1 provider pending\"", got)
+	}
+	if strings.Contains(got, "1 providers") {
+		t.Fatalf("catalogNotice(PendingProviders=1) = %q, must not pluralize a singular count", got)
+	}
+}
+
+// TestCatalogNoticeStaleOutranksPendingProviders: a catalog can be both
+// Stale (the whole cache is old) and carry a stale PendingProviders count
+// left over from before the cache expired — Stale is the stronger, more
+// urgent claim ("this whole snapshot might be wrong"), so it must win.
+func TestCatalogNoticeStaleOutranksPendingProviders(t *testing.T) {
+	cat := &catalog.Catalog{Stale: true, PendingProviders: 3}
+	got := catalogNotice(cat)
+	if !strings.Contains(got, "stale cache") {
+		t.Fatalf("catalogNotice(Stale && PendingProviders) = %q, want the stale wording to win", got)
+	}
+	if strings.Contains(got, "pending") {
+		t.Fatalf("catalogNotice(Stale && PendingProviders) = %q, must not also mention pending providers", got)
+	}
+}
+
+// TestCatalogNoticeHasNoPendingLineWhenEveryoneAnswered is the negative
+// case symmetric to TestPickerHasNoNoticeForALiveCatalog above: a live,
+// fully-answered catalog (PendingProviders == 0) must stay exactly as
+// quiet as before this change.
+func TestCatalogNoticeHasNoPendingLineWhenEveryoneAnswered(t *testing.T) {
+	if got := catalogNotice(&catalog.Catalog{}); got != "" {
+		t.Fatalf("catalogNotice(zero value) = %q, want empty", got)
+	}
+}

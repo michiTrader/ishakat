@@ -143,6 +143,7 @@ func Build(in BuildInput) Catalog {
 				msg += ": " + p.DiscoverErr
 			}
 			cat.Note(msg)
+			cat.PendingProviders++
 		}
 		if !p.AuthOK {
 			cat.Note("provider " + p.ID + " has no resolved credential")

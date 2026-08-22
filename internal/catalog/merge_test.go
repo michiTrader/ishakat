@@ -498,6 +498,38 @@ func TestNotesAreHonestAboutFailures(t *testing.T) {
 	}
 }
 
+// TestPendingProvidersCountsFailedDiscovery is F11's "catalogs refreshed /
+// N pending" notice own data source: a provider that came back
+// !DiscoverOK is exactly the case TestNotesAreHonestAboutFailures above
+// already narrates in a Note; this asserts the same condition is also
+// counted, not only narrated.
+func TestPendingProvidersCountsFailedDiscovery(t *testing.T) {
+	cat := Build(BuildInput{Providers: []ProviderInput{
+		okProvider("a", []DiscoveredModel{{WireID: "m1"}}),
+		{ID: "b", Enabled: true, AuthOK: true, Discover: true, DiscoverOK: false,
+			DiscoverErr: "timeout", Declared: []DeclaredModel{{WireID: "m2"}}},
+		{ID: "c", Enabled: true, AuthOK: true, Discover: true, DiscoverOK: false,
+			DiscoverErr: "timeout", Declared: []DeclaredModel{{WireID: "m3"}}},
+	}})
+	if cat.PendingProviders != 2 {
+		t.Errorf("PendingProviders = %d, want 2 (b and c both failed discovery)", cat.PendingProviders)
+	}
+}
+
+// TestPendingProvidersIsZeroWhenEveryoneAnswered is the negative case: a
+// catalog built from providers that all succeeded (or never had discovery
+// enabled to begin with) must not claim anything is pending.
+func TestPendingProvidersIsZeroWhenEveryoneAnswered(t *testing.T) {
+	cat := Build(BuildInput{Providers: []ProviderInput{
+		okProvider("a", []DiscoveredModel{{WireID: "m1"}}),
+		{ID: "b", Enabled: true, AuthOK: true, Discover: false,
+			Declared: []DeclaredModel{{WireID: "m2"}}},
+	}})
+	if cat.PendingProviders != 0 {
+		t.Errorf("PendingProviders = %d, want 0", cat.PendingProviders)
+	}
+}
+
 // TestFetchedAtIsTheOldestSource: the staleness strip of §4.4 must show the
 // worst case, not the best. Two providers refreshed hours apart are "as old
 // as" the older one.

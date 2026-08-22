@@ -371,10 +371,25 @@ func emptyPickerMessage(p Picker) string {
 // seed.json's by memory.
 //
 // Seeded outranks Stale (an unverified placeholder is a stronger claim than
-// an old-but-real one), and both outrank a plain "no notes" nil. It reuses
-// resumeAge rather than internal/app.humanAge for the same reason
-// resumemenu.go's own copy does: internal/app depends on internal/tui, not
-// the other way (§6.1), so a three-line helper is duplicated, not shared.
+// an old-but-real one), Stale outranks the F11 "catalogs refreshed / N
+// pending" case below (a whole cache being old is a stronger claim than
+// some of a fresh one's providers having failed), and all three outrank a
+// plain "no notes" nil. It reuses resumeAge rather than
+// internal/app.humanAge for the same reason resumemenu.go's own copy does:
+// internal/app depends on internal/tui, not the other way (§6.1), so a
+// three-line helper is duplicated, not shared.
+//
+// The PendingProviders case (docs/ROADMAP-ux-2026-08-20.md's W4 section)
+// is deliberately read straight off the immutable Catalog snapshot rather
+// than tracked as separate "just refreshed" transient state on Root/Picker:
+// catalog.Build already counts, per provider, exactly the p.Discover &&
+// !p.DiscoverOK condition this needs (the same one behind the "could not
+// list the models of X" Note and HealthUnreachable), so a snapshot that is
+// neither Seeded nor Stale but still carries PendingProviders > 0 IS "a
+// refresh just landed and some providers did not answer" — no tea.Tick
+// countdown, no extra field on CatalogRefreshedMsg, nothing that has to be
+// cleared later (§14's "no always-on ticker" rule, the same reasoning
+// applyPhaseWait's own doc comment already gives for PhaseWaitMsg).
 func catalogNotice(cat *catalog.Catalog) string {
 	if cat == nil {
 		return ""
@@ -387,9 +402,24 @@ func catalogNotice(cat *catalog.Catalog) string {
 			return "stale cache from " + resumeAge(cat.FetchedAt) + " ago — refreshing in the background"
 		}
 		return "stale cache — refreshing in the background"
+	case cat.PendingProviders > 0:
+		return "catalogs refreshed — " + pendingProvidersLabel(cat.PendingProviders) + " pending"
 	default:
 		return ""
 	}
+}
+
+// pendingProvidersLabel is catalogNotice's own singular/plural wording,
+// mirroring internal/provider.plural's exact "%d word" shape (that helper
+// lives in internal/provider, unreachable from here for the same §6.1
+// reason resumeAge is duplicated rather than shared) — "1 provider
+// pending", never "1 providers pending".
+func pendingProvidersLabel(n int) string {
+	word := "providers"
+	if n == 1 {
+		word = "provider"
+	}
+	return strconv.Itoa(n) + " " + word
 }
 
 func countModelRows(rows []pickerRow) int {
