@@ -384,9 +384,16 @@ func Run(version string, resume bool) int {
 		// preset hits its "no OAuth device flow configured" branch
 		// today, and why that is still correct infrastructure to ship.
 		LoginFor: NewLoginFactory(cfg),
-		Model:    model,
-		System:   system,
-		Catalog:  &snap.Catalog,
+		// CatalogRefreshFor is F2's own hot-apply seam
+		// (internal/tui/catalogrefresh.go, internal/app/catalogrefresh.go):
+		// closed over version only, deliberately not cfg, since every call
+		// must re-read config.toml/credentials.toml from disk rather than
+		// reuse this run's own boot-time cfg — see NewCatalogRefreshFactory's
+		// own doc comment for why.
+		CatalogRefreshFor: NewCatalogRefreshFactory(version),
+		Model:             model,
+		System:            system,
+		Catalog:           &snap.Catalog,
 		// DiscoverSkills reuses the exact same gate SystemPrompt (called
 		// inside BuildEngine, above) already applied when it built system:
 		// a second, disk-only call rather than threading the first result

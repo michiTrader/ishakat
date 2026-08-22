@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/catalog"
+	"github.com/MichiTrader/ishakat/internal/config"
 )
 
 // TestStartLoginWithNoFactoryReportsUnavailable covers Root.loginFor == nil
@@ -150,6 +153,84 @@ func TestStartLoginOpensModeLoginAndFinishesOnSuccess(t *testing.T) {
 	}
 	if len(root.transcript) != 1 || !strings.Contains(root.transcript[0].text, "Configured OpenAI") {
 		t.Fatalf("expected the success note in the transcript, got %v", root.transcript)
+	}
+}
+
+// TestFinishLoginSuccessChainsCatalogRefresh is F2's own hot-apply fix
+// (docs/ROADMAP-ux-2026-08-20.md's W4, catalogrefresh.go): a successful
+// /login must also kick off a catalog refresh, via the cmd finishLogin now
+// returns, so a freshly-authenticated provider does not stay invisible
+// until a separate --refresh/restart.
+func TestFinishLoginSuccessChainsCatalogRefresh(t *testing.T) {
+	root := newHeadlessRoot()
+	root.mode = ModeLogin
+	called := false
+	wantCat := &catalog.Catalog{}
+	wantCfg := &config.Config{}
+	root.catalogRefreshFor = func(context.Context) (*catalog.Catalog, *config.Config) {
+		called = true
+		return wantCat, wantCfg
+	}
+
+	var tm tea.Model = root
+	tm, cmd := tm.Update(loginDoneMsg{note: "Configured OpenAI (openai) via OAuth device flow."})
+	root = tm.(Root)
+	if root.mode != ModeChat {
+		t.Fatalf("mode = %v, want ModeChat", root.mode)
+	}
+	if cmd == nil {
+		t.Fatal("expected a non-nil cmd chaining the catalog refresh")
+	}
+
+	msg := cmd()
+	if !called {
+		t.Fatal("expected catalogRefreshFor to be called by the returned cmd")
+	}
+	// cancelLoginWith's own cmd is nil for a plain success note
+	// (slashNotice with no follow-up command), so finishLogin returns
+	// refreshCatalogCmd directly here rather than a tea.Batch — but the
+	// logic must also tolerate a tea.BatchMsg, in case cancelLoginWith's
+	// own cmd is ever non-nil in the future.
+	var got CatalogRefreshedMsg
+	found := false
+	switch v := msg.(type) {
+	case CatalogRefreshedMsg:
+		got, found = v, true
+	case tea.BatchMsg:
+		for _, sub := range v {
+			if sub == nil {
+				continue
+			}
+			if crm, ok := sub().(CatalogRefreshedMsg); ok {
+				got, found = crm, true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a CatalogRefreshedMsg (directly or batched), got %T", msg)
+	}
+	if got.Catalog != wantCat || got.Cfg != wantCfg {
+		t.Fatalf("CatalogRefreshedMsg = %+v, want Catalog=%p Cfg=%p", got, wantCat, wantCfg)
+	}
+}
+
+// TestFinishLoginSuccessNoCatalogRefreshFactoryFallsBack covers a nil
+// catalogRefreshFor (every other test in this package, and any caller with
+// nothing wired): finishLogin must fall back to its pre-F2 behaviour
+// unchanged, never panicking on the unwired dependency.
+func TestFinishLoginSuccessNoCatalogRefreshFactoryFallsBack(t *testing.T) {
+	root := newHeadlessRoot()
+	root.mode = ModeLogin
+	var tm tea.Model = root
+	tm, cmd := tm.Update(loginDoneMsg{note: "Configured OpenAI (openai) via OAuth device flow."})
+	root = tm.(Root)
+	if root.mode != ModeChat {
+		t.Fatalf("mode = %v, want ModeChat", root.mode)
+	}
+	if cmd != nil {
+		if _, isBatch := cmd().(tea.BatchMsg); isBatch {
+			t.Fatal("no catalogRefreshFor wired: did not expect a batched refresh cmd")
+		}
 	}
 }
 

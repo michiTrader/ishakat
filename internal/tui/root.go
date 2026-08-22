@@ -252,6 +252,22 @@ type Root struct {
 	// discipline switchEngine already follows for engineFor above.
 	loginFor LoginFactory
 
+	// catalogRefreshFor is F2's own hot-apply seam
+	// (docs/ROADMAP-ux-2026-08-20.md's W4, catalogrefresh.go): a
+	// successful /login writes a new credential to disk, but the catalog
+	// this Root is already showing (m.cat) — and the *config.Config it
+	// resolved from (m.cfg) — are both a snapshot taken once at boot, so
+	// neither sees the new credential until something re-reads
+	// configuration and re-runs discovery. finishLogin (login.go) calls
+	// this instead of leaving the freshly-authenticated provider
+	// invisible until a separate --refresh/restart. nil is a supported
+	// value (every test in this package, and any caller with nothing
+	// wired): finishLogin then falls back to its pre-F2 behaviour of
+	// closing the wizard with no refresh, the same "no silent panic on
+	// an unwired dependency" rule engineFor/loginFor's own nil checks
+	// already follow.
+	catalogRefreshFor CatalogRefreshFactory
+
 	// buf is the landing zone for the turn currently in flight: the engine's
 	// goroutine writes into it, and streamTickMsg drains it on the repaint
 	// clock (that decoupling is StreamBuf's whole purpose). Non-nil exactly
@@ -934,6 +950,12 @@ type Options struct {
 	// boundary this crosses and why nil is a supported value.
 	LoginFor LoginFactory
 
+	// CatalogRefreshFor is F2's own hot-apply seam (catalogrefresh.go) —
+	// see Root.catalogRefreshFor's own comment for the §6.1 boundary
+	// this crosses, why it has to re-read configuration from disk rather
+	// than reuse Cfg above, and why nil is a supported value.
+	CatalogRefreshFor CatalogRefreshFactory
+
 	// Model is the model reference to show and to send, in §4.2's Ref form
 	// ("provider/model" or a bare alias as the user typed it), never the
 	// wire ID directly: Root resolves the Ref to its WireID (wireModel, in
@@ -1234,42 +1256,43 @@ func NewRoot(o Options) Root {
 	}
 
 	r := Root{
-		version:         o.Version,
-		cwd:             o.CWD,
-		mode:            startMode,
-		lay:             lay,
-		styles:          styles,
-		themesDir:       o.ThemesDir,
-		themeStore:      o.ThemeStore,
-		trustStore:      o.TrustStore,
-		gitInGit:        o.GitInGit,
-		gitClean:        o.GitClean,
-		gitBranch:       o.GitBranch,
-		missionGuard:    o.MissionGuard,
-		missionPolicy:   o.MissionPolicy,
-		missionRecorder: o.MissionRecorder,
-		input:           NewInput(lay.InputPrefix()),
-		fps:             fps,
-		cfg:             o.Cfg,
-		cfgBanner:       o.Cfg == nil || o.Cfg.UI.Banner,
-		cfgSyntax:       o.Cfg == nil || o.Cfg.UI.Syntax,
-		cfgMarkdown:     o.Cfg == nil || o.Cfg.UI.Markdown,
-		cfgReasoning:    reasoningModeOr(o.Cfg),
-		animMode:        anim.Mode,
-		cap:             o.Cap,
-		tuiMode:         o.TUIMode,
-		exitTranscript:  o.FullscreenExitTranscript,
-		eng:             engineOr(o.Engine),
-		engineFor:       o.EngineFor,
-		loginFor:        o.LoginFor,
-		model:           model,
-		system:          o.System,
-		commands:        slash.Default(),
-		cat:             o.Catalog,
-		skills:          o.Skills,
-		alias:           o.Alias,
-		preferFree:      o.PreferFree,
-		favorites:       o.Favorites,
+		version:           o.Version,
+		cwd:               o.CWD,
+		mode:              startMode,
+		lay:               lay,
+		styles:            styles,
+		themesDir:         o.ThemesDir,
+		themeStore:        o.ThemeStore,
+		trustStore:        o.TrustStore,
+		gitInGit:          o.GitInGit,
+		gitClean:          o.GitClean,
+		gitBranch:         o.GitBranch,
+		missionGuard:      o.MissionGuard,
+		missionPolicy:     o.MissionPolicy,
+		missionRecorder:   o.MissionRecorder,
+		input:             NewInput(lay.InputPrefix()),
+		fps:               fps,
+		cfg:               o.Cfg,
+		cfgBanner:         o.Cfg == nil || o.Cfg.UI.Banner,
+		cfgSyntax:         o.Cfg == nil || o.Cfg.UI.Syntax,
+		cfgMarkdown:       o.Cfg == nil || o.Cfg.UI.Markdown,
+		cfgReasoning:      reasoningModeOr(o.Cfg),
+		animMode:          anim.Mode,
+		cap:               o.Cap,
+		tuiMode:           o.TUIMode,
+		exitTranscript:    o.FullscreenExitTranscript,
+		eng:               engineOr(o.Engine),
+		engineFor:         o.EngineFor,
+		loginFor:          o.LoginFor,
+		catalogRefreshFor: o.CatalogRefreshFor,
+		model:             model,
+		system:            o.System,
+		commands:          slash.Default(),
+		cat:               o.Catalog,
+		skills:            o.Skills,
+		alias:             o.Alias,
+		preferFree:        o.PreferFree,
+		favorites:         o.Favorites,
 
 		compactEng:           o.CompactEngine,
 		compactModel:         o.CompactModel,
@@ -1490,7 +1513,7 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applySessionChosen(msg.ID)
 
 	case CatalogRefreshedMsg:
-		return m.applyCatalogRefreshed(msg.Catalog)
+		return m.applyCatalogRefreshed(msg)
 
 	case compactDoneMsg:
 		// A stale result from a compaction cancelCompact already closed —
@@ -1742,12 +1765,12 @@ func (m Root) resolveOptions() catalog.ResolveOptions {
 	return catalog.ResolveOptions{Alias: m.alias, PreferFree: m.preferFree}
 }
 
-// applyCatalogRefreshed is CatalogRefreshedMsg's only handler. next is nil
-// when app.BackgroundRefresh could not improve on the catalog LoadCatalog
-// already handed Root at startup (network unreachable, every provider
-// timed out) — swapping m.cat for nothing would turn a working picker into
-// an empty one over something that was never the user's fault, so that case
-// is a no-op.
+// applyCatalogRefreshed is CatalogRefreshedMsg's only handler. msg.Catalog
+// is nil when app.BackgroundRefresh could not improve on the catalog
+// LoadCatalog already handed Root at startup (network unreachable, every
+// provider timed out) — swapping m.cat for nothing would turn a working
+// picker into an empty one over something that was never the user's fault,
+// so that case is a no-op.
 //
 // When the picker is open (ModePicker) at the moment the refresh lands, it
 // is rebuilt against the new catalog rather than left stale or closed: the
@@ -1755,11 +1778,39 @@ func (m Root) resolveOptions() catalog.ResolveOptions {
 // refresh is about to change, and closing the overlay out from under an
 // still-open selection would be a worse surprise than the row list moving
 // under their cursor.
-func (m Root) applyCatalogRefreshed(next *catalog.Catalog) (tea.Model, tea.Cmd) {
-	if next == nil {
+//
+// msg.Cfg is F2's own addition (docs/ROADMAP-ux-2026-08-20.md's W4,
+// catalogrefresh.go): nil for the pre-existing §4.4/§11 background refresh
+// (its cfg never changed), non-nil for a hot /login apply. When present, it
+// is copied into the *config.Config m.cfg already points at — *m.cfg =
+// *msg.Cfg, not m.cfg = msg.Cfg — deliberately: engineFor (see
+// Root.engineFor's own comment) was built once, at boot, by
+// app.NewEngineFactory(cfg, ...), and that closure holds the exact pointer
+// value cfg was at construction time, not a way to observe Root.cfg's own
+// field being reassigned later. Copying the fresh value's fields into the
+// same struct that pointer already refers to is what actually makes a
+// freshly-authenticated provider reachable by the very next /model switch,
+// with no restart and no rewiring of engineFor itself. This runs on
+// Update's own single goroutine (the same one that may read m.cfg via
+// /config, /debug), so it never races the tea.Cmd goroutine that produced
+// msg.Cfg — see CatalogRefreshFactory's own comment for why that goroutine
+// hands back an independent value instead of doing this same mutation
+// itself. The nil-m.cfg fallback (every test in this package, and any
+// caller that built a Root with no Options.Cfg) simply adopts the pointer
+// directly: there is no pre-existing closure for such a Root to keep in
+// sync anyway.
+func (m Root) applyCatalogRefreshed(msg CatalogRefreshedMsg) (tea.Model, tea.Cmd) {
+	if msg.Cfg != nil {
+		if m.cfg != nil {
+			*m.cfg = *msg.Cfg
+		} else {
+			m.cfg = msg.Cfg
+		}
+	}
+	if msg.Catalog == nil {
 		return m, nil
 	}
-	m.cat = next
+	m.cat = msg.Catalog
 	if m.mode == ModePicker {
 		m.picker.cat = m.cat
 		m.picker = m.picker.rebuild()

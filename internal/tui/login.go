@@ -126,11 +126,39 @@ func (m Root) finishLoginCode(code LoginDeviceCode, waiter LoginWaiter, err erro
 // finishLogin is loginDoneMsg's handler: the poll-for-token-and-save
 // sequence either produced a success line (note) or failed, mirroring
 // runLogin's own final branch in cmd/ishakat/login.go.
+//
+// F2 (docs/ROADMAP-ux-2026-08-20.md's W4): a successful login just wrote a
+// new credential to disk (config.SaveProviderConnection/SaveCredential,
+// internal/app/loginfactory.go), but nothing about that write is visible
+// to this running session yet — m.cat still shows whatever the catalog
+// looked like at boot (or the last refresh), and the newly-authenticated
+// provider has no way to appear in /model or ctrl+p without a hot refresh.
+// Before this fix, closing the wizard was the last thing that ever
+// happened here; the provider stayed unusable until a separate
+// --refresh/restart, which is exactly the gap F2 names. When
+// catalogRefreshFor is wired, the success path now also kicks off
+// refreshCatalogCmd alongside cancelLoginWith's own cmd, batched together
+// (tea.Batch) so cleanup is not delayed waiting on the network. The
+// refresh's own result lands back through the ordinary CatalogRefreshedMsg
+// path (applyCatalogRefreshed) once it completes, at which point the
+// picker (if open) rebuilds and any live /model resolution can see the
+// newly-usable provider — no restart, no --refresh, exactly what F2 asks
+// for. A nil catalogRefreshFor (every test in this package, and any
+// caller with nothing wired) falls back to the pre-F2 behaviour
+// unchanged.
 func (m Root) finishLogin(note string, err error) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.cancelLoginWith(m.lay.glyphs().warnMark + " login fallido: " + err.Error())
 	}
-	return m.cancelLoginWith(note)
+	next, cmd := m.cancelLoginWith(note)
+	if m.catalogRefreshFor == nil {
+		return next, cmd
+	}
+	refresh := refreshCatalogCmd(context.Background(), m.catalogRefreshFor)
+	if cmd == nil {
+		return next, refresh
+	}
+	return next, tea.Batch(cmd, refresh)
 }
 
 // updateLogin handles every message while mode == ModeLogin. Like
