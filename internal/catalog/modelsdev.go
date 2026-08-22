@@ -44,20 +44,31 @@ type MDCost struct {
 // small: the full api.json is over 3 MB and this brings it down by an order
 // of magnitude.
 type MDModel struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name,omitempty"`
-	Family      string   `json:"family,omitempty"`
-	Context     int      `json:"context,omitempty"`
-	Output      int      `json:"output,omitempty"`
-	Cost        *MDCost  `json:"cost,omitempty"`
-	Tools       bool     `json:"tools,omitempty"`
-	Reasoning   bool     `json:"reasoning,omitempty"`
-	Vision      bool     `json:"vision,omitempty"`
-	Attachments bool     `json:"attachments,omitempty"`
-	JSONSchema  bool     `json:"json_schema,omitempty"`
-	Modalities  []string `json:"modalities,omitempty"`
-	OpenWeights bool     `json:"open_weights,omitempty"`
-	ReleaseDate string   `json:"release_date,omitempty"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name,omitempty"`
+	Family      string  `json:"family,omitempty"`
+	Context     int     `json:"context,omitempty"`
+	Output      int     `json:"output,omitempty"`
+	Cost        *MDCost `json:"cost,omitempty"`
+	Tools       bool    `json:"tools,omitempty"`
+	Reasoning   bool    `json:"reasoning,omitempty"`
+	Vision      bool    `json:"vision,omitempty"`
+	Attachments bool    `json:"attachments,omitempty"`
+	JSONSchema  bool    `json:"json_schema,omitempty"`
+
+	// Modalities is the declared OUTPUT modalities, not input: what a
+	// model can accept and what it can emit are independent, and
+	// docs/DESIGN-model-curation.md §1.2's first curation signal ("output
+	// non-empty and lacks text") only makes sense against what comes
+	// out. A model that accepts image/audio/video and answers in text
+	// (gemini-3.5-flash) is a chat model; one that accepts text and
+	// emits only audio (a TTS endpoint) is not, regardless of what it
+	// accepts. Vision (below) is the input-side signal and stays
+	// separate on purpose.
+	Modalities []string `json:"modalities,omitempty"`
+
+	OpenWeights bool   `json:"open_weights,omitempty"`
+	ReleaseDate string `json:"release_date,omitempty"`
 
 	// Status is models.dev's own lifecycle field: "deprecated", "beta",
 	// "alpha", or absent. This is what lets `hide_deprecated` do anything at
@@ -206,7 +217,7 @@ func (w wireMDModelRaw) digest(id string) MDModel {
 		Vision:      vision,
 		Attachments: w.Attachment,
 		JSONSchema:  w.StructuredOutput,
-		Modalities:  w.Modalities.Input,
+		Modalities:  w.Modalities.Output,
 		OpenWeights: w.OpenWeights,
 		ReleaseDate: w.ReleaseDate,
 		Status:      w.Status,

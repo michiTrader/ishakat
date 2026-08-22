@@ -150,6 +150,46 @@ func TestParseAPIStatusAndTemperature(t *testing.T) {
 	}
 }
 
+// TestParseAPIModalitiesIsOutputNotInput pins the fix behind
+// docs/DESIGN-model-curation.md §1.2's first curation signal: MDModel.Modalities
+// must carry the WIRE's OUTPUT modalities, not input. A model that accepts
+// image+text but only emits audio (a TTS shape) must report Modalities =
+// ["audio"], never ["image","text"] — the input side is a completely
+// different question (vision capability, handled separately by Caps.Vision)
+// and conflating the two would make nonChat's own modality check useless.
+func TestParseAPIModalitiesIsOutputNotInput(t *testing.T) {
+	raw := []byte(`{
+		"google": {"id":"google","name":"Google","models":{
+			"gemini-tts": {
+				"id": "gemini-tts",
+				"modalities": {"input": ["text"], "output": ["audio"]}
+			},
+			"gemini-3.5-flash": {
+				"id": "gemini-3.5-flash",
+				"modalities": {"input": ["text","image","video","audio"], "output": ["text"]}
+			}
+		}}
+	}`)
+	ix := NewIndex()
+	if err := ix.ParseAPI(raw); err != nil {
+		t.Fatalf("ParseAPI: %v", err)
+	}
+
+	tts, _ := ix.Lookup("google", "gemini-tts")
+	if len(tts.Modalities) != 1 || tts.Modalities[0] != "audio" {
+		t.Errorf("gemini-tts.Modalities = %v, want [\"audio\"] (the output side, not input)", tts.Modalities)
+	}
+
+	flash, _ := ix.Lookup("google", "gemini-3.5-flash")
+	if len(flash.Modalities) != 1 || flash.Modalities[0] != "text" {
+		t.Errorf("gemini-3.5-flash.Modalities = %v, want [\"text\"]", flash.Modalities)
+	}
+	// Vision is still derived from the INPUT side, independently.
+	if !flash.Vision {
+		t.Errorf("gemini-3.5-flash.Vision = false, want true (input modalities include image/video)")
+	}
+}
+
 func TestParseAPISkipsBrokenEntriesButKeepsGoodOnes(t *testing.T) {
 	raw := []byte(`{
 		"anthropic": {"id":"anthropic","name":"Anthropic","models":{

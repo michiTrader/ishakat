@@ -339,6 +339,19 @@ func applyModelsDev(m *Model, ix *Index) {
 	}
 	m.Caps = m.Caps.Merge(md.Caps())
 
+	// Modalities/Temperature feed Layer 1's curation (curate.go's
+	// nonChat): both are copy-only-if-unset, the same "discovery and the
+	// user both outrank this source" rule as everything else in this
+	// function, and both stay nil/empty rather than false/zero when
+	// models.dev never said — see the field comments on Model and
+	// MDModel for why that distinction has to survive the copy.
+	if len(m.Modalities) == 0 && len(md.Modalities) > 0 {
+		m.Modalities = md.Modalities
+	}
+	if m.Temperature == nil && md.Temperature != nil {
+		m.Temperature = md.Temperature
+	}
+
 	// models.dev's own lifecycle field. This is what makes hide_deprecated
 	// (merge.go's HideDeprecated below) actually hide something: providers
 	// almost never send "deprecated": true on their own /models response
