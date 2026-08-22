@@ -314,6 +314,22 @@ type Catalog struct {
 	Stale  bool `json:"stale,omitempty"`
 	Seeded bool `json:"seeded,omitempty"`
 
+	// PendingProviders is how many discovery-enabled providers did NOT
+	// answer on the refresh that produced this snapshot (p.Discover &&
+	// !p.DiscoverOK in Build's own per-provider loop) — the same condition
+	// that already produces a "could not list the models of X" Note and a
+	// HealthUnreachable model, just counted instead of only narrated.
+	//
+	// It is deliberately NOT "N providers whose network call has not
+	// finished yet": RefreshCatalog's own fetch.Discover call runs every
+	// target to completion (success, failure or its own per-provider
+	// timeout) before RefreshCatalog ever returns, so by the time any
+	// Catalog value exists there is nothing left literally in flight. This
+	// counts providers still stuck on stale/cached data after a completed
+	// refresh — the F11 "catalogs refreshed / N pending" notice's own
+	// "pending" (docs/ROADMAP-ux-2026-08-20.md's W4 section).
+	PendingProviders int `json:"pending_providers,omitempty"`
+
 	// Notes are honest one-liners for the interface: which provider could
 	// not be reached, which metadata is missing. Never errors that abort.
 	Notes []string `json:"notes,omitempty"`
