@@ -5,6 +5,7 @@ import (
 
 	"github.com/MichiTrader/ishakat/internal/ask"
 	"github.com/MichiTrader/ishakat/internal/catalog"
+	"github.com/MichiTrader/ishakat/internal/config"
 	"github.com/MichiTrader/ishakat/internal/engine"
 	"github.com/MichiTrader/ishakat/internal/permissions"
 )
@@ -68,7 +69,23 @@ type compactDoneMsg struct {
 // Catalog is nil when the refresh could not improve on what LoadCatalog
 // already produced (see app.BackgroundRefresh) — applyCatalogRefreshed
 // treats that as a no-op rather than replacing a good catalog with nothing.
-type CatalogRefreshedMsg struct{ Catalog *catalog.Catalog }
+//
+// Cfg is F2's own addition (docs/ROADMAP-ux-2026-08-20.md's W4,
+// catalogrefresh.go): the §4.4/§11 background refresh above never has a
+// fresh config to report (its cfg never changed, only the catalog it was
+// discovered against did), so it leaves this nil. F2's own trigger
+// (refreshCatalogCmd, fired from login.go's finishLogin after a
+// successful /login) does have one — a successful login writes a new
+// credential to config.toml/credentials.toml that the running session's
+// in-memory *config.Config cannot see until something re-reads it from
+// disk, which is exactly what CatalogRefreshFactory's implementation
+// does before re-running discovery. applyCatalogRefreshed applies this
+// the same nil-is-a-no-op way it already applies Catalog: a nil Cfg
+// means "nothing new to adopt", not "clear the existing one".
+type CatalogRefreshedMsg struct {
+	Catalog *catalog.Catalog
+	Cfg     *config.Config
+}
 
 // ToolApproveRequestMsg is how a permissions.Reviewer bridge running inside
 // RunAgentTurn's goroutine (started by agentTurnCmd, a tea.Cmd — see
