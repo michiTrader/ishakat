@@ -12,6 +12,7 @@ import (
 	"github.com/MichiTrader/ishakat/internal/catalog"
 	"github.com/MichiTrader/ishakat/internal/catalog/fetch"
 	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/curation"
 	"github.com/MichiTrader/ishakat/internal/xdg"
 )
 
@@ -135,6 +136,17 @@ func providerInputs(cfg *config.Config, cache *catalog.Cache) []catalog.Provider
 // top-level cfg.Catalog.HideDeprecated (design doc §1.3: the flag "moved
 // here... kept as an alias one release" — a config.toml written before
 // [catalog.curate] existed must keep behaving the same way).
+//
+// KeepRefs/HideRefs come from curation.json (Layer 2's own persisted,
+// per-model decisions — a ctrl+x/ctrl+h in the picker, or /model hide|keep),
+// loaded here rather than threaded through as a parameter: LoadCatalog and
+// RefreshCatalog already resolve every other on-disk input (cache path,
+// digest) internally without the caller injecting them, and curation.Load
+// degrades to an empty, unhidden Store on any missing/corrupt/wrong-version
+// file — never an error worth failing curationRules(nil)'s own "no cfg, no
+// opinions" contract over, and never worth changing this function's
+// signature (and its two existing curationRules(nil)/curationRules(cfg)
+// tests) for.
 func curationRules(cfg *config.Config) catalog.Rules {
 	if cfg == nil {
 		return catalog.Rules{}
@@ -157,6 +169,14 @@ func curationRules(cfg *config.Config) catalog.Rules {
 			r.Providers = make(map[string]catalog.ProviderRules, len(cfg.Providers))
 		}
 		r.Providers[p.ID] = catalog.ProviderRules{Hide: p.Hide, Keep: p.Keep}
+	}
+	if cur, err := curation.Load(xdg.CurationFile()); err == nil && cur != nil {
+		for _, e := range cur.Kept {
+			r.KeepRefs = append(r.KeepRefs, e.Ref)
+		}
+		for _, e := range cur.Hidden {
+			r.HideRefs = append(r.HideRefs, e.Ref)
+		}
 	}
 	return r
 }

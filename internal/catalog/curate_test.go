@@ -198,6 +198,55 @@ func TestCurateNeverHidesUsedOrConfigDeclared(t *testing.T) {
 	mustKept(t, kept, "google/veo-3.1-generate-preview")
 }
 
+// TestCurateKeepRefsOverridesEverythingIncludingGlobHide is Layer 2's own
+// precedence check (design doc §2.2): curation.json's KeepRefs beats even
+// the glob-based Hide from config.toml, the strongest layer winning over a
+// weaker one.
+func TestCurateKeepRefsOverridesEverythingIncludingGlobHide(t *testing.T) {
+	cat := Catalog{Models: []Model{
+		gm("gemini-embedding-2", withModalities("text"), withMaxOutput(1), withDeprecated()),
+	}}
+	kept, hidden := Curate(cat, Rules{
+		ChatOnly: true, HideDeprecated: true,
+		Hide:     []string{"gemini-embedding-2"},
+		KeepRefs: []string{"google/gemini-embedding-2"},
+	})
+	if len(hidden) != 0 {
+		t.Fatalf("KeepRefs should override every rule, got hidden = %v", hidden)
+	}
+	mustKept(t, kept, "google/gemini-embedding-2")
+}
+
+// TestCurateHideRefsCatchesWhatNoAutomaticRuleWould asserts HideRefs can
+// hide a model that ChatOnly/HideDeprecated/etc. would never flag on their
+// own -- a plain, healthy chat model the user simply doesn't want to see.
+func TestCurateHideRefsCatchesWhatNoAutomaticRuleWould(t *testing.T) {
+	cat := Catalog{Models: []Model{
+		gm("gemini-3.5-flash"),
+	}}
+	kept, hidden := Curate(cat, Rules{
+		HideRefs: []string{"google/gemini-3.5-flash"},
+	})
+	mustHiddenReason(t, hidden, "google/gemini-3.5-flash", ReasonUserGlob)
+	if len(kept.Models) != 0 {
+		t.Fatalf("kept = %v, want empty", kept.Models)
+	}
+}
+
+// TestCurateHideRefsIsNotBlockedByUsedOrDeclared: an explicit, one-model
+// ctrl+x is a direct human instruction, not a heuristic guessing at
+// intent, so it is NOT subject to principle 3's "never hide what the user
+// actually used" carve-out the way HideDeprecated/ChatOnly/etc. are.
+func TestCurateHideRefsIsNotBlockedByUsedOrDeclared(t *testing.T) {
+	cat := Catalog{Models: []Model{
+		gm("gemini-embedding-2", withUseCount(3)),
+	}}
+	_, hidden := Curate(cat, Rules{
+		HideRefs: []string{"google/gemini-embedding-2"},
+	})
+	mustHiddenReason(t, hidden, "google/gemini-embedding-2", ReasonUserGlob)
+}
+
 // TestCuratePreservesFootCount asserts the invariant Layer 2's own
 // closing criterion depends on: len(kept.Models) + len(hidden) ==
 // len(input.Models), for every rule combination — the picker's footer

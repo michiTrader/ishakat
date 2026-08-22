@@ -173,6 +173,28 @@ func TestAskStaysPresentationFree(t *testing.T) {
 	}
 }
 
+// TestCurationStaysPure protects design doc DESIGN-model-curation.md
+// principle 5: internal/curation is a plain on-disk store (Store/Load/Save,
+// mirroring internal/trust), never importing net/http, lipgloss/bubbletea,
+// or internal/config/internal/xdg -- the caller supplies a plain path
+// string, so the same package can back a ctrl+x in the picker, a /model
+// hide, or a headless CLI flag without any of them dragging in the others'
+// dependencies.
+func TestCurationStaysPure(t *testing.T) {
+	list, ok := depsOpt(t, "internal/curation", "curation")
+	if !ok {
+		return
+	}
+	for _, mal := range []string{
+		"net/http", "lipgloss", "bubbletea", "bubbles", "colorprofile",
+		"ishakat/internal/tui", "ishakat/internal/config", "ishakat/internal/xdg",
+	} {
+		if strings.Contains(list, mal) {
+			t.Errorf("internal/curation imports %s: it must stay a plain on-disk store usable from picker, slash command, and CLI alike", mal)
+		}
+	}
+}
+
 // TestMissionStaysPureAndDoesNotImportPermissions protects §21.6's own
 // package boundary (internal/mission/mission.go's own doc comment):
 // mission.Rule and permissions.MissionRule are deliberately two separate
