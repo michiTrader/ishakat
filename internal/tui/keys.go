@@ -23,15 +23,20 @@ type Map struct {
 	HistoryNext string
 	CopyLast    string
 
-	// ToggleFold folds/unfolds the fenced code block closest to the cursor
-	// (codeblock.go, §17 2026-08-18 "code blocks fill the terminal" entry).
-	// It is deliberately not ctrl+o: that chord is already reserved for
-	// ModelCycle ("cycle favorites", §4/§9.7 — documented and configurable
-	// since Step 10, even though no key handler implements it yet), and
-	// claiming it here would collide with that still-pending feature the
-	// moment someone finishes it. ctrl+r was free across every file this
-	// package's own default keymap, defaults.toml and bubbles/v2's textarea
-	// bindings all touch (see this constant's own test).
+	// ToggleFold folds/unfolds every fenced code block still redrawable in
+	// the live-managed region (codeblock.go, §17 2026-08-18 "code blocks
+	// fill the terminal" entry) — and, as of F8b (docs/ROADMAP-ux-2026-08-
+	// 20.md W2 item 5), every reasoning preview alongside them, through the
+	// same Root.foldCode bool: "one toggle that folds/unfolds reasoning and
+	// code together", replacing the original "code only" behaviour rather
+	// than adding a second chord next to it. It is deliberately not
+	// ctrl+o: that chord is already reserved for ModelCycle ("cycle
+	// favorites", §4/§9.7 — documented and configurable since Step 10,
+	// even though no key handler implements it yet), and claiming it here
+	// would collide with that still-pending feature the moment someone
+	// finishes it. ctrl+r was free across every file this package's own
+	// default keymap, defaults.toml and bubbles/v2's textarea bindings all
+	// touch (see this constant's own test).
 	ToggleFold string
 
 	// QueueFollowup is W2 item 4's own chord (F13, docs/ROADMAP-ux-

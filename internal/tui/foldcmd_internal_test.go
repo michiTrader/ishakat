@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MichiTrader/ishakat/internal/engine"
 )
 
 // TestToggleFoldKeyFlipsRootFoldCode pins the actual keybinding wiring for
@@ -92,5 +95,67 @@ func TestPlayTurnWithFoldedCodeShowsSummaryNotBody(t *testing.T) {
 	plain = stripANSI(m.View().Content)
 	if !strings.Contains(plain, "fmt.Println") {
 		t.Errorf("with foldCode off again, the code body must be visible: %s", plain)
+	}
+}
+
+// reasoningEchoEngine is echoEngine's sibling for F8b's own end-to-end test
+// below: a deterministic engine double whose stream emits an EventReasoning
+// burst before echoing the prompt back as EventDelta text, so a real turn
+// through a real Root actually populates m.live.reason (chat.go) the same
+// way a tool-enabled or reasoning-capable provider would.
+func reasoningEchoEngine(reasoning string) *engine.Engine {
+	stream := func(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
+		text := ""
+		if len(req.Messages) > 0 {
+			text = req.Messages[len(req.Messages)-1].Text()
+		}
+		out := make(chan engine.Event, 3)
+		out <- engine.Event{Kind: engine.EventReasoning, Text: reasoning}
+		out <- engine.Event{Kind: engine.EventDelta, Text: text}
+		out <- engine.Event{Kind: engine.EventDone}
+		close(out)
+		return out, nil
+	}
+	return engine.New(stream, 0)
+}
+
+// TestPlayTurnWithFoldedReasoningShowsSummaryNotText is
+// TestPlayTurnWithFoldedCodeShowsSummaryNotBody's own reasoning half — the
+// concrete proof that F8b's "one toggle... folds/unfolds reasoning and code
+// together" (docs/ROADMAP-ux-2026-08-20.md W2 item 5) actually reaches a
+// real Root's real rendered frame, not just renderReasoningPreview in
+// isolation. Same ctrl+r chord, same foldCode field, now also collapsing
+// the reasoning preview a real streamed turn produces.
+func TestPlayTurnWithFoldedReasoningShowsSummaryNotText(t *testing.T) {
+	const reasoning = "pensando paso a paso sobre la pregunta"
+
+	root := newVisibleRoot()
+	root = withEngine(root, reasoningEchoEngine(reasoning))
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	if !m.(Root).foldCode {
+		t.Fatal("ctrl+r must have set foldCode before the turn even starts")
+	}
+	m = playTurn(m, "hola")
+
+	plain := stripANSI(m.View().Content)
+	if strings.Contains(plain, reasoning) {
+		t.Errorf("with foldCode on, the reasoning text must not appear on screen: %s", plain)
+	}
+	if !strings.Contains(plain, unicodeGlyphs.foldMark) {
+		t.Errorf("with foldCode on, the fold summary glyph must appear: %s", plain)
+	}
+	if !strings.Contains(plain, "hola") {
+		t.Errorf("the answer body must still be visible: %s", plain)
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	if m.(Root).foldCode {
+		t.Fatal("second ctrl+r should turn folding back off")
+	}
+	plain = stripANSI(m.View().Content)
+	if !strings.Contains(plain, reasoning) {
+		t.Errorf("with foldCode off again, the reasoning preview must be visible: %s", plain)
 	}
 }

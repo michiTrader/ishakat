@@ -386,6 +386,24 @@ type Root struct {
 	// committed via commitEntryCmd cannot be redrawn afterwards (§7.5), so
 	// this only ever affects the last keepInline transcript entries plus
 	// the live turn — see commitEntryCmd's own comment for that limit.
+	//
+	// As of F8b (docs/ROADMAP-ux-2026-08-20.md W2 item 5) this field's name
+	// undersells what it does: the same bool now also collapses a bubble's
+	// reasoning preview (renderReasoningPreview, chat.go) to
+	// reasoningFoldSummary's one-line form, replacing the pre-F8b behaviour
+	// of "ctrl+r folds code only". It keeps the field's original name
+	// rather than gaining a second one, exactly because §5's "deliberately
+	// not in any wave" note is explicit that F8b "extends *what* it folds,
+	// not *how much state* it keeps" — renaming or duplicating this field
+	// would imply new state where the roadmap asks for none. The regular-
+	// vs-fullscreen limitation above is unchanged and applies identically
+	// to the reasoning half: a committed entry's reasoning preview freezes
+	// at whatever foldCode held the moment commitEntryCmd printed it, in
+	// `regular` mode only — `fullscreen` never commits at all (see
+	// evictOverflow's own fullscreen guard), so there every entry still in
+	// m.transcript keeps reacting to ctrl+r for as long as the session
+	// runs, which is DECISION-1's own "concrete payoff" the roadmap names
+	// for this item.
 	foldCode bool
 
 	// animMode and cap are ui.animations.mode and the terminal's colour

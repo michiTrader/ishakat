@@ -148,6 +148,21 @@ func (t liveTurn) elapsed() time.Duration {
 // own doc comment for the exact truncation rule. A user bubble is passed
 // an empty reasoning by every call site (only an assistant turn ever
 // produces one), so this is a no-op there regardless of mode.
+//
+// folded also now gates the reasoning preview, not just renderMessageBody's
+// code blocks (F8b, docs/ROADMAP-ux-2026-08-20.md W2 item 5, replacing the
+// old "ctrl+r folds code only" behaviour with "one toggle that folds/
+// unfolds reasoning and code together"). This is deliberately *not* a
+// second parameter or a new Root field: F8b's own text in the roadmap's
+// §5 "deliberately not in any wave" ("F8b extends *what* it folds, not
+// *how much state* it keeps") is read literally here — Root.foldCode
+// stays the single global bool it already was, and this function just
+// widens what that one bool reaches into. reasoningFoldSummary (below)
+// mirrors foldSummary's (codeblock.go) own one-line, dim, "say something
+// was folded" shape, so a folded bubble reads consistently whether the
+// thing collapsed was code or thinking. mode=="off" stays authoritative
+// either way: folding never *reveals* a reasoning stream the config says
+// to hide, it only ever collapses one that would otherwise show.
 func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, text string, ts time.Time, highlightCode, renderProse, folded bool, reasoning, reasoningMode string) string {
 	marker := g.userMark
 	roleStyle := styles.User
@@ -157,7 +172,7 @@ func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, 
 	}
 	header := roleStyle.Render(fmt.Sprintf("%s %s %s", marker, name, ts.Format("15:04")))
 	body := wrapText(header, width)
-	if preview := renderReasoningPreview(styles, reasoning, reasoningMode, width); preview != "" {
+	if preview := renderReasoningPreview(styles, g, reasoning, reasoningMode, folded, width); preview != "" {
 		body += "\n" + preview
 	}
 	body += "\n" + renderMessageBody(styles, g, text, width, highlightCode, renderProse, folded)
@@ -225,7 +240,8 @@ const reasoningPreviewLines = 2
 // mode is ui.reasoning verbatim, not a bool: three real behaviours, not two.
 //   - "off" (or unset/anything unrecognised — the safe default matching
 //     defaults.toml's own pre-Step-33 behaviour of showing nothing) returns
-//     "" unconditionally, regardless of how much reasoning is available.
+//     "" unconditionally, regardless of how much reasoning is available, and
+//     regardless of folded — see folded's own paragraph below.
 //   - "collapsed" (defaults.toml's own default) truncates to
 //     reasoningPreviewLines lines and, when more remains, appends an
 //     ellipsis line rather than silently cutting a sentence in half — the
@@ -235,6 +251,18 @@ const reasoningPreviewLines = 2
 //   - "full" prints the whole stream, unclipped — for a user who explicitly
 //     wants to read everything the model was doing, not just a taste of it.
 //
+// folded is F8b's own addition (docs/ROADMAP-ux-2026-08-20.md W2 item 5,
+// Root.foldCode/ctrl+r — see renderTranscriptLine's own doc comment for why
+// this reuses that single existing bool rather than adding new state): when
+// true and mode is "collapsed" or "full" (i.e. there would be something to
+// show), the preview collapses to reasoningFoldSummary's one-line form
+// instead — mirroring exactly what folded already does to a fenced code
+// block via foldSummary (codeblock.go). mode == "off" is unaffected by
+// folded in either direction: a hidden reasoning stream neither gains a
+// summary line (there is nothing folded to announce) nor gets revealed by
+// toggling fold — ctrl+r changes how much of what would already show is
+// visible, never whether ui.reasoning's own "off" is honoured.
+//
 // The whole preview renders through styles.Dim — the same grey codeblock.go
 // already uses for a folded block's one-line summary and a fenced block's
 // language tag — wrapped to width first so a long reasoning line does not
@@ -243,15 +271,21 @@ const reasoningPreviewLines = 2
 // at "N wrapped rows" is what "~2 lines" on screen actually means, whereas
 // cutting at "N sentences/paragraphs of raw text" could still overflow the
 // terminal on a narrow window.
-func renderReasoningPreview(styles theme.Styles, reasoning, mode string, width int) string {
+func renderReasoningPreview(styles theme.Styles, g glyphs, reasoning, mode string, folded bool, width int) string {
 	reasoning = strings.TrimSpace(reasoning)
 	if reasoning == "" {
 		return ""
 	}
 	switch mode {
 	case "full":
+		if folded {
+			return styles.Dim.Render(reasoningFoldSummary(g, reasoning))
+		}
 		return styles.Dim.Render(wrapText(reasoning, width))
 	case "collapsed":
+		if folded {
+			return styles.Dim.Render(reasoningFoldSummary(g, reasoning))
+		}
 		wrapped := wrapText(reasoning, width)
 		lines := strings.Split(wrapped, "\n")
 		if len(lines) <= reasoningPreviewLines {
@@ -264,9 +298,29 @@ func renderReasoningPreview(styles theme.Styles, reasoning, mode string, width i
 		// "off", empty, or an unrecognised value: show nothing. This is the
 		// same "an unrecognised override is not an error, it degrades to
 		// the safe default" rule theme.overrideCapability already follows
-		// for [ui] color, applied here to [ui] reasoning.
+		// for [ui] color, applied here to [ui] reasoning — unaffected by
+		// folded, per this function's own doc comment above.
 		return ""
 	}
+}
+
+// reasoningFoldSummary is renderReasoningPreview's own folded shape,
+// mirroring foldSummary's (codeblock.go) "say something was collapsed, and
+// how much" rule for a folded fenced block, applied to a folded reasoning
+// stream instead. It counts wrapped-free raw lines (strings.Count on "\n"),
+// not reasoningPreviewLines' own post-wrap row count, on purpose: the two
+// numbers answer different questions — foldSummary's own "N lines" already
+// counts a code block's real newlines the same way, and reusing that exact
+// convention here is what makes a folded reasoning summary and a folded
+// code summary read as the same kind of thing side by side, not two
+// different truncation dialects in one transcript.
+func reasoningFoldSummary(g glyphs, reasoning string) string {
+	n := strings.Count(reasoning, "\n") + 1
+	unit := "line"
+	if n != 1 {
+		unit = "lines"
+	}
+	return fmt.Sprintf("%s thinking, %d %s", g.foldMark, n, unit)
 }
 
 // renderLiveTurn dibuja el turno vivo con el cursor de streaming al final
