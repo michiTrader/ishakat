@@ -48,23 +48,24 @@ USAGE
   ishakat provider add <provider> [--api-key-unsafe <key>]
   ishakat provider add <provider> --api-key-stdin
   ishakat provider add <provider> --force   (overwrite a customized base_url)
-  ishakat provider add <provider> --no-verify  (skip the live authentication check)
+  ishakat provider add <provider> --verify  (make one real authenticated request before saving)
   ishakat provider list
   ishakat provider remove <provider>
 
 PROVIDERS
   omniroute, openai, anthropic, nvidia, gemini
 
-Before writing anything, `+"`add`"+` makes one real authenticated request to the
-service (a one-token chat completion) to confirm the key actually works.
-GET /models is not used for this: some services (NVIDIA) answer it without
-any credential at all, which would report success for a bad key.
+By default, `+"`add`"+` saves the key without checking it against the service —
+pass --verify to make one real authenticated request (a one-token chat
+completion, never GET /models: some services, like NVIDIA, answer that one
+without any credential at all, which would report success for a bad key)
+before anything is written.
 
 The key is stored in a separate, owner-only credentials file
 (~/.config/ishakat/credentials.toml). Connection details (base_url, kind,
 discover) go in config.toml instead, so a key rotation never silently
-reverts a base_url you customized. Adding a provider also enables it once
-verified; no manual config.toml edit is required.`)
+reverts a base_url you customized. Adding a provider also enables it
+immediately; no manual config.toml edit is required.`)
 }
 
 func cmdProviderAdd(args []string) int {
@@ -97,12 +98,32 @@ func cmdProviderAdd(args []string) int {
 	apiKey := fs.String("api-key-unsafe", "", "API key on the command line (visible in shell history and ps); prefer the interactive prompt or --api-key-stdin")
 	fromStdin := fs.Bool("api-key-stdin", false, "read the API key from stdin without echoing it")
 	force := fs.Bool("force", false, "overwrite a base_url this provider id already has in config.toml")
-	noVerify := fs.Bool("no-verify", false, "skip the live authentication probe (not recommended)")
+	// F10 (docs/ROADMAP-ux-2026-08-20.md, W4): the live authentication probe
+	// used to be the default, with --no-verify as the opt-out. Inverted here
+	// — saving without checking is now the default, and --verify is the new
+	// opt-in — because the common case (a key just copied from the
+	// provider's own dashboard) does not need a second network round trip to
+	// prove what the user already knows, and the probe was the single most
+	// common source of `provider add` support questions (rate limits on
+	// Gemini's free tier, firewalled NVIDIA endpoints) for a check that,
+	// when it fails, still tells you to re-run without it anyway.
+	verify := fs.Bool("verify", false, "make one real authenticated request before saving (recommended if you are not sure the key is valid)")
+	// --no-verify is kept for one release as a working, silent no-op: it
+	// already describes the new default, so scripts that still pass it keep
+	// working unchanged rather than breaking on an unknown-flag error. This
+	// mirrors internal/config/schema.go's own Catalog.HideDeprecated alias
+	// precedent (design doc §1.3) for renaming/moving a knob without a hard
+	// break.
+	noVerify := fs.Bool("no-verify", false, "deprecated, no-op: not verifying is now the default (see --verify)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	if *apiKey != "" && *fromStdin {
 		fmt.Fprintln(os.Stderr, "use only one of --api-key-unsafe and --api-key-stdin")
+		return 2
+	}
+	if *verify && *noVerify {
+		fmt.Fprintln(os.Stderr, "--verify and --no-verify contradict each other; --no-verify is deprecated and now a no-op, drop it")
 		return 2
 	}
 
@@ -126,11 +147,17 @@ func cmdProviderAdd(args []string) int {
 		return 1
 	}
 
-	if *noVerify {
-		fmt.Fprintln(os.Stderr, "warning: skipping the live authentication check (--no-verify); "+
-			"the provider will be marked enabled even if the key is invalid")
-	} else {
-		fmt.Fprintf(os.Stderr, "Verifying %s credentials…\n", preset.Name)
+	return runProviderAdd(os.Stdout, os.Stderr, preset, key, *force, *verify)
+}
+
+// runProviderAdd is cmdProviderAdd's own body from the resolved preset and
+// key onward, split out (mirroring login.go's own cmdLogin/runLogin split)
+// so tests can drive the verify/skip branch and the offerDefaultModel gate
+// against a fake httptest chat server, without going through
+// os.Args/flag parsing or a real stdin prompt.
+func runProviderAdd(stdout, stderr io.Writer, preset config.ProviderPreset, key string, force, verify bool) int {
+	if verify {
+		fmt.Fprintf(stderr, "Verifying %s credentials…\n", preset.Name)
 		if err := verifyCredential(preset, key); err != nil {
 			// Nothing is written on failure — the whole point of verifying
 			// first. This is the fix for the audit's central finding: a
@@ -138,46 +165,49 @@ func cmdProviderAdd(args []string) int {
 			// not declare success (or, worse, silently accept a key for a
 			// service like NVIDIA that answers GET /models unauthenticated)
 			// without ever having checked it against the real API.
-			fmt.Fprintf(os.Stderr, "provider setup failed: %v\n", err)
-			fmt.Fprintln(os.Stderr, "Nothing was written. Re-run with --no-verify to save anyway.")
+			fmt.Fprintf(stderr, "provider setup failed: %v\n", err)
+			fmt.Fprintln(stderr, "Nothing was written. Re-run without --verify to save anyway.")
 			return 1
 		}
-		fmt.Fprintln(os.Stderr, "✓ Key verified.")
+		fmt.Fprintln(stderr, "✓ Key verified.")
+	} else {
+		fmt.Fprintln(stderr, "note: the key was not checked against the service (pass --verify to make one "+
+			"real authenticated request first); the provider will be marked enabled even if the key is invalid")
 	}
 
-	overwrote, err := config.SaveProviderConnection(preset, *force)
+	overwrote, err := config.SaveProviderConnection(preset, force)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "provider setup failed: %v\n", err)
+		fmt.Fprintf(stderr, "provider setup failed: %v\n", err)
 		return 1
 	}
 	if !overwrote {
-		fmt.Fprintf(os.Stderr, "note: %s already has a different base_url in config.toml; "+
+		fmt.Fprintf(stderr, "note: %s already has a different base_url in config.toml; "+
 			"left it untouched. Re-run with --force to overwrite it with the preset default.\n", preset.ID)
 	}
 
 	if err := config.SaveCredential(preset.ID, key); err != nil {
-		fmt.Fprintf(os.Stderr, "provider setup failed: %v\n", err)
+		fmt.Fprintf(stderr, "provider setup failed: %v\n", err)
 		return 1
 	}
 
-	fmt.Printf("Configured %s (%s).\n", preset.Name, preset.ID)
+	fmt.Fprintf(stdout, "Configured %s (%s).\n", preset.Name, preset.ID)
 	if runtime.GOOS == "windows" {
 		// os.Chmod on Windows only toggles the read-only attribute; there
 		// is no POSIX owner-only mode. Claiming "0600" here would be a
 		// false statement about protection the file does not have — the
 		// key inherits whatever ACL the parent directory (normally the
 		// user's own profile) already had.
-		fmt.Printf("Credentials stored in %s.\n", xdg.CredentialsFile())
-		fmt.Println("Note: Windows has no POSIX file-permission equivalent to the 0600 " +
-			"this build uses on Linux/macOS; the file relies on your user profile's " +
+		fmt.Fprintf(stdout, "Credentials stored in %s.\n", xdg.CredentialsFile())
+		fmt.Fprintln(stdout, "Note: Windows has no POSIX file-permission equivalent to the 0600 "+
+			"this build uses on Linux/macOS; the file relies on your user profile's "+
 			"own access control instead.")
 	} else {
-		fmt.Printf("Credentials stored in %s with mode 0600.\n", xdg.CredentialsFile())
+		fmt.Fprintf(stdout, "Credentials stored in %s with mode 0600.\n", xdg.CredentialsFile())
 	}
 	if preset.Notes != "" {
-		fmt.Printf("Note: %s\n", preset.Notes)
+		fmt.Fprintf(stdout, "Note: %s\n", preset.Notes)
 	}
-	fmt.Println("The provider is enabled. Run `ishakat models --refresh` to update its model list.")
+	fmt.Fprintln(stdout, "The provider is enabled. Run `ishakat models --refresh` to update its model list.")
 
 	// Offer to set app.default_model to the model this run just proved
 	// works, but only when the *current* default doesn't already resolve
@@ -188,13 +218,16 @@ func cmdProviderAdd(args []string) int {
 	// failure mode the audit that added this found, and the fix documented
 	// there (SetDefaultModel) had never actually been wired to a caller.
 	//
-	// Skipped for --no-verify: that path has no proof the key is valid at
-	// all, so nudging the user toward making it the default would be
-	// promoting an unconfirmed credential instead of a confirmed one.
-	if !*noVerify {
+	// Skipped unless verify actually ran and succeeded: the unverified path
+	// (now the default, F10) has no proof the key is valid at all, so
+	// nudging the user toward making it the default would be promoting an
+	// unconfirmed credential instead of a confirmed one — the exact
+	// coupling that existed before F10 (as !noVerify) and must survive the
+	// flag's inversion unchanged, not just get flipped along with it.
+	if verify {
 		offerDefaultModel(preset)
 	} else {
-		fmt.Printf("If you want this provider's models as your default, edit app.default_model in %s\n", xdg.ConfigFile())
+		fmt.Fprintf(stdout, "If you want this provider's models as your default, edit app.default_model in %s\n", xdg.ConfigFile())
 	}
 	return 0
 }
