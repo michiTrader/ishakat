@@ -33,6 +33,24 @@ type ProviderPreset struct {
 	// between `provider add` and a false "configured" success.
 	VerifyModel string
 
+	// Label is the short, human-facing provider name the picker renders in
+	// `model-id [label] TVR ✓` (docs/ROADMAP-ux-2026-08-20.md's DECISION-3),
+	// dimmed, next to every row. It exists purely for display: `id` remains
+	// the only thing configs, refs and session files ever store or persist
+	// (DECISION-3's own words), so this field carries no config.toml
+	// counterpart and no user-override mechanism — it is a compile-time
+	// constant of the preset, looked up at render time via LabelFor below.
+	// Almost every preset's Label equals its own ID (omniroute, openai,
+	// anthropic, nvidia); "gemini-direct" is the one exception, labelled
+	// "google" because that's the name every user actually recognizes —
+	// DECISION-3 overruled making "google" the real id for W4 (that full
+	// rename is deliberately deferred to W5, after the rendering and loop
+	// waves), so for now the mismatch between id and Label is the whole
+	// point: it's what lets the picker show "google" today without
+	// touching anything a provider ref, config file or session transcript
+	// stores.
+	Label string
+
 	// Notes is a short, honest caveat about what this preset's chosen kind
 	// cannot do for the underlying service, printed once after a successful
 	// `provider add`. Empty when the dialect covers the service without
@@ -66,12 +84,12 @@ func (p ProviderPreset) SupportsDeviceFlow() bool {
 
 var providerPresets = map[string]ProviderPreset{
 	"omniroute": {
-		ID: "omniroute", Name: "OmniRoute", Kind: "openai",
+		ID: "omniroute", Name: "OmniRoute", Kind: "openai", Label: "omniroute",
 		BaseURL: "http://localhost:20128/v1", Discover: true,
 		Environment: "OMNIROUTE_API_KEY", VerifyModel: "auto",
 	},
 	"openai": {
-		ID: "openai", Name: "OpenAI", Kind: "openai",
+		ID: "openai", Name: "OpenAI", Kind: "openai", Label: "openai",
 		BaseURL: "https://api.openai.com/v1", Discover: true,
 		Environment: "OPENAI_API_KEY", VerifyModel: "gpt-4o-mini",
 	},
@@ -104,7 +122,7 @@ var providerPresets = map[string]ProviderPreset{
 	// keep exposing this id as "anthropic" for the user-facing name either
 	// way; only the wire dialect would change.
 	"anthropic": {
-		ID: "anthropic", Name: "Anthropic", Kind: "openai",
+		ID: "anthropic", Name: "Anthropic", Kind: "openai", Label: "anthropic",
 		BaseURL: "https://api.anthropic.com/v1", Discover: true,
 		Environment: "ANTHROPIC_API_KEY", VerifyModel: "claude-3-5-haiku-20241022",
 		Notes: "Anthropic is reached through its OpenAI-compatible shim, not " +
@@ -115,7 +133,7 @@ var providerPresets = map[string]ProviderPreset{
 			"switches its default.",
 	},
 	"nvidia": {
-		ID: "nvidia", Name: "NVIDIA NIM", Kind: "openai",
+		ID: "nvidia", Name: "NVIDIA NIM", Kind: "openai", Label: "nvidia",
 		BaseURL: "https://integrate.api.nvidia.com/v1", Discover: true,
 		Environment: "NVIDIA_API_KEY", VerifyModel: "meta/llama-3.1-8b-instruct",
 		Notes: "NVIDIA's model catalog (GET /models) is public and answers " +
@@ -126,7 +144,7 @@ var providerPresets = map[string]ProviderPreset{
 			"here can hold a conversation.",
 	},
 	"gemini": {
-		ID: "gemini-direct", Name: "Google Gemini", Kind: "openai",
+		ID: "gemini-direct", Name: "Google Gemini", Kind: "openai", Label: "google",
 		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Discover: true,
 		Environment: "GEMINI_API_KEY", VerifyModel: "gemini-2.0-flash",
 		Notes: "Google's OpenAI-compatible layer has historically rejected " +
@@ -199,6 +217,23 @@ func VerifyModelFor(providerID string) (string, bool) {
 		return "", false
 	}
 	return p.VerifyModel, true
+}
+
+// LabelFor returns the short, human-facing display name (ProviderPreset.Label
+// above) of the preset whose ID matches providerID — the picker's own lookup
+// for F11's `model-id [label] TVR ✓` row format
+// (docs/ROADMAP-ux-2026-08-20.md's DECISION-3). It mirrors VerifyModelFor's
+// exact contract on purpose: only providers that came from a preset
+// (ProviderPresets()) have a known Label; a provider the user declared
+// entirely by hand under a different id has none, and callers fall back to
+// rendering the bare id instead of guessing a display name for a service
+// this package has never described.
+func LabelFor(providerID string) (string, bool) {
+	p, ok := presetByID(providerID)
+	if !ok || strings.TrimSpace(p.Label) == "" {
+		return "", false
+	}
+	return p.Label, true
 }
 
 // SaveCredential atomically stores a provider's API key in the private
