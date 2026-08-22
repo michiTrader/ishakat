@@ -6,6 +6,7 @@
 package app
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -79,5 +80,40 @@ func (s *fileCurationStore) Unhide(ref string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store.Unhide(ref)
+	return curation.Save(s.path, s.store)
+}
+
+// Keep pins ref against every automatic rule (curation.Store.Keep already
+// does the "move it out of Hidden first" work — see that method's own doc
+// comment) and persists immediately, the same "no batching step" contract
+// Hide/Unhide already follow.
+func (s *fileCurationStore) Keep(ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store.Keep(ref, time.Now())
+	return curation.Save(s.path, s.store)
+}
+
+// Hidden lists every ref in the cache's own hide list, sorted so /models
+// hidden's own listing reads the same run to run regardless of the order
+// curation.json happens to store entries in.
+func (s *fileCurationStore) Hidden() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.store.Hidden))
+	for _, e := range s.store.Hidden {
+		out = append(out, e.Ref)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Reset drops every entry in the cache's own hide list (Kept is left
+// untouched — see tui.CurationStore.Reset's own doc comment for why) and
+// persists immediately.
+func (s *fileCurationStore) Reset() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store.Hidden = nil
 	return curation.Save(s.path, s.store)
 }

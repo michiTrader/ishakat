@@ -29,7 +29,25 @@ import (
 // the picker's own header line already draws (catalogNotice). An empty or
 // missing catalog is reported instead of an empty list with no explanation —
 // the same "no models" case models_cmd.go's writeModelsText guards against.
-func (m Root) runModelsCommand() (tea.Model, tea.Cmd) {
+//
+// args carries design doc §2.1's two sub-verbs, dispatched before the
+// catalog-listing path below since neither reads m.cat at all: "hidden"
+// lists every ref the user has hidden and why (runModelsHidden), "reset"
+// drops every one of those hides (runModelsReset). Both have to read
+// m.curationStore directly rather than m.cat, because internal/app's
+// curationRules/applyCuration has already removed every hidden ref from
+// the catalog snapshot by the time a running session ever sees it — the
+// same constraint pickerRow.hidden's own doc comment documents for ctrl+h.
+// Anything else (including "") falls through to the ordinary listing,
+// unchanged from before this Kind took an argument at all.
+func (m Root) runModelsCommand(args string) (tea.Model, tea.Cmd) {
+	switch strings.ToLower(strings.TrimSpace(args)) {
+	case "hidden":
+		return m.runModelsHidden()
+	case "reset":
+		return m.runModelsReset()
+	}
+
 	g := m.lay.glyphs()
 	if m.cat == nil || m.cat.Len() == 0 {
 		return m.slashNotice(g.warnMark + " no hay catalogo cargado todavia")
@@ -62,6 +80,52 @@ func (m Root) runModelsCommand() (tea.Model, tea.Cmd) {
 	}
 
 	return m.slashNotice(b.String())
+}
+
+// runModelsHidden implements "/models hidden" (design doc §2.1): every ref
+// the user has hidden — through a ctrl+x press or a "/model hide" — along
+// with why (Reason(), always "hidden by you" for this store's own entries,
+// per CurationStore.Reason's own doc comment on the difference between a
+// human decision and a catalog.curate heuristic). This reads
+// m.curationStore.Hidden() rather than walking m.cat, since m.cat has
+// already had every one of these refs removed by internal/app's own
+// curationRules/applyCuration by the time Root ever sees a snapshot — the
+// "listing has to look upstream of the filter it is describing" problem
+// pickerRow.hidden's own doc comment names for ctrl+h.
+func (m Root) runModelsHidden() (tea.Model, tea.Cmd) {
+	g := m.lay.glyphs()
+	if m.curationStore == nil {
+		return m.slashNotice(g.warnMark + " no hay almacen de curacion configurado; nada que listar")
+	}
+	refs := m.curationStore.Hidden()
+	if len(refs) == 0 {
+		return m.slashNotice(g.assistantMark + " no hay modelos escondidos")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s escondidos %s %d", g.assistantMark, g.dot, len(refs))
+	for _, ref := range refs {
+		fmt.Fprintf(&b, "\n  %s  %s", ref, m.curationStore.Reason(ref))
+	}
+	return m.slashNotice(b.String())
+}
+
+// runModelsReset implements "/models reset" (design doc §2.1): drop every
+// user hide, leaving [catalog.curate]'s own automatic rules (and any
+// Keep) untouched — CurationStore.Reset's own contract, which this only
+// calls and reports on.
+func (m Root) runModelsReset() (tea.Model, tea.Cmd) {
+	g := m.lay.glyphs()
+	if m.curationStore == nil {
+		return m.slashNotice(g.warnMark + " no hay almacen de curacion configurado; nada que reiniciar")
+	}
+	n := len(m.curationStore.Hidden())
+	if n == 0 {
+		return m.slashNotice(g.assistantMark + " no habia modelos escondidos")
+	}
+	if err := m.curationStore.Reset(); err != nil {
+		return m.slashNotice(g.warnMark + " no se pudo reiniciar: " + err.Error())
+	}
+	return m.slashNotice(fmt.Sprintf("%s %d modelo(s) ya no escondidos por ti", g.assistantMark, n))
 }
 
 // sortedByRef orders a provider's models alphabetically by reference so the

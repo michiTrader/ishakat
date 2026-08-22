@@ -200,8 +200,8 @@ func (c Command) Usage() string {
 var Commands = []Command{
 	{Name: "help", Describe: "esta pantalla", Kind: KindHelp},
 	{Name: "hotkeys", Describe: "atajos de teclado", Kind: KindHotkeys},
-	{Name: "model", ArgHint: "[texto]", Describe: "cambiar modelo", Kind: KindModel},
-	{Name: "models", Describe: "explorar catalogo", Kind: KindModels},
+	{Name: "model", ArgHint: "[texto|hide|keep <texto>]", Describe: "cambiar, esconder o mantener un modelo", Kind: KindModel},
+	{Name: "models", ArgHint: "[hidden|reset]", Describe: "explorar catalogo, o ver/reiniciar lo escondido", Kind: KindModels},
 	{Name: "skills", Describe: "capacidades cargadas", Kind: KindSkills},
 	{Name: "theme", ArgHint: "[nombre]", Describe: "cambiar tema", Kind: KindTheme},
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
