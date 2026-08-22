@@ -111,7 +111,19 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	// immediately below, just on the tools-enabled fork. Its .sink() is
 	// what actually reaches RunAgentTurnStreaming below; drainAgentStream
 	// (root.go's streamTickMsg dispatch) is the only reader.
-	streamBuf := &agentStreamBuf{}
+	//
+	// steering/steeringMode (W2 item 4, F13, steering.go) are resolved
+	// here, once, rather than read fresh on every inject() call: m's own
+	// steeringQueue() accessor already lazily creates the queue if this
+	// is the first turn to need one, and steeringModeOr(m.cfg) is the
+	// exact config-or-default read checkFollowup's own comment explains
+	// is safe to snapshot for the whole turn — see agentStreamBuf's own
+	// doc comment on why a value that cannot change mid-turn needs no
+	// fresher read than this.
+	streamBuf := &agentStreamBuf{
+		steering:     m.steeringQueue(),
+		steeringMode: steeringModeOr(m.cfg),
+	}
 	m.agentStream = streamBuf
 
 	req := engine.Request{

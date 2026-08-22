@@ -107,11 +107,15 @@ func TestBusyUnknownSlashCommandIsReported(t *testing.T) {
 	}
 }
 
-// TestBusySubmitWithOrdinaryTextReportsNotWiredYet proves an ordinary
-// (non-slash) message submitted mid-turn gets an honest placeholder
-// notice — W2 item 4's real steering queue, not this item's job — instead
-// of silently vanishing or being sent straight into the running loop.
-func TestBusySubmitWithOrdinaryTextReportsNotWiredYet(t *testing.T) {
+// TestBusySubmitWithOrdinaryTextQueuesSteering proves an ordinary
+// (non-slash) message submitted mid-turn becomes a real steering message
+// (W2 item 4, F13, DECISION-2 consequence 2, steering.go's own
+// queueSteering) — shown in the transcript immediately, input cleared,
+// and queued for the running loop's own next Inject poll — rather than
+// silently vanishing, being sent straight into the running loop's own
+// hist, or (this test's own predecessor, before this slice) reporting an
+// honest "not wired yet" placeholder.
+func TestBusySubmitWithOrdinaryTextQueuesSteering(t *testing.T) {
 	m := startBusyTurn(t)
 	m = typeAndEnter(m, "focus on the other file instead")
 
@@ -120,11 +124,14 @@ func TestBusySubmitWithOrdinaryTextReportsNotWiredYet(t *testing.T) {
 		t.Fatalf("mode = %v, want ModeBusy", root.mode)
 	}
 	last := root.transcript[len(root.transcript)-1]
-	if !strings.Contains(last.text, "W2") {
-		t.Errorf("expected a notice naming this as future W2 work, got %q", last.text)
+	if last.role != "user" || last.text != "focus on the other file instead" {
+		t.Errorf("expected the steering message itself in the transcript as a user entry, got role=%q text=%q", last.role, last.text)
 	}
 	if got := root.input.Value(); got != "" {
-		t.Errorf("input should be cleared after the notice, got %q", got)
+		t.Errorf("input should be cleared after queuing, got %q", got)
+	}
+	if root.steering == nil || root.steering.steeringLen() != 1 {
+		t.Fatalf("expected exactly one steering message queued, got %v", root.steering)
 	}
 }
 
