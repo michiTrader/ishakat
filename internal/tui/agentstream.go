@@ -17,13 +17,15 @@
 // caller's goroutine), so this package needs a buffer of its own to hand
 // them.
 //
-// OnToolCallStart/OnToolCallEnd/Inject are deliberately left unused here:
-// this file is W2 item 2, not item 4 (steering, docs/ROADMAP-ux-2026-08-20.md's
-// W2 list) — the wave's own "eventing first, then the UI affordances that
-// depend on it" ordering, respected the same way agentloop.go's own item-1
-// change respected it by touching zero internal/tui files. Wiring those two
-// fields is left for the sub-step that actually implements the steering
-// queue and needs them.
+// OnToolCallStart/OnToolCallEnd are deliberately left unused here: this
+// file was originally W2 item 2, not item 4 (steering,
+// docs/ROADMAP-ux-2026-08-20.md's W2 list) — the wave's own "eventing
+// first, then the UI affordances that depend on it" ordering, respected
+// the same way agentloop.go's own item-1 change respected it by touching
+// zero internal/tui files. Inject is wired below (steering.go's own
+// drainSteering) — the sub-step that actually implements the steering
+// queue and needs it; the tool-call pair remains unused since nothing in
+// this package's own UI depends on them yet.
 package tui
 
 import (
@@ -58,6 +60,23 @@ type agentStreamBuf struct {
 	// rather than overloading a sentinel value on another field).
 	phase    string
 	phaseSet bool
+
+	// steering/steeringMode are W2 item 4's own addition (F13,
+	// steering.go): the queue startAgentTurn resolves from m.steering
+	// (created if nil) and the ui.steering_mode value resolved once, at
+	// turn start, from steeringModeOr(m.cfg) — both set by startAgentTurn
+	// before this buffer's sink() is ever handed to
+	// RunAgentTurnStreaming, and never written again afterwards. Neither
+	// field needs its own mutex protection beyond steeringQueue's own:
+	// steering is a pointer that travels unchanged for the buffer's whole
+	// lifetime (see steeringQueue's own doc comment on why the pointer
+	// itself, once set, is safe to read from either goroutine), and
+	// steeringMode is a plain string written once before the producer
+	// goroutine (agentTurnCmd) is even started and read only from that
+	// same goroutine's own inject() call thereafter — there is no
+	// concurrent writer for either field to race against.
+	steering     *steeringQueue
+	steeringMode string
 }
 
 // pushText is OnTextDelta's landing spot — append's sibling for the plain
@@ -113,6 +132,21 @@ func (b *agentStreamBuf) drain() (text, reasoning string, usage *convo.Usage, ph
 	return
 }
 
+// inject is Inject's landing spot (engine.AgentSink.Inject,
+// agentloop.go): called once per iteration, from
+// agentTurnStreamingCmd's own goroutine, right before that iteration's
+// request is rebuilt — see AgentSink.Inject's own doc comment for the
+// exact call site and the hard security boundary it documents. This is
+// steering.go's own drainSteering, given nothing more than the
+// steeringMode this buffer was constructed with (startAgentTurn) —
+// b.steering is nil-safe (steeringQueue's own nil receiver checks), so a
+// buffer built without one (every pre-W2-item-4 test in this package
+// that still constructs a bare agentStreamBuf{}) drains nothing rather
+// than panicking.
+func (b *agentStreamBuf) inject() []convo.Message {
+	return b.steering.drainSteering(b.steeringMode)
+}
+
 // sink builds the engine.AgentSink startAgentTurn hands to
 // RunAgentTurnStreaming. Every field here only ever pushes into this
 // buffer — never touches Root directly — because these callbacks run on
@@ -121,12 +155,18 @@ func (b *agentStreamBuf) drain() (text, reasoning string, usage *convo.Usage, ph
 // nothing in this package starts a goroutine for a turn; see RunAgentTurn's
 // own doc comment"), never Update's. Touching Root fields directly from
 // here would be a data race Update's own goroutine could observe mid-write.
+//
+// Inject is wired to b.inject (W2 item 4, F13): the only field this
+// struct now provides that reads rather than writes b's own state, since
+// drainSteering's whole point is to hand queued steering messages *out*
+// to the loop, not to buffer something that arrived from it.
 func (b *agentStreamBuf) sink() engine.AgentSink {
 	return engine.AgentSink{
 		OnTextDelta:      b.pushText,
 		OnReasoningDelta: b.pushReasoning,
 		OnUsage:          b.setUsage,
 		OnPhase:          b.setPhase,
+		Inject:           b.inject,
 	}
 }
 

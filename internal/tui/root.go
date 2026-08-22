@@ -146,6 +146,19 @@ const (
 	// value, since ask_user has no such axis) returns to ModeBusy, not
 	// ModeChat.
 	ModeAskUser
+	// ModeQueueEdit: W2 item 4's own overlay (F13, DECISION-2 consequence
+	// 3, queueedit.go) for alt+up — "re-opens the follow-up queue for
+	// editing". Unlike every mid-turn overlay above, this one opens from
+	// *either* ModeBusy or ModeChat: a follow-up queued during one turn
+	// can still be sitting unsubmitted once the interface is back in
+	// ModeChat (checkFollowup, chained from checkEndOfTurn, may have been
+	// pre-empted by checkAutoCompact/checkSuggest at the moment that turn
+	// ended), and reviewing/trimming the queue should not require
+	// starting a new turn first. openQueueEdit records which of the two
+	// this dialog was opened from (queueEditDialog.returnMode) so closing
+	// it goes back to exactly that, the same way ModeToolApprove always
+	// knows to return to ModeBusy without needing to ask.
+	ModeQueueEdit
 )
 
 // transcriptEntry es una línea ya comprometida al scrollback, mantenida en
@@ -607,6 +620,10 @@ type Root struct {
 	// while mode == ModeAskUser.
 	askUser askUserDialog
 
+	// queueEdit is W2 item 4's own overlay state (queueedit.go), live
+	// only while mode == ModeQueueEdit.
+	queueEdit queueEditDialog
+
 	// agentTurn is startAgentTurn's own bookkeeping (agentturn.go) for
 	// whichever tools-enabled turn is currently running through
 	// engine.RunAgentTurn, live only between startAgentTurn and
@@ -614,6 +631,18 @@ type Root struct {
 	// carries that turn's cancellation, so there is no separate
 	// agentCancel field — cancelAgentTurn closes the very same m.cancel.
 	agentTurn agentTurnState
+
+	// steering is W2 item 4's own queue pair (F13, steering.go): ordinary
+	// text submitted mid-turn (queueSteering) and alt+enter follow-ups
+	// (queueFollowup), both reached through the lazily-initialised
+	// steeringQueue() accessor rather than set directly here. Unlike
+	// buf/agentStream/agentTurn above, releaseTurn/finishAgentTurn must
+	// never nil this out — DECISION-2 consequence 3 is explicit that the
+	// follow-up queue survives a turn boundary, and a steering message
+	// that missed this iteration's Inject poll must still be there for
+	// the next one. See steering.go's own package doc comment for the
+	// full reasoning.
+	steering *steeringQueue
 
 	// evolveStore is §19.7's own persistence seam (suggest.go's own
 	// EvolveStore doc comment) — usage.jsonl's ledger plus
@@ -1546,6 +1575,8 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateToolApprove(msg)
 	case ModeAskUser:
 		return m.updateAskUser(msg)
+	case ModeQueueEdit:
+		return m.updateQueueEdit(msg)
 	case ModeLogin:
 		return m.updateLogin(msg)
 	case ModeSuggest:
@@ -1840,6 +1871,14 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key {
 		case m.keys.Cancel:
 			return m, nil // nada que cancelar en ModeChat
+		case m.keys.EditQueue:
+			// alt+up is also reachable here, not only from updateBusy's own
+			// case — see ModeQueueEdit's own doc comment for why a
+			// follow-up queued during a turn that has already ended (and
+			// left mode at ModeChat, unsubmitted because checkFollowup was
+			// pre-empted by checkAutoCompact/checkSuggest) still needs a
+			// way back into view without starting a new turn first.
+			return m.openQueueEdit()
 		case m.keys.Submit:
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
@@ -1971,17 +2010,45 @@ func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if slash.IsCommand(typed) {
 				return m.runBusySlashLine(typed)
 			}
-			// Ordinary chat text submitted mid-turn is W2 item 4's job
-			// (the steering queue, engine.AgentSink.Inject), not this
-			// item's — see this function's own doc comment. Reporting
-			// that honestly, rather than silently eating the draft or
-			// wiring a half wing of item 4 ahead of its own slice, is
-			// the same "point at the remedy instead of a silent gap"
-			// rule unimplementedNotice already follows.
-			m.input.Reset()
-			m.menu = slashMenu{}
-			g := m.lay.glyphs()
-			return m.slashNotice(g.warnMark + " el turno todavia no acepta mensajes mientras trabaja (steering: W2, siguiente parte)")
+			// Ordinary chat text submitted mid-turn is W2 item 4's real
+			// steering queue (queueSteering, steering.go): the message
+			// becomes a real conversation event, shown in the transcript
+			// right away, and delivered to the running loop only through
+			// engine.AgentSink.Inject's own once-per-iteration poll — see
+			// queueSteering's own doc comment for the full reasoning, and
+			// this function's own doc comment for why that split (never
+			// touching hist directly from here) is the point.
+			return m.queueSteering(typed)
+
+		case m.keys.QueueFollowup:
+			// alt+enter (F13's second half, DECISION-2 consequence 3):
+			// queues typed as a follow-up for *after* this turn, rather
+			// than steering it in now — see tui.Map.QueueFollowup's own
+			// doc comment (keys.go) for why this needs a distinct chord
+			// from Submit at all. Only wired here, not in updateChat: with
+			// no turn running there is no "after this turn" for a
+			// follow-up to wait for, so alt+enter in ModeChat falls
+			// through to the ordinary textarea handling below (which
+			// inserts nothing for alt+enter, since bubbles/v2's own
+			// textarea does not bind it) rather than silently queuing
+			// something that might sit unsubmitted indefinitely.
+			typed := strings.TrimSpace(m.input.Value())
+			if typed == "" {
+				return m, nil
+			}
+			return m.queueFollowup(typed)
+
+		case m.keys.EditQueue:
+			// alt+up (F13's other chord): re-opens the follow-up queue for
+			// editing. Unlike QueueFollowup this is also reachable from
+			// ModeChat (updateChat's own case below) — DECISION-2
+			// consequence 3's "the queue survives a turn boundary" means a
+			// follow-up queued during one turn can still be sitting there
+			// once the interface is back in ModeChat (checkAutoCompact or
+			// checkSuggest may have preempted checkFollowup at the moment
+			// this turn ended), and reviewing/trimming it should not
+			// require starting a new turn first.
+			return m.openQueueEdit()
 
 		case m.keys.Newline:
 			m.input.InsertRune('\n')
@@ -2384,8 +2451,22 @@ func (m Root) checkEndOfTurn() (tea.Model, tea.Cmd) {
 		return next, nil
 	}
 	next, cmd := r.checkAutoCompact()
-	if r2, ok := next.(Root); ok && r2.mode == ModeChat {
-		return r2.checkSuggest()
+	r2, ok := next.(Root)
+	if !ok || r2.mode != ModeChat {
+		return next, cmd
+	}
+	next, cmd = r2.checkSuggest()
+	// checkFollowup (W2 item 4, F13, steering.go) is chained in last, on
+	// the exact same "nothing else pending" gate checkSuggest's own call
+	// above already applies: a follow-up must not preempt a compaction
+	// or a crystallization offer that also wants this exact moment, and
+	// must not fire at all if either of those instead opened its own
+	// dialog (mode would no longer be ModeChat here). Reaching this line
+	// with mode == ModeChat means every prior end-of-turn check found
+	// nothing to do, which is exactly when DECISION-2 consequence 3 says
+	// a queued follow-up should become "the next thing submitted."
+	if r3, ok := next.(Root); ok && r3.mode == ModeChat {
+		return r3.checkFollowup()
 	}
 	return next, cmd
 }

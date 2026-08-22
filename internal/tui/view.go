@@ -239,6 +239,9 @@ func (m Root) renderRaw() string {
 	if m.mode == ModeToolScope {
 		return m.renderToolScope()
 	}
+	if m.mode == ModeQueueEdit {
+		return m.renderQueueEdit()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.head())

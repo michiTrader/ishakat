@@ -128,17 +128,22 @@ func TestAgentStreamBufPhaseSetDistinguishesNoEventFromEmptyString(t *testing.T)
 }
 
 // TestAgentStreamBufSinkWiresTextReasoningUsagePhase confirms sink() hands
-// engine.AgentSink exactly the four callbacks agentstream.go's own doc
-// comment says it wires (OnTextDelta/OnReasoningDelta/OnUsage/OnPhase) and
-// that each one actually lands in this buffer — a compile-time signature
-// check alone would not catch a callback silently wired to the wrong
-// method.
+// engine.AgentSink exactly the five callbacks agentstream.go's own doc
+// comment says it wires (OnTextDelta/OnReasoningDelta/OnUsage/OnPhase/
+// Inject) and that each one actually lands in this buffer — a
+// compile-time signature check alone would not catch a callback silently
+// wired to the wrong method. OnToolCallStart/OnToolCallEnd remain
+// unwired: nothing in this package's own UI depends on them yet (see
+// agentstream.go's own package doc comment).
 func TestAgentStreamBufSinkWiresTextReasoningUsagePhase(t *testing.T) {
 	var b agentStreamBuf
 	sink := b.sink()
 
-	if sink.OnToolCallStart != nil || sink.OnToolCallEnd != nil || sink.Inject != nil {
-		t.Fatalf("sink() wired OnToolCallStart/OnToolCallEnd/Inject, want them left nil (W2 item 2 does not touch those fields)")
+	if sink.OnToolCallStart != nil || sink.OnToolCallEnd != nil {
+		t.Fatalf("sink() wired OnToolCallStart/OnToolCallEnd, want them left nil (nothing in this package reads them yet)")
+	}
+	if sink.Inject == nil {
+		t.Fatalf("sink() left Inject nil, want it wired to b.inject (W2 item 4, F13)")
 	}
 
 	sink.OnTextDelta("answer")
@@ -159,6 +164,48 @@ func TestAgentStreamBufSinkWiresTextReasoningUsagePhase(t *testing.T) {
 	}
 	if !phaseSet || phase != "exec" {
 		t.Errorf("phase=%q phaseSet=%v, want %q/true", phase, phaseSet, "exec")
+	}
+}
+
+// TestAgentStreamBufSinkInjectDrainsSteeringQueue is the new half of the
+// test above, specific to W2 item 4: sink().Inject must actually reach
+// this buffer's own steering queue and honour steeringMode, not just be
+// non-nil.
+func TestAgentStreamBufSinkInjectDrainsSteeringQueue(t *testing.T) {
+	q := newSteeringQueue()
+	q.enqueueSteering(convo.User("one"))
+	q.enqueueSteering(convo.User("two"))
+	b := &agentStreamBuf{steering: q, steeringMode: "one-at-a-time"}
+	sink := b.sink()
+
+	got := sink.Inject()
+	if len(got) != 1 || got[0].Text() != "one" {
+		t.Fatalf("first Inject() call = %+v, want exactly [\"one\"] (one-at-a-time)", got)
+	}
+	if q.steeringLen() != 1 {
+		t.Fatalf("queue len after first Inject() = %d, want 1 (\"two\" still queued)", q.steeringLen())
+	}
+
+	got = sink.Inject()
+	if len(got) != 1 || got[0].Text() != "two" {
+		t.Fatalf("second Inject() call = %+v, want exactly [\"two\"]", got)
+	}
+	if got := sink.Inject(); got != nil {
+		t.Fatalf("third Inject() call with an empty queue = %+v, want nil", got)
+	}
+}
+
+// TestAgentStreamBufSinkInjectNilSteeringIsANoOp confirms a buffer built
+// without a steering queue at all (every pre-W2-item-4 test in this
+// package that still constructs a bare agentStreamBuf{}, and
+// TestAgentStreamBufSinkWiresTextReasoningUsagePhase above) does not
+// panic when Inject is actually called — steeringQueue's own nil
+// receiver checks (steering.go) are what make this safe.
+func TestAgentStreamBufSinkInjectNilSteeringIsANoOp(t *testing.T) {
+	var b agentStreamBuf
+	sink := b.sink()
+	if got := sink.Inject(); got != nil {
+		t.Fatalf("Inject() on a buffer with no steering queue = %+v, want nil", got)
 	}
 }
 
