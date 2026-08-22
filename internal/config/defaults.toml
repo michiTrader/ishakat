@@ -109,6 +109,18 @@ offline_ok = true
 hide_deprecated = true
 prefer_free = false
 
+# Layer 1 of docs/DESIGN-model-curation.md (internal/catalog/curate.go).
+# hide_deprecated above stays a working alias for one release: setting only
+# the top-level key still hides deprecated models.
+[catalog.curate]
+chat_only = true
+hide_deprecated = true
+hide_superseded = true
+hide_dated_twins = true
+hide_latest = false
+hide = []
+keep = []
+
 [compact]
 auto = true
 trigger_pct = 80

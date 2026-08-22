@@ -189,6 +189,55 @@ type Catalog struct {
 	OfflineOK        bool     `toml:"offline_ok"`
 	HideDeprecated   bool     `toml:"hide_deprecated"`
 	PreferFree       bool     `toml:"prefer_free"`
+
+	// Curate is Layer 1 of docs/DESIGN-model-curation.md
+	// (internal/catalog/curate.go's catalog.Rules), wired into
+	// internal/app/catalog.go's Build() call sites. HideDeprecated above
+	// stays a working alias for Curate.HideDeprecated for one release
+	// (design doc §1.3), so a config.toml written before this section
+	// existed keeps behaving the same way.
+	Curate CatalogCurate `toml:"curate"`
+}
+
+// CatalogCurate is [catalog.curate]: which automatic rules are on, plus the
+// user's own global hide/keep globs. Per-provider hide/keep lives on
+// Provider itself (Provider.Hide/Provider.Keep), since §1.3's own example
+// puts them inside [[provider]], not here.
+type CatalogCurate struct {
+	// ChatOnly drops models that cannot hold a conversation at all (design
+	// doc §1.2's three-signal disjunction: non-text output modality, a
+	// degenerate output limit, or an explicitly non-sampled model with no
+	// tools and no structured output).
+	ChatOnly bool `toml:"chat_only"`
+
+	// HideDeprecated is Layer 1's own copy of the flag (design doc §1.3):
+	// moved here so Rules carries its whole policy in one place, but the
+	// top-level Catalog.HideDeprecated above is still read as a fallback
+	// when this one was never set (see the wiring in internal/app/catalog.go).
+	HideDeprecated bool `toml:"hide_deprecated"`
+
+	// HideSuperseded hides "X-preview"/"X-experimental"/"X-exp" only when
+	// the base id "X" also exists in the same provider (design doc §1.3:
+	// this has to be relational, not name-shape, or it hides the best
+	// model a provider offers).
+	HideSuperseded bool `toml:"hide_superseded"`
+
+	// HideDatedTwins hides "X-<date>" only when the undated id "X" also
+	// exists in the same provider.
+	HideDatedTwins bool `toml:"hide_dated_twins"`
+
+	// HideLatest hides "X-latest"/"X:latest"/"X@latest" aliases. Off by
+	// default: some users deliberately want the moving target (design doc
+	// §1.3).
+	HideLatest bool `toml:"hide_latest"`
+
+	// Hide is the user's own glob list (path.Match syntax against the
+	// model's WireID), merged with any per-provider Hide.
+	Hide []string `toml:"hide"`
+
+	// Keep wins over every rule above, including ChatOnly and
+	// HideDeprecated.
+	Keep []string `toml:"keep"`
 }
 
 type Compact struct {
@@ -435,6 +484,15 @@ type Provider struct {
 	Headers  map[string]string `toml:"headers"`
 	Params   map[string]any    `toml:"params"`
 	Models   []ProviderModel   `toml:"model"`
+
+	// Hide and Keep are this provider's own curation globs
+	// (docs/DESIGN-model-curation.md §1.3's "per-provider policy the
+	// report asked for"), merged additively with [catalog.curate]'s
+	// global Hide/Keep — never override semantics, per that section's own
+	// text. Read by internal/app/catalog.go into
+	// catalog.Rules.Providers[p.ID].
+	Hide []string `toml:"hide"`
+	Keep []string `toml:"keep"`
 
 	AuthOK     bool   `toml:"-"`
 	MissingEnv string `toml:"-"`
