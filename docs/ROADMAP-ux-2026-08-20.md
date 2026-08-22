@@ -582,6 +582,35 @@ UI affordances that depend on it.
 
 **Closes:** F7, F8, F13, F3; unblocks F9.
 
+> **Status (2026-08-22): W2 CLOSED, all five items landed.** Part 1:
+> streaming agent-turn API in `internal/engine` (PR #195, `56fe847`). Part 2:
+> the TUI consumes real events — live reasoning during tool-enabled turns
+> and phase/footer updates from real events, not inferred ones (**F8a**,
+> PR #196, `71026bc`). Part 3: non-modal `ModeBusy` — typing, `/`-commands
+> and overlays stay reachable while the agent works (**F7**, **F3**,
+> PR #197, `2e61894`). Part 4: the steering + follow-up queue with its two
+> config keys, `alt+enter`/`alt+up` (**F13**, PR #198 scaffolding `dd86cbe`
+> + PR #199 implementation `9ebe0fd`), including the TUI-side negative-
+> security test for DECISION-2 consequence 2
+> (`TestQueueSteeringCannotResolvePendingToolApproval`). Part 5: the unified
+> fold/unfold toggle — `Root.foldCode`/ctrl+r now collapses a bubble's
+> reasoning preview (`reasoningFoldSummary`, mirroring `foldSummary`'s own
+> one-line shape for code) in the same call that already folds its fenced
+> code blocks, replacing "ctrl+r folds code only" with **F8b**'s own text,
+> "one toggle that folds/unfolds reasoning and code together" — without
+> adding new state: it is still the single global bool §5's "deliberately
+> not in any wave" note insists on, now reaching one more kind of content.
+> `ui.reasoning`'s "off" stays authoritative in both directions — folding
+> never reveals a hidden reasoning stream. The `regular`-mode "cannot touch
+> committed scrollback" limitation and `fullscreen`'s DECISION-1 payoff both
+> fall out unchanged, for free, because this reuses the exact same
+> `foldCode` bool and `commitEntryCmd`/`evictOverflow` machinery already
+> wired through both modes — no mode-aware branching was needed anywhere in
+> this slice. See `docs/PLAN.md` §17, 2026-08-21/22 entries for parts 1-5
+> (part 5, "W2 closing," has the full detail). All acceptance criteria for
+> the wave now pass together, per this document's own "no wave starts/
+> closes piecemeal" rule.
+
 ### W3 · Screen ownership and true responsiveness
 
 Implements DECISION-1(d): `fullscreen` render path with owned scrollback,
