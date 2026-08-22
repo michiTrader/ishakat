@@ -736,6 +736,14 @@ type Root struct {
 	// ThemeStore's own nil case already documents.
 	trustStore TrustStore
 
+	// curationStore is F5/Layer 2's own persistence seam
+	// (curation.go's own doc comment on the §6.1 seam this draws — the
+	// same shape TrustStore/ThemeStore already draw for their own
+	// writes). nil is a supported value: ctrl+x/ctrl+h simply do
+	// nothing, the same degradation hideOrUnhideCurrent's own doc
+	// comment already documents.
+	curationStore CurationStore
+
 	// mission is §21.6's ModeMission overlay's own state (mission.go),
 	// live only while mode == ModeMission.
 	mission missionDialog
@@ -1157,6 +1165,11 @@ type Options struct {
 	// own comment for why nil is a supported value.
 	TrustStore TrustStore
 
+	// CurationStore persists F5/Layer 2's own hide/keep decisions
+	// (curation.go's own doc comment on the §6.1 seam this draws) — see
+	// Root.curationStore's own comment for why nil is a supported value.
+	CurationStore CurationStore
+
 	// MissionGuard is §21.6's own enforcement seam (mission.go's own doc
 	// comment) — see Root.missionGuard's own comment for why nil is a
 	// supported value. internal/app is expected to pass the same
@@ -1264,6 +1277,7 @@ func NewRoot(o Options) Root {
 		themesDir:         o.ThemesDir,
 		themeStore:        o.ThemeStore,
 		trustStore:        o.TrustStore,
+		curationStore:     o.CurationStore,
 		gitInGit:          o.GitInGit,
 		gitClean:          o.GitClean,
 		gitBranch:         o.GitBranch,
@@ -1752,7 +1766,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // whatever text the user typed after /model when it did not resolve
 // unambiguously (§4.5's OutcomePicker).
 func (m Root) openPicker(query string) (tea.Model, tea.Cmd) {
-	m.picker = newPicker(m.cat, m.resolveOptions(), m.favorites, m.model, query)
+	m.picker = newPicker(m.cat, m.resolveOptions(), m.favorites, m.model, query, m.curationStore)
 	m.mode = ModePicker
 	return m, nil
 }

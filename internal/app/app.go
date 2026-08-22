@@ -469,6 +469,16 @@ func Run(version string, resume bool) int {
 		InitialAutonomy: initialAutonomy,
 		TrustStore:      trustStore,
 
+		// CurationStore is F5/Layer 2's own ctrl+x/ctrl+h persistence
+		// seam (internal/tui/curation.go's own doc comment on the §6.1
+		// seam this draws), backed by curationstore.go's fileCurationStore
+		// over internal/curation and xdg.CurationFile() — the same file
+		// internal/app/catalog.go's curationRules already reads at
+		// startup (docs/PLAN.md's part 8 entry), so a hide made through
+		// the picker this session is exactly what the NEXT LoadCatalog
+		// call sees.
+		CurationStore: newFileCurationStore(xdg.CurationFile()),
+
 		// §21.6 (Step 31, part 2) — the same guard already bound into
 		// agentOpts.Runner above, so a mission confirmed through
 		// ModeMission is enforced on the very same Guard every tool call
