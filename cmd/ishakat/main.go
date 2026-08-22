@@ -50,7 +50,7 @@ SUBCOMMANDS
 
 FLAGS
   -p, --prompt <text>    question to answer without opening the interface
-  -m, --model <ref>      model to use (ref, alias or wire_id)
+  -m, --model <ref>      model to use (ref, alias, wire_id, or id[provider])
       --system <text>    system prompt for this turn
       --json             one JSON event per line (for jq)
       --stream           force streaming
