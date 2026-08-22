@@ -74,6 +74,28 @@ type pickerRow struct {
 	collapsed bool // header only
 	count     int  // header only: how many models this group has, collapsed or not
 	cand      catalog.Candidate
+
+	// hidden/hiddenReason are Layer 2's own addition (F5,
+	// docs/DESIGN-model-curation.md's "interactive hide/keep"): true when
+	// Picker.curationStore.IsHidden reports this ref hidden. A hidden row
+	// only ever appears in p.rows at all when Picker.showHidden is true
+	// (ctrl+h); with it false, buildPickerRows drops the row entirely —
+	// which is what makes ctrl+x on a row still on screen mean "hide it"
+	// (never a redundant re-hide) and keeps the footer's "N hidden" count
+	// meaning "not currently drawn", the same thing it says.
+	//
+	// NOTE, a real limitation of this slice: only a ref hidden through
+	// THIS picker's own curationStore is ever visible here to un-hide,
+	// because a ref already in curation.json's HideRefs before this
+	// process started never reaches p.cat at all — internal/app's
+	// curationRules folds it into catalog.Rules.HideRefs and catalog.Curate
+	// removes it upstream of LoadCatalog/RefreshCatalog ever handing Root a
+	// snapshot (docs/PLAN.md's part-8 entry). Revealing THOSE rows too
+	// needs the picker to see the pre-curation model list, which is a
+	// separate, larger change left for a follow-up slice; ctrl+h's "show
+	// hidden" is fully correct for anything hidden after the picker opened.
+	hidden       bool
+	hiddenReason string
 }
 
 // Picker is the §9.4 overlay's state.
@@ -94,18 +116,33 @@ type Picker struct {
 
 	rows []pickerRow
 	sel  int
+
+	// curationStore is Layer 2's persistence seam (curation.go), nil for
+	// every pre-F5 caller (every test in this package that does not set
+	// it explicitly) — see CurationStore's own doc comment for the
+	// "session still works, just does not persist" degradation that nil
+	// gives.
+	curationStore CurationStore
+	// showHidden is ctrl+h's own toggle: "all filtering axes stay in
+	// effect, but also show me what a hide rule or a ctrl+x removed"
+	// (design doc §2's own "hidden-visibility is an orthogonal axis"
+	// reasoning for why this is not folded into pickerFilter's cycle).
+	showHidden bool
 }
 
 // newPicker builds the picker's initial state, seeded with query — the text
-// already typed after "/model", or "" for ctrl+p and a bare "/model".
-func newPicker(cat *catalog.Catalog, opts catalog.ResolveOptions, favorites []string, active, query string) Picker {
+// already typed after "/model", or "" for ctrl+p and a bare "/model". store
+// is Layer 2's own CurationStore (nil for every caller that predates F5, or
+// that simply has none configured — see CurationStore's own doc comment).
+func newPicker(cat *catalog.Catalog, opts catalog.ResolveOptions, favorites []string, active, query string, store CurationStore) Picker {
 	p := Picker{
-		cat:       cat,
-		opts:      opts,
-		active:    active,
-		favorites: favoriteSet(favorites),
-		query:     query,
-		collapsed: map[string]bool{},
+		cat:           cat,
+		opts:          opts,
+		active:        active,
+		favorites:     favoriteSet(favorites),
+		query:         query,
+		collapsed:     map[string]bool{},
+		curationStore: store,
 	}
 	return p.rebuild()
 }
@@ -137,7 +174,8 @@ func (p Picker) rebuild() Picker {
 	}
 	cands := p.cat.Filter(p.query, p.opts)
 	cands = filterCandidates(cands, p.filter, p.favorites)
-	p.rows = buildPickerRows(groupCandidates(cands), p.collapsed)
+	cands, hiddenRefs := p.splitCurationHidden(cands)
+	p.rows = buildPickerRows(groupCandidates(cands), p.collapsed, hiddenRefs)
 	if p.sel >= len(p.rows) {
 		p.sel = len(p.rows) - 1
 	}
@@ -207,10 +245,63 @@ func groupCandidates(cands []catalog.Candidate) []pickerGroup {
 	return groups
 }
 
+// splitCurationHidden separates cands into what still gets drawn and, when
+// p.showHidden is set, which refs among them are hidden (so
+// buildPickerRows can tag those rows dimmed with their reason). With a nil
+// curationStore or showHidden false, curation-hidden refs are dropped from
+// cands outright — the ordinary, common case, and the reason ctrl+x's own
+// hide takes effect on the very next rebuild with no other code path
+// needing to know about it.
+func (p Picker) splitCurationHidden(cands []catalog.Candidate) ([]catalog.Candidate, map[string]string) {
+	if p.curationStore == nil {
+		return cands, nil
+	}
+	out := make([]catalog.Candidate, 0, len(cands))
+	var hiddenRefs map[string]string
+	for _, c := range cands {
+		if !p.curationStore.IsHidden(c.Model.Ref) {
+			out = append(out, c)
+			continue
+		}
+		if !p.showHidden {
+			continue
+		}
+		if hiddenRefs == nil {
+			hiddenRefs = map[string]string{}
+		}
+		hiddenRefs[strings.ToLower(c.Model.Ref)] = p.curationStore.Reason(c.Model.Ref)
+		out = append(out, c)
+	}
+	return out, hiddenRefs
+}
+
+// countCurationHidden reports how many of p.rows' underlying candidates the
+// curationStore currently hides — the footer's own "+N hidden" count
+// (design doc §2's wireframe). It re-derives the count from p.cat.Filter
+// rather than counting p.rows directly, since with showHidden false those
+// rows were never built at all (splitCurationHidden already dropped them).
+func (p Picker) countCurationHidden() int {
+	if p.curationStore == nil || p.cat == nil {
+		return 0
+	}
+	cands := p.cat.Filter(p.query, p.opts)
+	cands = filterCandidates(cands, p.filter, p.favorites)
+	n := 0
+	for _, c := range cands {
+		if p.curationStore.IsHidden(c.Model.Ref) {
+			n++
+		}
+	}
+	return n
+}
+
 // buildPickerRows flattens groups into the row list Update/View walk. A
 // collapsed group still contributes its header — with the count of models
-// it is hiding — so it stays reachable to expand again.
-func buildPickerRows(groups []pickerGroup, collapsed map[string]bool) []pickerRow {
+// it is hiding — so it stays reachable to expand again. hiddenRefs (keyed
+// lowercase, from splitCurationHidden) tags a row hidden/dimmed when
+// ctrl+h's "show hidden" is on; it is nil the rest of the time, in which
+// case every row in groups is already something the user can see normally.
+func buildPickerRows(groups []pickerGroup, collapsed map[string]bool, hiddenRefs map[string]string) []pickerRow {
 	var rows []pickerRow
 	for _, g := range groups {
 		coll := collapsed[g.provider]
@@ -219,7 +310,8 @@ func buildPickerRows(groups []pickerGroup, collapsed map[string]bool) []pickerRo
 			continue
 		}
 		for _, c := range g.models {
-			rows = append(rows, pickerRow{provider: g.provider, cand: c})
+			reason, hidden := hiddenRefs[strings.ToLower(c.Model.Ref)]
+			rows = append(rows, pickerRow{provider: g.provider, cand: c, hidden: hidden, hiddenReason: reason})
 		}
 	}
 	return rows
@@ -319,6 +411,56 @@ func (p Picker) toggleCurrent() Picker {
 // to point at, and guessing would hide the caller's own bug.
 func (p Picker) selected() pickerRow { return p.rows[p.sel] }
 
+// toggleShowHidden is ctrl+h: flip whether curation-hidden rows are drawn
+// (dimmed, tagged with their reason) and rebuild. The selection resets to
+// 0 rather than trying to preserve "same row" across a rebuild that can
+// insert or remove rows anywhere in the list — the same reset typeText and
+// cycleFilter already do on any edit that reshapes p.rows.
+func (p Picker) toggleShowHidden() Picker {
+	p.showHidden = !p.showHidden
+	p.sel = 0
+	return p.rebuild()
+}
+
+// hideOrUnhideCurrent is ctrl+x: on an ordinary (not-yet-hidden) row it
+// hides the model under the cursor; on a row already shown dimmed (only
+// reachable with showHidden on) it un-hides instead — "same key, reads as
+// a toggle... the escape hatch that makes pressing it a decision you
+// cannot regret" (design doc §2). It is a no-op on a header row or an
+// empty list, and a no-op entirely when curationStore is nil (Layer 2 has
+// nowhere to record the decision, so there is nothing safe to do besides
+// leave the row exactly as it was — silently degrading to "cannot hide"
+// is judged less surprising here than hiding for one render frame and
+// then having it reappear on the very next keystroke's rebuild).
+//
+// The one-line undo notice the design doc's own wireframe shows riding
+// Root.slashNotice ("hid gemini-embedding-2 · ctrl+z undo") is left for a
+// follow-up slice: it needs a chord (ctrl+z) not yet wired to anything in
+// this package, and this method already gives ctrl+x itself a full,
+// symmetrical undo path (press it again on the same row) that does not
+// depend on that second chord existing.
+func (p Picker) hideOrUnhideCurrent() (Picker, string) {
+	if p.curationStore == nil || len(p.rows) == 0 {
+		return p, ""
+	}
+	row := p.selected()
+	if row.header {
+		return p, ""
+	}
+	ref := row.cand.Model.Ref
+	if row.hidden {
+		if err := p.curationStore.Unhide(ref); err != nil {
+			return p, "could not un-hide " + ref + ": " + err.Error()
+		}
+		return p.rebuild(), "shown " + ref
+	}
+	if err := p.curationStore.Hide(ref); err != nil {
+		return p, "could not hide " + ref + ": " + err.Error()
+	}
+	p.sel = 0
+	return p.rebuild(), "hid " + ref
+}
+
 // renderPicker draws the full-screen overlay (§9.4). Like renderHelp, it
 // replaces the whole live region rather than composing with the input box
 // and footer: there is nothing left to type into chat while the picker owns
@@ -329,8 +471,19 @@ func (m Root) renderPicker() string {
 	width := m.lay.ContentWidth()
 	p := m.picker
 
+	// hiddenCount is Layer 2's own footer number (design doc §2's
+	// wireframe: "models · 26 shown · 15 hidden"). It is 0 whenever there
+	// is no curationStore at all, which is exactly what makes the
+	// pre-F5 header line ("models · N") below unchanged for every caller
+	// that never wires one — countCurationHidden already returns 0 for a
+	// nil store.
+	hiddenCount := p.countCurationHidden()
 	var b strings.Builder
-	fmt.Fprintf(&b, " models %s %d\n", g.dot, countModelRows(p.rows))
+	if hiddenCount > 0 {
+		fmt.Fprintf(&b, " models %s %d shown %s %d hidden\n", g.dot, countModelRows(p.rows), g.dot, hiddenCount)
+	} else {
+		fmt.Fprintf(&b, " models %s %d\n", g.dot, countModelRows(p.rows))
+	}
 	if notice := catalogNotice(p.cat); notice != "" {
 		b.WriteString(" " + m.styles.Warn.Render(notice) + "\n")
 	}
@@ -348,10 +501,33 @@ func (m Root) renderPicker() string {
 		}
 	}
 
+	// "+N hidden · ctrl+h show" only when there is something to reveal
+	// and it is not on screen already — the design doc's own wireframe
+	// line, dropped entirely once showHidden is on (the rows themselves
+	// are the proof, no separate count line needed).
+	if hiddenCount > 0 && !p.showHidden {
+		fmt.Fprintf(&b, " %s\n", m.styles.Dim.Render(fmt.Sprintf("+ %d hidden %s ctrl+h show", hiddenCount, g.dot)))
+	}
+
 	b.WriteString(" " + strings.Repeat(g.rule, max(width-2, 1)) + "\n")
 	b.WriteString(fmt.Sprintf(" %s move  enter use  %s%s collapse\n", g.scrollHint, g.inputPrefix, g.inputPrefix))
-	fmt.Fprintf(&b, " ctrl+f filter:%s  esc close\n", p.filter.label())
+	if p.curationStore != nil {
+		fmt.Fprintf(&b, " ctrl+x hide  ctrl+h %s  ctrl+f filter:%s  esc close\n", showHiddenLabel(p.showHidden), p.filter.label())
+	} else {
+		fmt.Fprintf(&b, " ctrl+f filter:%s  esc close\n", p.filter.label())
+	}
 	return b.String()
+}
+
+// showHiddenLabel is ctrl+h's own footer wording, "show" when hidden rows
+// are not currently drawn and "hide" once they are — describing what the
+// key does next, the same "name the verb, not the current state" idiom
+// ctrl+f's own "filter:all" label already uses for its own cycle.
+func showHiddenLabel(showing bool) string {
+	if showing {
+		return "hide hidden"
+	}
+	return "show hidden"
 }
 
 func emptyPickerMessage(p Picker) string {
@@ -536,9 +712,21 @@ func renderPickerRow(g glyphs, st theme.Styles, width int, row pickerRow, select
 		id += " " + st.Dim.Render("["+label+"]")
 	}
 	meta := pickerMetaLine(g, row.cand.Model)
+	// Layer 2 (F5, ctrl+h "show hidden"): tag a hidden row with why, the
+	// same reason vocabulary catalog.Reason already uses ("hidden by
+	// you", "deprecated", etc. — design doc §2's own three examples).
+	if row.hidden && row.hiddenReason != "" {
+		meta += " " + g.dot + " " + row.hiddenReason
+	}
 
 	styleID := func(s string) string {
 		switch {
+		// A hidden row stays dimmed even while selected — the cursor's
+		// own pointer glyph above is what shows where it is, and giving
+		// it the ordinary Accent color would make a row the user just
+		// asked NOT to see look identical to any other selection.
+		case row.hidden:
+			return st.Dim.Render(s)
 		case selected:
 			return st.Accent.Render(s)
 		case favorite:
@@ -685,6 +873,24 @@ func (m Root) updatePicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// keymap currently makes configurable.
 	case "ctrl+f":
 		m.picker = m.picker.cycleFilter()
+		return m, nil
+	// ctrl+x/ctrl+h are Layer 2's own two chords (F5,
+	// docs/DESIGN-model-curation.md §2), hardcoded for the identical
+	// reason ctrl+f is above: named by this exact chord in the design
+	// doc, and neither is in m.keys' remapping table today. Both are
+	// no-ops when m.picker.curationStore is nil (see
+	// hideOrUnhideCurrent/toggleShowHidden's own doc comments) — a
+	// caller that never wires Layer 2 keeps today's behaviour exactly,
+	// including "x" still only ever reaching typeText below.
+	case "ctrl+x":
+		next, notice := m.picker.hideOrUnhideCurrent()
+		m.picker = next
+		if notice == "" {
+			return m, nil
+		}
+		return m.slashNotice(m.lay.glyphs().assistantMark + " " + notice)
+	case "ctrl+h":
+		m.picker = m.picker.toggleShowHidden()
 		return m, nil
 	case m.keys.Submit:
 		if len(m.picker.rows) == 0 {

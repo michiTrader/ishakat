@@ -174,7 +174,7 @@ func TestPickerActiveIsFalseWithoutACatalog(t *testing.T) {
 
 func TestPickerRebuildClampsSelectionAfterTheListShrinks(t *testing.T) {
 	cat := catalogWithModels("omni/son45", "omni/gpt-5")
-	p := newPicker(cat, catalog.ResolveOptions{}, nil, "", "")
+	p := newPicker(cat, catalog.ResolveOptions{}, nil, "", "", nil)
 	p.sel = len(p.rows) - 1 // last row, whatever it currently is
 
 	p = p.typeText("nosuchmodelatall")
@@ -341,7 +341,7 @@ func TestRenderPickerNeverDrawsMoreThanTenRows(t *testing.T) {
 	root := rootWithCatalog(catalogWithModels(refs...))
 	root.lay = NewLayout(80, 24, 0, false, false)
 	root.styles = theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
-	root.picker = newPicker(root.cat, root.resolveOptions(), nil, "", "")
+	root.picker = newPicker(root.cat, root.resolveOptions(), nil, "", "", nil)
 	root.mode = ModePicker
 	root.picker.sel = len(root.picker.rows) - 1 // jump to the very last row
 
