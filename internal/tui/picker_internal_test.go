@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MichiTrader/ishakat/internal/catalog"
@@ -243,6 +245,59 @@ func TestRenderPickerRowFallsBackToTwoLinesWhenTooNarrow(t *testing.T) {
 	lines := renderPickerRow(g, st, 40, row, false, false, false)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines at width 40, want 2 (id must not be truncated to make room for meta): %q", len(lines), lines)
+	}
+}
+
+// TestRenderPickerRowShowsProviderLabel is F11
+// (docs/ROADMAP-ux-2026-08-20.md's DECISION-3): the row must show the
+// provider's short display label — "google", not the raw "gemini-direct"
+// id — dimmed, in brackets, next to the model id. The id itself stays
+// exactly what catalog.SplitRef already extracted; only the label is new.
+func TestRenderPickerRowShowsProviderLabel(t *testing.T) {
+	g := unicodeGlyphs
+	st := theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
+	row := pickerRow{
+		provider: "gemini-direct",
+		cand: catalog.Candidate{Model: catalog.Model{
+			Ref:      "gemini-direct/gemini-3.6-flash",
+			Provider: "gemini-direct",
+			Context:  200_000,
+		}},
+	}
+
+	lines := renderPickerRow(g, st, 80, row, false, false, false)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "gemini-3.6-flash") {
+		t.Errorf("row must still show the wire id, got %q", joined)
+	}
+	if !strings.Contains(joined, "[google]") {
+		t.Errorf("row must show the provider's display label in brackets, got %q", joined)
+	}
+	if strings.Contains(joined, "gemini-direct") {
+		t.Errorf("row must not leak the raw provider id, got %q", joined)
+	}
+}
+
+// TestRenderPickerRowOmitsLabelForUnknownProvider covers a provider the
+// user declared entirely by hand under an id with no matching preset: F11's
+// bracket is display-only sugar, not a required decoration, so it must be
+// omitted rather than guessed.
+func TestRenderPickerRowOmitsLabelForUnknownProvider(t *testing.T) {
+	g := unicodeGlyphs
+	st := theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
+	row := pickerRow{
+		provider: "my-custom-gateway",
+		cand: catalog.Candidate{Model: catalog.Model{
+			Ref:      "my-custom-gateway/some-model",
+			Provider: "my-custom-gateway",
+			Context:  200_000,
+		}},
+	}
+
+	lines := renderPickerRow(g, st, 80, row, false, false, false)
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+	if strings.Contains(joined, "[") {
+		t.Errorf("row for a provider with no known preset must not show a bracketed label, got %q", joined)
 	}
 }
 

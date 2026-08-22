@@ -339,6 +339,37 @@ func TestVerifyModelForUnknownID(t *testing.T) {
 	}
 }
 
+// TestLabelFor is F11's picker lookup (docs/ROADMAP-ux-2026-08-20.md's
+// DECISION-3): "gemini-direct" is the one preset whose Label deliberately
+// diverges from its ID — "google" is the name users actually type and
+// recognize, while the id stays "gemini-direct" until W5's full rename.
+// Every other preset's Label equals its own ID.
+func TestLabelFor(t *testing.T) {
+	cases := map[string]string{
+		"gemini-direct": "google",
+		"omniroute":     "omniroute",
+		"openai":        "openai",
+		"anthropic":     "anthropic",
+		"nvidia":        "nvidia",
+	}
+	for id, want := range cases {
+		got, ok := config.LabelFor(id)
+		if !ok {
+			t.Errorf("LabelFor(%q) ok = false, want true", id)
+			continue
+		}
+		if got != want {
+			t.Errorf("LabelFor(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestLabelForUnknownID(t *testing.T) {
+	if _, ok := config.LabelFor("some-hand-rolled-provider"); ok {
+		t.Error("LabelFor of an id with no matching preset: want ok = false")
+	}
+}
+
 func TestSaveCredentialRejectsUnknownProvider(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := config.SaveCredential("does-not-exist", "whatever"); err == nil {
