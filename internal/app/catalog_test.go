@@ -457,6 +457,42 @@ func TestRefreshKeepsCachedModelsWhenTheProviderIsDown(t *testing.T) {
 	}
 }
 
+// TestRefreshCatalogAppliesCurationEndToEnd is TestLoadCatalogAppliesCurationEndToEnd's
+// counterpart on the network path: RefreshCatalog's own rebuild must also
+// run through applyCuration, and PruneStats must still see the UNcurated
+// model set (a model curation hides is still resolvable by exact ref, per
+// principle 1, and must not have its usage statistics pruned away just for
+// being hidden from the picker).
+func TestRefreshCatalogAppliesCurationEndToEnd(t *testing.T) {
+	gw := newOmniRouteServer(t)
+	cfg := catalogCfg(t, gw.URL, "")
+	cfg.Providers[0].Hide = []string{"openai/gpt-5-nano"}
+
+	snap, err := RefreshCatalog(context.Background(), cfg, "test", LoadCatalog(cfg))
+	if err != nil {
+		t.Fatalf("RefreshCatalog: %v", err)
+	}
+	if snap.Catalog.Has("omniroute/openai/gpt-5-nano") {
+		t.Error("omniroute/openai/gpt-5-nano is visible despite matching the provider's own hide glob")
+	}
+	if !snap.Catalog.Has("omniroute/openai/gpt-5") {
+		t.Error("omniroute/openai/gpt-5 (not matching the glob) was hidden")
+	}
+	notes := strings.Join(snap.Catalog.Notes, "\n")
+	if !strings.Contains(notes, "model(s) hidden by catalog.curate") {
+		t.Errorf("Notes = %q, want the curation count reported", notes)
+	}
+
+	// The hidden model's own usage stats must have survived PruneStats:
+	// hiding is a view (principle 1), not deletion, and RecordModelUse
+	// against a hidden ref must still find something to update.
+	RecordModelUse(cfg, "omniroute/openai/gpt-5-nano", 100*time.Millisecond)
+	st := catalog.LoadCache(CatalogCachePath(cfg)).Stat("omniroute/openai/gpt-5-nano")
+	if st.UseCount != 1 {
+		t.Errorf("UseCount = %d after RecordModelUse on a hidden ref, want 1", st.UseCount)
+	}
+}
+
 // TestSourcesFilterIsHonored: [catalog].sources turns a whole source off,
 // and the merge has to notice.
 func TestSourcesFilterIsHonored(t *testing.T) {
@@ -701,6 +737,154 @@ func TestCleanCatalogCacheRemovesBothFiles(t *testing.T) {
 	}
 	if res.CacheRemoved || res.DigestRemoved {
 		t.Error("CleanCatalogCache() reported removing files on an already-clean cache")
+	}
+}
+
+// TestCurationRulesMapsConfigToCatalogRules is curationRules' own contract:
+// a nil cfg shows everything, [catalog.curate]'s fields map straight across,
+// the top-level Catalog.HideDeprecated stays a working alias (design doc
+// §1.3), and per-provider Hide/Keep only shows up in Rules.Providers for
+// providers that actually declared one.
+func TestCurationRulesMapsConfigToCatalogRules(t *testing.T) {
+	if r := curationRules(nil); r.ChatOnly || r.HideDeprecated || r.HideSuperseded ||
+		r.HideDatedTwins || r.HideLatest || len(r.Hide) != 0 || len(r.Keep) != 0 || len(r.Providers) != 0 {
+		t.Errorf("curationRules(nil) = %+v, want the zero value (show everything)", r)
+	}
+
+	cfg := &config.Config{
+		Catalog: config.Catalog{
+			HideDeprecated: true, // the pre-[catalog.curate] alias
+			Curate: config.CatalogCurate{
+				ChatOnly:       true,
+				HideSuperseded: true,
+				HideDatedTwins: true,
+				Hide:           []string{"*-tts*"},
+				Keep:           []string{"gemini-3.1-flash-image"},
+			},
+		},
+		Providers: []config.Provider{
+			{ID: "gemini-direct", Hide: []string{"veo-*"}, Keep: []string{"gemini-3.1-pro-preview"}},
+			{ID: "omniroute"}, // no hide/keep of its own: must not appear in Providers
+		},
+	}
+	r := curationRules(cfg)
+	if !r.ChatOnly || !r.HideSuperseded || !r.HideDatedTwins {
+		t.Errorf("Rules = %+v, want the three [catalog.curate] bools carried across", r)
+	}
+	if !r.HideDeprecated {
+		t.Error("HideDeprecated = false, want true from the top-level Catalog.HideDeprecated alias")
+	}
+	if len(r.Hide) != 1 || r.Hide[0] != "*-tts*" {
+		t.Errorf("Hide = %v, want [*-tts*]", r.Hide)
+	}
+	if len(r.Keep) != 1 || r.Keep[0] != "gemini-3.1-flash-image" {
+		t.Errorf("Keep = %v, want [gemini-3.1-flash-image]", r.Keep)
+	}
+	if _, ok := r.Providers["omniroute"]; ok {
+		t.Error("Providers[\"omniroute\"] present even though that provider declared no hide/keep")
+	}
+	pr, ok := r.Providers["gemini-direct"]
+	if !ok {
+		t.Fatal("Providers[\"gemini-direct\"] missing")
+	}
+	if len(pr.Hide) != 1 || pr.Hide[0] != "veo-*" {
+		t.Errorf("gemini-direct Hide = %v, want [veo-*]", pr.Hide)
+	}
+	if len(pr.Keep) != 1 || pr.Keep[0] != "gemini-3.1-pro-preview" {
+		t.Errorf("gemini-direct Keep = %v, want [gemini-3.1-pro-preview]", pr.Keep)
+	}
+}
+
+// TestApplyCurationNotesTheCount is principle 2 ("say the number"): a
+// curation pass that actually hides something leaves a note behind with the
+// count, and one that hides nothing leaves the catalog untouched byte for
+// byte (no spurious "0 model(s) hidden" note).
+func TestApplyCurationNotesTheCount(t *testing.T) {
+	cat := catalog.Catalog{Models: []catalog.Model{
+		{Ref: "p/chat", Provider: "p", WireID: "chat"},
+		{Ref: "p/embed", Provider: "p", WireID: "embed", MaxOutput: 1},
+	}}
+
+	t.Run("nothing to hide leaves the catalog untouched", func(t *testing.T) {
+		got := applyCuration(cat, catalog.Rules{})
+		if len(got.Notes) != 0 {
+			t.Errorf("Notes = %v, want none when curation hides nothing", got.Notes)
+		}
+		if got.Len() != 2 {
+			t.Errorf("Len = %d, want 2", got.Len())
+		}
+	})
+
+	t.Run("a real hide notes the count", func(t *testing.T) {
+		got := applyCuration(cat, catalog.Rules{ChatOnly: true})
+		if got.Len() != 1 {
+			t.Fatalf("Len = %d, want 1 (the embedding model hidden)", got.Len())
+		}
+		notes := strings.Join(got.Notes, "\n")
+		if !strings.Contains(notes, "1 model(s) hidden by catalog.curate") {
+			t.Errorf("Notes = %q, want the count reported (principle 2)", notes)
+		}
+	})
+}
+
+// TestApplyCurationNeverEmptiesTheCatalog is the safety net a misconfigured
+// [catalog.curate] must not be able to defeat: hiding every single model is
+// treated as "curation found nothing sane to show" and skipped, with a note
+// explaining why, rather than handing the picker an empty list.
+func TestApplyCurationNeverEmptiesTheCatalog(t *testing.T) {
+	cat := catalog.Catalog{Models: []catalog.Model{
+		{Ref: "p/only-model", Provider: "p", WireID: "only-model"},
+	}}
+	got := applyCuration(cat, catalog.Rules{Hide: []string{"*"}})
+	if got.Len() != 1 {
+		t.Fatalf("Len = %d, want 1: an all-hiding rule set must be skipped, not emptied", got.Len())
+	}
+	notes := strings.Join(got.Notes, "\n")
+	if !strings.Contains(notes, "would hide every model") {
+		t.Errorf("Notes = %q, want an explanation of why curation was skipped", notes)
+	}
+}
+
+// TestLoadCatalogAppliesCurationEndToEnd is the wiring's own closing
+// criterion: a DISCOVERED model (never one the user typed into
+// [[provider.model]] by hand — those carry SourceConfig and are exempt from
+// every automatic rule under principle 3, same as a model with UseCount >
+// 0) matching [[provider]]'s own hide glob does not show up in LoadCatalog's
+// snapshot, and a discovered model that HAS been used survives the same
+// glob unhidden.
+func TestLoadCatalogAppliesCurationEndToEnd(t *testing.T) {
+	cfg := catalogCfg(t, "http://127.0.0.1:1", "")
+	cfg.Providers[0].Hide = []string{"legacy-*"}
+
+	pre := catalog.NewCache(CatalogCachePath(cfg))
+	pre.SetProvider("omniroute", []catalog.DiscoveredModel{
+		{WireID: "legacy-model"},
+		{WireID: "legacy-used"},
+		{WireID: "current-model"},
+	}, time.Now())
+	pre.FetchedAt = time.Now()
+	if err := pre.Save(""); err != nil {
+		t.Fatalf("preparing the cache: %v", err)
+	}
+
+	// legacy-used has a use recorded before this LoadCatalog runs, so the
+	// merge picks up UseCount > 0 from the cache stats and the carve-out
+	// (principle 3) must keep it visible despite matching the same glob.
+	RecordModelUse(cfg, "omniroute/legacy-used", 500*time.Millisecond)
+
+	snap := LoadCatalog(cfg)
+	if snap.Catalog.Has("omniroute/legacy-model") {
+		t.Error("omniroute/legacy-model is visible despite matching the provider's own hide glob")
+	}
+	if !snap.Catalog.Has("omniroute/legacy-used") {
+		t.Error("omniroute/legacy-used was hidden even though it has UseCount > 0 (principle 3)")
+	}
+	if !snap.Catalog.Has("omniroute/current-model") {
+		t.Error("omniroute/current-model (not matching the glob) was hidden")
+	}
+	notes := strings.Join(snap.Catalog.Notes, "\n")
+	if !strings.Contains(notes, "model(s) hidden by catalog.curate") {
+		t.Errorf("Notes = %q, want the curation count reported", notes)
 	}
 }
 

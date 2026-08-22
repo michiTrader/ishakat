@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +125,67 @@ func providerInputs(cfg *config.Config, cache *catalog.Cache) []catalog.Provider
 	return out
 }
 
+// curationRules turns [catalog.curate] (and each provider's own hide/keep)
+// into a catalog.Rules, the input Curate needs (docs/DESIGN-model-curation.md
+// Layer 1). A nil cfg returns the zero value, which Curate treats as "show
+// everything" — never a reason to hide anything just because the caller
+// forgot to pass a configuration.
+//
+// HideDeprecated is read from cfg.Catalog.Curate.HideDeprecated OR the
+// top-level cfg.Catalog.HideDeprecated (design doc §1.3: the flag "moved
+// here... kept as an alias one release" — a config.toml written before
+// [catalog.curate] existed must keep behaving the same way).
+func curationRules(cfg *config.Config) catalog.Rules {
+	if cfg == nil {
+		return catalog.Rules{}
+	}
+	c := cfg.Catalog.Curate
+	r := catalog.Rules{
+		ChatOnly:       c.ChatOnly,
+		HideDeprecated: c.HideDeprecated || cfg.Catalog.HideDeprecated,
+		HideSuperseded: c.HideSuperseded,
+		HideDatedTwins: c.HideDatedTwins,
+		HideLatest:     c.HideLatest,
+		Hide:           c.Hide,
+		Keep:           c.Keep,
+	}
+	for _, p := range cfg.Providers {
+		if len(p.Hide) == 0 && len(p.Keep) == 0 {
+			continue
+		}
+		if r.Providers == nil {
+			r.Providers = make(map[string]catalog.ProviderRules, len(cfg.Providers))
+		}
+		r.Providers[p.ID] = catalog.ProviderRules{Hide: p.Hide, Keep: p.Keep}
+	}
+	return r
+}
+
+// applyCuration runs catalog.Curate over a freshly built snapshot and notes
+// the count, mirroring merge.go's own "N deprecated model(s) hidden" note
+// (principle 2, design doc §2: "say the number", never a silent filter).
+//
+// Guard against the degenerate case a misconfigured [catalog.curate] could
+// produce: if curation would hide EVERY model, that is treated as "curation
+// found nothing sane to show" and skipped entirely, with a note explaining
+// why — an empty picker is a worse failure than a noisy one, and nothing in
+// [catalog.curate] should be able to brick the model list.
+func applyCuration(cat catalog.Catalog, r catalog.Rules) catalog.Catalog {
+	if cat.Len() == 0 {
+		return cat
+	}
+	kept, hidden := catalog.Curate(cat, r)
+	if len(hidden) == 0 {
+		return cat
+	}
+	if kept.Len() == 0 {
+		cat.Note("catalog.curate would hide every model; showing the uncurated list instead")
+		return cat
+	}
+	kept.Note(strconv.Itoa(len(hidden)) + " model(s) hidden by catalog.curate")
+	return kept
+}
+
 // LoadCatalog builds the snapshot from disk. It NEVER touches the network
 // and it never fails: the worst case is the embedded seed.
 //
@@ -180,6 +242,11 @@ func LoadCatalog(cfg *config.Config) CatalogSnapshot {
 			}
 		}
 	}
+	// Layer 1 curation (docs/DESIGN-model-curation.md) runs last, on the
+	// snapshot that is actually going to be shown — after the seed
+	// fallback, never instead of it, so a first run with nothing cached
+	// still gets a usable list before anything is filtered from it.
+	snap.Catalog = applyCuration(snap.Catalog, curationRules(cfg))
 	if snap.Catalog.Stale && !snap.Catalog.Seeded {
 		if age := cache.Age(now); age < time.Duration(1<<62-1) {
 			snap.Catalog.Note("catalog from " + humanAge(age) + " ago")
@@ -292,18 +359,24 @@ func RefreshCatalog(ctx context.Context, cfg *config.Config, version string, pre
 	// 3. Rebuild and persist. A cache that cannot be written is a warning,
 	// never a failure: the catalog in memory is already correct.
 	inputs := providerInputs(cfg, cache)
-	cat := catalog.Build(catalog.BuildInput{
+	built := catalog.Build(catalog.BuildInput{
 		Providers:      inputs,
 		ModelsDev:      index,
 		Stats:          cache.Stats,
 		HideDeprecated: cfg != nil && cfg.Catalog.HideDeprecated,
 	})
 
-	alive := make(map[string]bool, cat.Len())
-	for _, m := range cat.Models {
+	// alive is computed from the UNcurated build (principle 1: "hiding is
+	// a view, never a deletion" — a model curation hides is still resolvable
+	// by exact ref, so its usage statistics must survive the same prune a
+	// visible model's would).
+	alive := make(map[string]bool, built.Len())
+	for _, m := range built.Models {
 		alive[m.Ref] = true
 	}
 	cache.PruneStats(alive, 500)
+
+	cat := applyCuration(built, curationRules(cfg))
 
 	if err := cache.Save(cachePath); err != nil {
 		cat.Note("could not write the cache: " + err.Error())
