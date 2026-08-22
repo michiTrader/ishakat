@@ -65,6 +65,28 @@ type Rules struct {
 	// Provider lists MERGE with the global Hide/Keep above; they do not
 	// replace them.
 	Providers map[string]ProviderRules
+
+	// KeepRefs and HideRefs are Layer 2's own contribution (design doc
+	// §2.2/§2.3): exact, fully-qualified refs ("provider/wire_id") from
+	// the user's curation.json, one keystroke at a time from the picker,
+	// rather than the glob-against-WireID lists above (which come from
+	// config.toml and are typed by hand). They are refs, not globs, for
+	// a reason: a ctrl+x press knows exactly which model it is hiding —
+	// turning that into a glob pattern would risk silently catching a
+	// sibling model the user never looked at, and design doc §2.2's own
+	// worked JSON example stores plain refs, not patterns.
+	//
+	// Precedence (design doc §2.2, weakest to strongest): built-in
+	// defaults < [catalog.curate] < [[provider]] hide/keep <
+	// curation.json — "what you just pressed always wins". KeepRefs is
+	// therefore checked first, before even r.Keep, and HideRefs is
+	// checked LAST, after every automatic rule and after the glob-based
+	// Hide/Providers checks — a curation.json hide must be able to
+	// remove a model none of the automatic rules would have caught
+	// (principle 9's "ranking beats filtering" is not in tension here:
+	// this is the one layer where a human, not a heuristic, is deciding).
+	KeepRefs []string
+	HideRefs []string
 }
 
 // ProviderRules is one provider's own hide/keep glob lists, additive with
@@ -149,12 +171,35 @@ func Curate(cat Catalog, r Rules) (kept Catalog, hidden []Hidden) {
 // shape (never-hide carve-outs first, then each rule in report order) is
 // easy to read against the design doc's own §1.4 breakdown table.
 func decide(m Model, r Rules, providerIDs map[string]bool) (Reason, bool) {
+	// curation.json's KeepRefs wins over absolutely everything, including
+	// the config.toml-level Keep below — it is the strongest layer in
+	// design doc §2.2's own precedence table ("what you just pressed
+	// always wins"), checked by exact ref rather than a WireID glob.
+	if refMatchAny(m.Ref, r.KeepRefs) {
+		return "", false
+	}
+
 	// Keep always wins, and is checked before anything else — including
 	// the "never hide what the user used" carve-out, which would
 	// otherwise make Keep redundant for exactly the models a user is
 	// most likely to explicitly ask for.
 	if globMatchAny(m.WireID, r.Keep) || globMatchAny(m.WireID, r.Providers[m.Provider].Keep) {
 		return "", false
+	}
+
+	// curation.json's HideRefs is an explicit, one-model-at-a-time human
+	// decision (a ctrl+x press, or /model hide) — the opposite case from
+	// the automatic rules below, which are heuristics guessing at intent.
+	// It is therefore checked NOT gated by usedOrDeclared: principle 3's
+	// "never hide what the user actually used" carve-out exists to keep
+	// an automatic rule from silently surprising someone, but a model the
+	// user just told the picker to hide is not a surprise — it is the
+	// most specific instruction this whole system can receive short of
+	// Keep itself, and reports the same "hidden by you" reason the
+	// glob-based Hide list already uses (they are the same kind of fact:
+	// a human, not a heuristic, made this call).
+	if refMatchAny(m.Ref, r.HideRefs) {
+		return ReasonUserGlob, true
 	}
 
 	// Principle 3: never hide what the user has actually used, or what
@@ -302,6 +347,25 @@ func globMatchAny(id string, patterns []string) bool {
 			continue
 		}
 		if ok, err := path.Match(p, lower); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// refMatchAny reports whether ref exactly (case-insensitively) equals any
+// of refs — KeepRefs/HideRefs' own matching, deliberately NOT glob syntax
+// (see those fields' own doc comment): curation.json stores the exact
+// fully-qualified ref a picker key press resolved against, never a
+// pattern, so exact comparison is both simpler and more precise than
+// reusing globMatchAny would be for this case.
+func refMatchAny(ref string, refs []string) bool {
+	if ref == "" || len(refs) == 0 {
+		return false
+	}
+	lower := strings.ToLower(ref)
+	for _, r := range refs {
+		if strings.ToLower(strings.TrimSpace(r)) == lower {
 			return true
 		}
 	}

@@ -103,6 +103,19 @@ func SuggestStateFile() string { return filepath.Join(StateDir(), "suggest-state
 // changed, small, not worth backing up" shape $XDG_STATE_HOME exists for.
 func TrustFile() string { return filepath.Join(StateDir(), "trust.json") }
 
+// CurationFile is docs/DESIGN-model-curation.md §2.2's own persisted
+// per-model hide/keep decisions — the picker's ctrl+x/ctrl+h, written by
+// internal/curation, never hand-edited. It lives under StateDir, not
+// ConfigDir, for the exact reason that section spells out: config.toml is
+// hand-written and heavily commented, and round-tripping it through
+// BurntSushi/toml's map[string]any encoder (as SaveProviderConnection
+// already must) would silently strip every comment — a key pressed
+// casually inside a picker must never have that consequence. Same
+// category of thing as TrustFile above: small, machine-written state that
+// is annoying but not destructive to lose, and must never end up
+// versioned or shared across machines the way config.toml sometimes is.
+func CurationFile() string { return filepath.Join(StateDir(), "curation.json") }
+
 // EnsureDir crea un directorio con permisos 0700 (§8.1).
 func EnsureDir(p string) error { return os.MkdirAll(p, 0o700) }
 
