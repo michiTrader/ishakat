@@ -199,6 +199,25 @@ type Model struct {
 	Context   int `json:"context,omitempty"` // 0 = unknown
 	MaxOutput int `json:"max_output,omitempty"`
 
+	// Modalities is the declared set of OUTPUT modalities from models.dev
+	// (docs/DESIGN-model-curation.md §1.2's first curation signal — a
+	// non-empty list that does not contain "text" means the model cannot
+	// hold a conversation at all, e.g. Veo/Imagen/TTS). Deliberately the
+	// output side, not input: a model can *accept* image/audio/video and
+	// still answer in text (gemini-3.5-flash does), but a model that
+	// cannot *emit* text can never carry a chat turn either way. Empty
+	// slice means "unknown, not asked" (principle 10: unknown is never a
+	// reason to hide), never "no modalities at all".
+	Modalities []string `json:"modalities,omitempty"`
+
+	// Temperature mirrors MDModel's own field (modelsdev.go): nil means
+	// the models.dev record never mentioned it (unknown, keep), false
+	// means the provider explicitly declares the model non-samplable
+	// (§1.2 signal 3 — embeddings, rerankers, safety guards). A plain
+	// bool could not tell "explicitly false" from "not asked" apart and
+	// would silently turn "unknown" into "hide", violating principle 10.
+	Temperature *bool `json:"temperature,omitempty"`
+
 	Cost *Cost    `json:"cost,omitempty"` // nil = UNKNOWN, which is not the same as free
 	Caps Caps     `json:"caps,omitzero"`
 	Tags []string `json:"tags,omitempty"`

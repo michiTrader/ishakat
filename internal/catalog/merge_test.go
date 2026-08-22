@@ -429,6 +429,51 @@ func TestHideDeprecatedViaModelsDevStatus(t *testing.T) {
 	}
 }
 
+// TestApplyModelsDevCarriesModalitiesAndTemperature is the fix behind
+// Layer 1's dependency on both fields actually reaching Model, not just
+// MDModel: before this change nonChat() had nothing to read because
+// applyModelsDev never copied either field over. Both must stay
+// copy-only-if-unset (discovery/config still outrank models.dev), and
+// both must preserve "unknown" (empty slice / nil pointer) rather than
+// ever synthesizing false evidence.
+func TestApplyModelsDevCarriesModalitiesAndTemperature(t *testing.T) {
+	falsePtr := false
+	ix := NewIndex()
+	ix.ByProvider["gw"] = map[string]MDModel{
+		"tts-model":     {ID: "tts-model", Modalities: []string{"audio"}, Temperature: &falsePtr},
+		"chat-model":    {ID: "chat-model", Modalities: []string{"text"}},
+		"unknown-model": {ID: "unknown-model"}, // no modalities, no temperature key
+	}
+	p := okProvider("gw", []DiscoveredModel{
+		{WireID: "tts-model"}, {WireID: "chat-model"}, {WireID: "unknown-model"},
+	})
+	cat := Build(BuildInput{Providers: []ProviderInput{p}, ModelsDev: ix})
+
+	tts := find(t, cat, "gw/tts-model")
+	if len(tts.Modalities) != 1 || tts.Modalities[0] != "audio" {
+		t.Errorf("tts-model.Modalities = %v, want [\"audio\"]", tts.Modalities)
+	}
+	if tts.Temperature == nil || *tts.Temperature != false {
+		t.Errorf("tts-model.Temperature = %v, want a pointer to false", tts.Temperature)
+	}
+
+	chat := find(t, cat, "gw/chat-model")
+	if len(chat.Modalities) != 1 || chat.Modalities[0] != "text" {
+		t.Errorf("chat-model.Modalities = %v, want [\"text\"]", chat.Modalities)
+	}
+	if chat.Temperature != nil {
+		t.Errorf("chat-model.Temperature = %v, want nil (key absent)", *chat.Temperature)
+	}
+
+	unknown := find(t, cat, "gw/unknown-model")
+	if len(unknown.Modalities) != 0 {
+		t.Errorf("unknown-model.Modalities = %v, want empty (unknown, not evidence)", unknown.Modalities)
+	}
+	if unknown.Temperature != nil {
+		t.Errorf("unknown-model.Temperature = %v, want nil", *unknown.Temperature)
+	}
+}
+
 // TestNotesAreHonestAboutFailures: a provider that could not be reached, or
 // has no credential, produces a one-liner the interface can show. Never an
 // error that aborts the startup.
