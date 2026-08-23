@@ -399,6 +399,11 @@ func Run(version string, resume bool) int {
 		// catalog says cannot take them — instead of inheriting whatever
 		// the boot model happened to support.
 		EngineFor: NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
+		// EffortFor is F9's own seam (internal/tui/effortcmd.go's own
+		// EffortResolver doc comment): resolves /effort's and the
+		// EffortCycle chord's chosen level into the engine.Request.Params
+		// override that reaches the active model's own provider dialect.
+		EffortFor: NewEffortResolver(cfg),
 		// LoginFor drives /login's actual device-flow network calls
 		// (internal/tui/loginfactory.go's own §6.1 boundary comment) —
 		// see loginfactory.go's own doc comment for why every built-in

@@ -74,6 +74,7 @@ import (
 	"strings"
 
 	"github.com/MichiTrader/ishakat/internal/config"
+	"github.com/MichiTrader/ishakat/internal/tui"
 )
 
 // EffortParams returns the engine.Request.Params entry that asks kind's
@@ -133,4 +134,29 @@ func EffortParams(kind, level string) map[string]any {
 // matching what provider.New would do with the same zero value.
 func EffortParamsFor(pc config.Provider, level string) map[string]any {
 	return EffortParams(pc.Kind, level)
+}
+
+// NewEffortResolver returns a tui.EffortResolver closed over cfg: the real
+// implementation of effortcmd.go's own seam, walking the exact same
+// ResolveModel/FindProvider path NewEngineFactory already uses for the
+// same ref, so a turn's effort override and the engine it runs on can
+// never disagree about which provider dialect they are both addressing.
+//
+// A ref that fails to resolve (a disabled/undeclared provider, a stale Ref
+// left over from before a config edit) returns nil rather than an error —
+// mirroring EffortParams' own "silence, not refusal" rule for the
+// unrecognized-dialect case: F9 is additive, so a turn must never fail
+// just because its effort override could not be resolved.
+func NewEffortResolver(cfg *config.Config) tui.EffortResolver {
+	return func(ref, level string) map[string]any {
+		r, err := ResolveModel(cfg, ref)
+		if err != nil {
+			return nil
+		}
+		pc, ok := FindProvider(cfg, r.Provider)
+		if !ok {
+			return nil
+		}
+		return EffortParamsFor(pc, level)
+	}
 }

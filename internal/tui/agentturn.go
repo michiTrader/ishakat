@@ -129,6 +129,7 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	req := engine.Request{
 		Model:  wireModel(m.cat, m.model),
 		System: m.system,
+		Params: m.effortParams(),
 		// Messages is left empty: RunAgentTurn rebuilds it every iteration
 		// from hist.Active() (see agentloop.go's own comment on iterReq),
 		// so nothing set here would ever reach the wire.

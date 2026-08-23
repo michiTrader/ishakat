@@ -282,6 +282,16 @@ type Root struct {
 	// engine bound to the destination Ref before committing the switch.
 	engineFor EngineFactory
 
+	// effortFor is F9's own §6.1 seam (effortcmd.go's own EffortResolver
+	// doc comment): turns m.model + m.effort into the
+	// engine.Request.Params override startEngineTurn/startAgentTurn
+	// attach to the request they are about to send. nil is a supported
+	// value, the same discipline engineFor/reloadFor/pathLister already
+	// establish: every test in this package, and any caller with
+	// nothing wired, simply never attaches an effort override — exactly
+	// the behaviour a session had before F9 existed.
+	effortFor EffortResolver
+
 	// loginFor drives the §13/Step 24 in-session /login wizard's actual
 	// network calls (loginfactory.go) — nil is a supported value
 	// (every test in this package, and any caller with nothing wired):
@@ -339,6 +349,26 @@ type Root struct {
 	// prompt (§5.2's file-over-inline rule already applied by internal/app).
 	model  string
 	system string
+
+	// effort is F9's own session-scoped state (docs/ROADMAP-ux-2026-08-20.md
+	// W5, effortcmd.go): the effort/thinking-level the user picked via
+	// /effort or the EffortCycle chord, exactly as it appears in the
+	// active model's own catalog.Model.EffortLevels — never the user's
+	// raw typed casing (setEffort/matchEffortLevel already normalize
+	// that before this is assigned). "" means "nothing chosen this
+	// session, use whatever the provider defaults to" — the same
+	// "absence is a legitimate value, not an error" convention system
+	// above already follows for "no system prompt configured": every
+	// turn-start site reads this fresh (startEngineTurn/startAgentTurn)
+	// and simply omits the effort override from engine.Request.Params
+	// when it is empty, rather than sending an empty string on the wire.
+	//
+	// Deliberately not persisted through any *Store: unlike titleStore/
+	// themeStore's own session-crossing writes, an effort level is a
+	// per-turn request parameter, not saved session state — the same
+	// reasoning that already keeps compactModel/system themselves
+	// in-memory-only fields on this struct.
+	effort string
 
 	transcript []transcriptEntry
 
@@ -1021,6 +1051,11 @@ type Options struct {
 	// nothing wired, keeps the pre-existing "relabel only" behaviour.
 	EngineFor EngineFactory
 
+	// EffortFor is F9's own §6.1 seam (effortcmd.go's own EffortResolver
+	// doc comment) — see Root.effortFor's own comment for what it is
+	// called with and why nil is a supported value.
+	EffortFor EffortResolver
+
 	// LoginFor drives /login's actual device-flow network calls
 	// (loginfactory.go) — see Root.loginFor's own comment for the §6.1
 	// boundary this crosses and why nil is a supported value.
@@ -1399,6 +1434,7 @@ func NewRoot(o Options) Root {
 		exitTranscript:    o.FullscreenExitTranscript,
 		eng:               engineOr(o.Engine),
 		engineFor:         o.EngineFor,
+		effortFor:         o.EffortFor,
 		loginFor:          o.LoginFor,
 		catalogRefreshFor: o.CatalogRefreshFor,
 		model:             model,
@@ -1861,6 +1897,19 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		// since every overlay mode's own updateX claims the keyboard first
 		// per handleGlobalKey's own doc comment.
 		m.foldCode = !m.foldCode
+		return true, m, nil
+
+	case m.keys.EffortCycle:
+		// Same "not gated to ModeChat" reasoning as ToggleFold above:
+		// cycling the effort level for the *next* turn is harmless to
+		// press while the current one is still streaming (ModeBusy), and
+		// every overlay mode's own updateX already claims the keyboard
+		// first, so this is simply unreachable there rather than needing
+		// its own guard. cycleEffort (effortcmd.go) is itself a silent
+		// no-op when the active model has no discrete effort levels, so
+		// no notice is shown either way — a chord is not a place to
+		// explain why it did nothing.
+		m = m.cycleEffort()
 		return true, m, nil
 	}
 	return false, m, nil
@@ -2477,6 +2526,7 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 		Model:    wireModel(m.cat, m.model),
 		Messages: m.conv.Active(),
 		System:   m.system,
+		Params:   m.effortParams(),
 	}, m.buf)
 
 	// The stream tick always runs — it is what delivers text. The animation
