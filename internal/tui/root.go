@@ -234,6 +234,18 @@ type Root struct {
 	// instead of a silent no-op.
 	reloadFor ReloadFactory
 
+	// pathLister is F18's own "@" path-completion seam (atmenu.go/atrun.go,
+	// docs/ROADMAP-ux-2026-08-20.md's W5): the same §6.1 boundary
+	// reloadFor/catalogRefreshFor already cross, called synchronously
+	// (engineFor's own switchEngine convention, not reloadFor's tea.Cmd
+	// one) since listing a directory is cheap and local, the same way
+	// theme.Available's own os.ReadDir call needs no tea.Cmd wrapping
+	// either. nil is the supported "not wired" value: atMenuFor never
+	// opens the dropdown when pathLister is nil, so a Root built without
+	// one (every test in this package that does not set it) behaves
+	// exactly as if the user never typed "@" at all.
+	pathLister PathLister
+
 	input textarea.Model
 	live  liveTurn
 
@@ -488,6 +500,14 @@ type Root struct {
 	// menu is the autocomplete dropdown's own state (§9.6), recomputed from
 	// the input on every keystroke by slashMenuFor.
 	menu slashMenu
+
+	// atMenu is F18's own "@" path-completion dropdown state (atmenu.go),
+	// the direct structural sibling of menu above: recomputed from the
+	// input on every keystroke by atMenuFor, but only ever considers the
+	// word at the true end of the whole buffer (currentWordAtEnd) rather
+	// than menu's whole-line scope, since an "@" reference can sit
+	// anywhere inside an otherwise ordinary chat message.
+	atMenu atMenu
 
 	// cat is the model catalog snapshot (§4.2). Never touched over the
 	// network from this package (§6.1) — it is handed over once, already
@@ -1017,6 +1037,12 @@ type Options struct {
 	// the §6.1 boundary this crosses and why nil is a supported value.
 	ReloadFor ReloadFactory
 
+	// PathLister is F18's own "@" path-completion seam (atmenu.go) — see
+	// Root.pathLister's own comment for the §6.1 boundary this crosses,
+	// why it is called synchronously rather than wrapped in a tea.Cmd,
+	// and why nil is a supported value.
+	PathLister PathLister
+
 	// Model is the model reference to show and to send, in §4.2's Ref form
 	// ("provider/model" or a bare alias as the user typed it), never the
 	// wire ID directly: Root resolves the Ref to its WireID (wireModel, in
@@ -1350,6 +1376,7 @@ func NewRoot(o Options) Root {
 		titleStore:        o.TitleStore,
 		settingsStore:     o.SettingsStore,
 		reloadFor:         o.ReloadFor,
+		pathLister:        o.PathLister,
 		trustStore:        o.TrustStore,
 		curationStore:     o.CurationStore,
 		hidden:            o.Hidden,
@@ -2053,6 +2080,16 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 		}
+		// The "@" dropdown (F18, atmenu.go) claims the same keys next,
+		// mutually exclusive with m.menu by construction: slashMenuFor
+		// only ever opens on a whole-line "/" prefix, atMenuFor only ever
+		// opens on a trailing "@" token, so the two conditions never hold
+		// at once for the same input value.
+		if m.atMenu.Active() {
+			if handled, next, cmd := m.updateAtMenu(key); handled {
+				return next, cmd
+			}
+		}
 		switch key {
 		case m.keys.Cancel:
 			return m, nil // nada que cancelar en ModeChat
@@ -2103,6 +2140,7 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.input.Line() == 0 {
 				if next, ok := m.historyPrev(); ok {
 					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
@@ -2110,6 +2148,7 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.input.Line() == m.input.LineCount()-1 {
 				if next, ok := m.historyNext(); ok {
 					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
+					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
@@ -2120,6 +2159,7 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Recomputed after every keystroke — printable rune, backspace, paste —
 	// so the dropdown always reflects what the textarea now holds.
 	m.menu = slashMenuFor(m.input.Value(), m.commands, m.menu)
+	m.atMenu = atMenuFor(currentWordAtEnd(m.input), m.pathLister, m.atMenu)
 	return m, cmd
 }
 
@@ -2168,12 +2208,21 @@ func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 		}
+		// Wired the same as updateChat above: harmless while a turn is
+		// running since completing a path never submits anything by
+		// itself, only ever changes what is sitting in the input box.
+		if m.atMenu.Active() {
+			if handled, next, cmd := m.updateAtMenu(text); handled {
+				return next, cmd
+			}
+		}
 
 		switch text {
 		case m.keys.Cancel:
 			if strings.TrimSpace(m.input.Value()) != "" {
 				m.input.Reset()
 				m.menu = slashMenu{}
+				m.atMenu = atMenu{}
 				return m, nil
 			}
 			// agentTurn.hist is only non-nil between startAgentTurn and
@@ -2243,6 +2292,7 @@ func (m Root) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.menu = slashMenuFor(m.input.Value(), m.commands, m.menu)
+	m.atMenu = atMenuFor(currentWordAtEnd(m.input), m.pathLister, m.atMenu)
 	return m, cmd
 }
 
