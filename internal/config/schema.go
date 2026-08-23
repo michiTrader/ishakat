@@ -177,6 +177,16 @@ type Keys struct {
 	// follow-up queue QueueFollowup fills. See tui.Map.EditQueue's own
 	// comment.
 	EditQueue string `toml:"edit_queue"`
+
+	// EffortCycle is F9's chord (docs/ROADMAP-ux-2026-08-20.md, W5):
+	// cycles the current model's effort/thinking-level through its own
+	// catalog.Model.EffortLevels, the same discrete per-model vocabulary
+	// the `/effort` command reads and writes. It is deliberately not
+	// wired to autonomy (§5's "deliberately not in any wave" list is
+	// explicit that this is a different axis from the shift+tab autonomy
+	// question §21.16 decision 4 defers). See tui.Map.EffortCycle's own
+	// comment for the chord choice.
+	EffortCycle string `toml:"effort_cycle"`
 }
 
 type Catalog struct {

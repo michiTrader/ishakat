@@ -53,6 +53,11 @@ func NewStreamer(prov provider.Provider, caps provider.Caps, reasoning bool) eng
 			Stream:           true,
 			Tools:            tools,
 			IncludeReasoning: reasoning,
+			// F9: copied straight through, unexamined — see
+			// engine.Request.Params's own doc comment for who
+			// populates it and why this package has no opinion on
+			// what the keys mean.
+			Params: req.Params,
 		})
 		if err != nil {
 			// Returned as-is, not wrapped: retryAfter (internal/engine)

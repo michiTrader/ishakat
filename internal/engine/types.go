@@ -83,6 +83,28 @@ type Request struct {
 	Messages []convo.Message
 	System   string
 	Tools    []ToolDef
+
+	// Params is F9's per-turn wire escape hatch (roadmap: "/effort,
+	// effort/thinking-level picker, a chord to cycle it, and a
+	// headless-equivalent flag"), a plain map[string]any exactly mirroring
+	// provider.Request.Params (internal/provider/provider.go) one field
+	// down. It does NOT reopen the "no provider import" rule this
+	// package's own doc comment states above: the type is
+	// map[string]any, not a provider type, the same reasoning that
+	// already lets provider.Caps stay out while Request still crosses
+	// the internal/app boundary cleanly. The Streamer closure
+	// (internal/app/streamer.go's NewStreamer) copies this straight into
+	// provider.Request.Params, unexamined — engine has no opinion on
+	// what a key means, only that some caller upstream (internal/tui or
+	// internal/app) knows the per-provider/per-model wire key for the
+	// effort or thinking-level it wants (e.g. "reasoning_effort" for
+	// OpenAI, "generationConfig.thinkingConfig.thinkingLevel" for
+	// Gemini 3+, one dotted path per applyParam's nested-key extension)
+	// and has already resolved the value against that model's
+	// catalog.Model.EffortLevels. nil is the zero value and the common
+	// case: a turn with no effort override sends nothing new, byte-for-
+	// byte identical to before this field existed.
+	Params map[string]any
 }
 
 // ToolDef describes one callable tool without coupling engine to its implementation.

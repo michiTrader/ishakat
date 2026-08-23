@@ -358,6 +358,83 @@ func TestFromConvoAplanaHerramientasSinCapsTools(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// params (F9's dotted-key applyParam extension)
+// ─────────────────────────────────────────────────────────────
+
+// TestStreamParamsConClaveAnidadaCreaElObjetoIntermedio is F9's regression
+// guard for applyParam's dotted-key extension on this dialect: a key like
+// "metadata.user_id" must walk/create the intermediate objects and set only
+// the innermost field, leaving a sibling flat key (e.g. temperature) unaffected.
+// This dialect's own buildBody never pre-populates a nested struct, unlike
+// gemini's typed generationConfig, so this exercises descend's `nil` branch —
+// the JSON-round-trip branch is pinned in gemini's own equivalent test.
+func TestStreamParamsConClaveAnidadaCreaElObjetoIntermedio(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{fixture(t, "stream_normal.sse")}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+
+	p := newProvider(t, srv.URL)
+	req := hola()
+	temp := 0.3
+	req.Temperature = &temp
+	req.Params = map[string]any{"metadata.user_id": "u-123"}
+
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	if gotBody["temperature"] != 0.3 {
+		t.Errorf("una clave plana junto a una anidada debe seguir llegando: %+v", gotBody)
+	}
+	md, ok := gotBody["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata no se creó como objeto: %+v", gotBody)
+	}
+	if md["user_id"] != "u-123" {
+		t.Errorf("user_id = %v, want \"u-123\"", md["user_id"])
+	}
+}
+
+// TestStreamParamsAnidadosNilBorraSoloLaHoja pins the delete side of the
+// dotted-key extension: a nil at the leaf must delete only that innermost
+// key, leaving sibling fields at the same nesting level untouched.
+func TestStreamParamsAnidadosNilBorraSoloLaHoja(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{fixture(t, "stream_normal.sse")}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+
+	p := newProvider(t, srv.URL, func(s *provider.Settings) {
+		s.Params = map[string]any{
+			"metadata.user_id": "u-123",
+			"metadata.foo":     "bar",
+		}
+	})
+	req := hola()
+	req.Params = map[string]any{"metadata.foo": nil}
+
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	md, ok := gotBody["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata no se creó como objeto: %+v", gotBody)
+	}
+	if _, hay := md["foo"]; hay {
+		t.Errorf("un nil en una clave anidada debe borrar solo esa hoja: %+v", md)
+	}
+	if md["user_id"] != "u-123" {
+		t.Errorf("una hoja hermana no debe verse afectada por el borrado de otra: %+v", md)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
 // no-streaming
 // ─────────────────────────────────────────────────────────────
 

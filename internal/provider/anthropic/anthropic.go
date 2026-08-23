@@ -182,17 +182,66 @@ func (p *Provider) buildBody(req provider.Request, msgs []wireMessage, system st
 	return out, nil
 }
 
-// applyParam es una copia de openai.applyParam: un valor nil borra la clave,
-// para poder quitar un campo desde el TOML.
+// applyParam es una copia de openai.applyParam/gemini.applyParam: un valor
+// nil borra la clave, para poder quitar un campo desde el TOML.
+//
+// F9 extends this with one level (or more) of dotted-key nesting: a key
+// like "metadata.effort" walks/creates the intermediate objects and applies
+// nil-deletes/sets-otherwise only to the innermost one, instead of only ever
+// touching a flat top-level field. This dialect's own buildBody never sets a
+// nested struct field today (every field it puts in body is a flat
+// top-level key, unlike gemini's typed generationConfig) — so descend's own
+// JSON-round-trip fallback is unreached in practice here — but the
+// identical implementation is kept for symmetry with the other two
+// dialects' own applyParam, matching this codebase's established
+// byte-identical-copy convention. A flat key (every existing caller)
+// behaves exactly as before: this is purely additive.
 func applyParam(body map[string]any, k string, v any) {
 	if k == "" {
 		return
 	}
-	if v == nil {
-		delete(body, k)
+	segs := strings.Split(k, ".")
+	target := body
+	for _, seg := range segs[:len(segs)-1] {
+		if seg == "" {
+			return // malformed key ("a..b", leading/trailing dot): no-op, safer than guessing
+		}
+		target = descend(target, seg)
+	}
+	leaf := segs[len(segs)-1]
+	if leaf == "" {
 		return
 	}
-	body[k] = v
+	if v == nil {
+		delete(target, leaf)
+		return
+	}
+	target[leaf] = v
+}
+
+// descend es una copia de openai.descend/gemini.descend: devuelve el mapa
+// anidado en body[seg], creando uno vacío si no existe. Si body[seg] ya
+// contiene otra cosa se pasa primero por encoding/json (Marshal/Unmarshal)
+// para que sus campos existentes sobrevivan como mapa en vez de perderse con
+// un simple "target[seg] = map[string]any{}". Un Marshal fallido cae a un
+// mapa vacío en vez de entrar en pánico o devolver un error que nada aquí
+// podría reportar de forma útil.
+func descend(body map[string]any, seg string) map[string]any {
+	switch existing := body[seg].(type) {
+	case map[string]any:
+		return existing
+	case nil:
+		m := map[string]any{}
+		body[seg] = m
+		return m
+	default:
+		m := map[string]any{}
+		if raw, err := json.Marshal(existing); err == nil {
+			_ = json.Unmarshal(raw, &m)
+		}
+		body[seg] = m
+		return m
+	}
 }
 
 // httpError interpreta una respuesta con estado distinto de 200 y la

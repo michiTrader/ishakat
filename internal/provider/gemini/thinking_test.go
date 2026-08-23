@@ -83,6 +83,51 @@ func TestBuildBodyAsksForThoughtSummaries(t *testing.T) {
 	}
 }
 
+// TestBuildBodyParamsNestedKeySurvivesTypedGenerationConfig is F9's
+// regression guard for applyParam's dotted-key extension on this dialect
+// specifically: buildBody sets body["generationConfig"] as a *typed*
+// wireGenConfig struct (not a map[string]any) whenever IncludeReasoning is
+// true, so a params override like
+// "generationConfig.thinkingConfig.thinkingLevel" must reach descend's
+// JSON-round-trip branch (not its `nil` branch, which the openai dialect's
+// own equivalent test exercises) — and the struct's own fields
+// (includeThoughts, set by buildBody itself) must survive the round-trip
+// instead of being silently discarded by a naive map overwrite.
+func TestBuildBodyParamsNestedKeySurvivesTypedGenerationConfig(t *testing.T) {
+	var got map[string]any
+	srv := sseServer(t, []string{fixture(t, "stream_pensamiento.sse")}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &got)
+	})
+
+	req := hola()
+	req.IncludeReasoning = true // buildBody sets generationConfig as a wireGenConfig struct
+	req.Params = map[string]any{
+		"generationConfig.thinkingConfig.thinkingLevel": "HIGH",
+	}
+
+	p := newProvider(t, srv.URL)
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	drain(t, ch)
+
+	gc, ok := got["generationConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("generationConfig missing or not an object after the nested params override: %v", got)
+	}
+	tc, ok := gc["thinkingConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinkingConfig missing or not an object: %v", gc)
+	}
+	if tc["includeThoughts"] != true {
+		t.Errorf("includeThoughts must survive the round-trip descend() does to reach thinkingLevel: %v", tc)
+	}
+	if tc["thinkingLevel"] != "HIGH" {
+		t.Errorf("thinkingLevel = %v, want \"HIGH\" from the nested params override", tc["thinkingLevel"])
+	}
+}
+
 // TestStreamThoughtPartsBecomeReasoningEvents is the receiving half: a
 // `thought`-marked Part must arrive as EventReasoning and must NOT be
 // concatenated into the answer. Keeping the two apart is the whole point of

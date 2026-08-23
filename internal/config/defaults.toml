@@ -97,6 +97,9 @@ toggle_fold = "ctrl+r"
 # of submitting it now; alt+up re-opens that queue for editing.
 queue_followup = "alt+enter"
 edit_queue = "alt+up"
+# F9: cycles the current model's effort/thinking-level through its own
+# catalog.Model.EffortLevels.
+effort_cycle = "ctrl+g"
 
 [catalog]
 sources = ["provider", "modelsdev", "config"]

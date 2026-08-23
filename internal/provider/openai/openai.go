@@ -238,15 +238,66 @@ func isGoogleHost(base string) bool {
 
 // applyParam aplica un override. Un valor nil borra la clave: así se puede
 // quitar stream_options desde el TOML.
+//
+// F9 extends this with one level (or more) of dotted-key nesting: a key
+// like "extra_body.google.thinking_config.include_thoughts" walks/creates
+// the intermediate objects and applies nil-deletes/sets-otherwise only to
+// the innermost one, instead of only ever touching a flat top-level field.
+// This dialect's own body has no nested struct fields today (stream_options
+// and extra_body are already map[string]any literals in buildBody), so a
+// dotted key here mostly matters for symmetry with anthropic/gemini's own
+// applyParam, whose bodies do carry typed nested structs — see descend's own
+// comment for why the JSON round-trip fallback exists at all. A flat key
+// (every existing caller, including TestStreamParamsSobrescribenElCuerpo)
+// behaves exactly as before: this is purely additive.
 func applyParam(body map[string]any, k string, v any) {
 	if k == "" {
 		return
 	}
-	if v == nil {
-		delete(body, k)
+	segs := strings.Split(k, ".")
+	target := body
+	for _, seg := range segs[:len(segs)-1] {
+		if seg == "" {
+			return // malformed key ("a..b", leading/trailing dot): no-op, safer than guessing
+		}
+		target = descend(target, seg)
+	}
+	leaf := segs[len(segs)-1]
+	if leaf == "" {
 		return
 	}
-	body[k] = v
+	if v == nil {
+		delete(target, leaf)
+		return
+	}
+	target[leaf] = v
+}
+
+// descend returns the nested map[string]any at body[seg], creating an empty
+// one if absent. If body[seg] already holds something else — a typed
+// struct buildBody set before the params loop ran, or a *pointer to one —
+// it is round-tripped through encoding/json first so its existing fields
+// survive as a map instead of being silently discarded by a naive
+// "target[seg] = map[string]any{}" overwrite. A failed marshal (should not
+// happen for anything buildBody itself constructs) falls back to a fresh
+// empty map rather than panicking or returning an error nothing here could
+// usefully report.
+func descend(body map[string]any, seg string) map[string]any {
+	switch existing := body[seg].(type) {
+	case map[string]any:
+		return existing
+	case nil:
+		m := map[string]any{}
+		body[seg] = m
+		return m
+	default:
+		m := map[string]any{}
+		if raw, err := json.Marshal(existing); err == nil {
+			_ = json.Unmarshal(raw, &m)
+		}
+		body[seg] = m
+		return m
+	}
 }
 
 // httpError interpreta una respuesta con estado distinto de 200 y la convierte

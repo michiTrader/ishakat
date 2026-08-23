@@ -61,6 +61,15 @@ type Map struct {
 	// renders as exactly "alt+up".
 	EditQueue string
 
+	// EffortCycle is F9's chord (docs/ROADMAP-ux-2026-08-20.md, W5):
+	// cycles the current model's effort/thinking-level through its own
+	// catalog.Model.EffortLevels. ctrl+g was chosen because it is the
+	// only single ctrl+letter chord this file, defaults.toml and
+	// bubbles/v2's own textarea bindings all leave unclaimed (see this
+	// constant's own test) — the same "grep every keymap surface before
+	// adopting a chord" discipline ToggleFold's own comment documents.
+	EffortCycle string
+
 	// QuitRepeat is how many times Quit must be pressed inside the grace
 	// window to actually exit (§7.4, RC-1). 1 quits on the first press;
 	// 2 is the shipped double-press; N counts presses. 0 is treated as
@@ -85,6 +94,7 @@ var defaultMap = Map{
 	ToggleFold:    "ctrl+r",
 	QueueFollowup: "alt+enter",
 	EditQueue:     "alt+up",
+	EffortCycle:   "ctrl+g",
 	QuitRepeat:    2,
 }
 
@@ -112,6 +122,7 @@ func NewMap(k config.Keys) Map {
 		ToggleFold:    or(k.ToggleFold, defaultMap.ToggleFold),
 		QueueFollowup: or(k.QueueFollowup, defaultMap.QueueFollowup),
 		EditQueue:     or(k.EditQueue, defaultMap.EditQueue),
+		EffortCycle:   or(k.EffortCycle, defaultMap.EffortCycle),
 		QuitRepeat:    repeat,
 	}
 	return m
