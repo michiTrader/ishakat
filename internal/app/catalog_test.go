@@ -806,23 +806,29 @@ func TestApplyCurationNotesTheCount(t *testing.T) {
 	}}
 
 	t.Run("nothing to hide leaves the catalog untouched", func(t *testing.T) {
-		got := applyCuration(cat, catalog.Rules{})
+		got, hidden := applyCuration(cat, catalog.Rules{})
 		if len(got.Notes) != 0 {
 			t.Errorf("Notes = %v, want none when curation hides nothing", got.Notes)
 		}
 		if got.Len() != 2 {
 			t.Errorf("Len = %d, want 2", got.Len())
 		}
+		if len(hidden) != 0 {
+			t.Errorf("hidden = %v, want none", hidden)
+		}
 	})
 
-	t.Run("a real hide notes the count", func(t *testing.T) {
-		got := applyCuration(cat, catalog.Rules{ChatOnly: true})
+	t.Run("a real hide notes the count and reports it in hidden", func(t *testing.T) {
+		got, hidden := applyCuration(cat, catalog.Rules{ChatOnly: true})
 		if got.Len() != 1 {
 			t.Fatalf("Len = %d, want 1 (the embedding model hidden)", got.Len())
 		}
 		notes := strings.Join(got.Notes, "\n")
 		if !strings.Contains(notes, "1 model(s) hidden by catalog.curate") {
 			t.Errorf("Notes = %q, want the count reported (principle 2)", notes)
+		}
+		if len(hidden) != 1 || hidden[0].Model.Ref != "p/embed" {
+			t.Errorf("hidden = %+v, want exactly p/embed", hidden)
 		}
 	})
 }
@@ -835,13 +841,16 @@ func TestApplyCurationNeverEmptiesTheCatalog(t *testing.T) {
 	cat := catalog.Catalog{Models: []catalog.Model{
 		{Ref: "p/only-model", Provider: "p", WireID: "only-model"},
 	}}
-	got := applyCuration(cat, catalog.Rules{Hide: []string{"*"}})
+	got, hidden := applyCuration(cat, catalog.Rules{Hide: []string{"*"}})
 	if got.Len() != 1 {
 		t.Fatalf("Len = %d, want 1: an all-hiding rule set must be skipped, not emptied", got.Len())
 	}
 	notes := strings.Join(got.Notes, "\n")
 	if !strings.Contains(notes, "would hide every model") {
 		t.Errorf("Notes = %q, want an explanation of why curation was skipped", notes)
+	}
+	if len(hidden) != 0 {
+		t.Errorf("hidden = %v, want none when the guard skips curation entirely", hidden)
 	}
 }
 
