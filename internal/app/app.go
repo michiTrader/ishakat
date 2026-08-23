@@ -479,6 +479,16 @@ func Run(version string, resume bool) int {
 		// call sees.
 		CurationStore: newFileCurationStore(xdg.CurationFile()),
 
+		// Hidden is applyCuration's own audit trail, already computed by
+		// LoadCatalog above (snap.Hidden) — design doc §2.3's second
+		// closing criterion / principle 4, "a hidden model is still
+		// resolvable by exact ref, and /model says it is hidden rather
+		// than failing": tui.Root.hiddenByRef reads this for the
+		// automatic-rule hides CurationStore itself never tracked (see
+		// tui.Options.Hidden's own doc comment). nil (curation hid
+		// nothing) is a supported value, same as CurationStore's own nil.
+		Hidden: snap.Hidden,
+
 		// §21.6 (Step 31, part 2) — the same guard already bound into
 		// agentOpts.Runner above, so a mission confirmed through
 		// ModeMission is enforced on the very same Guard every tool call

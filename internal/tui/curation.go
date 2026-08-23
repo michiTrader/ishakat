@@ -27,6 +27,12 @@
 // config.toml.
 package tui
 
+import (
+	"strings"
+
+	"github.com/MichiTrader/ishakat/internal/catalog"
+)
+
 // CurationStore is Layer 2's own persistence seam. nil is a supported
 // value, the same "session behaves correctly, just does not survive a
 // restart" contract TrustStore/ThemeStore already give their own nil case:
@@ -82,3 +88,51 @@ type CurationStore interface {
 // you") so a dimmed row reads the same regardless of whether the hide came
 // from a config.toml glob or a ctrl+x press.
 const curationHideReason = "hidden by you"
+
+// hiddenByRef looks ref up in m.hidden (internal/app's applyCuration audit
+// trail, Options.Hidden's own doc comment) by exact reference,
+// case-insensitively — the same comparison catalog.Catalog.Get itself uses,
+// so this never disagrees with m.cat about which ref is which. This is
+// design doc §2.3's second closing criterion's actual data source for
+// automatic-rule hides (ChatOnly, HideDeprecated, HideSuperseded, ...): the
+// ones CurationStore.Reason cannot explain, because that store only ever
+// tracks curation.json's own user-driven entries (see its own doc comment).
+func (m Root) hiddenByRef(ref string) (catalog.Hidden, bool) {
+	ref = strings.TrimSpace(ref)
+	for _, h := range m.hidden {
+		if strings.EqualFold(h.Model.Ref, ref) {
+			return h, true
+		}
+	}
+	return catalog.Hidden{}, false
+}
+
+// hiddenRuleLabel names the [catalog.curate] setting (or equivalent) behind
+// reason, for the one-line "hidden by ..." chat notice runModelCommand's
+// hidden-fallback produces. Deliberately a smaller cousin of
+// internal/app/models_cmd.go's whyReasonText (which this package cannot
+// import, §6.1) rather than a shared helper: `ishakat models --why`'s
+// multi-line diagnostic and this package's single notice line have
+// different enough shapes that a shared function would need its own
+// "which format" branch, and the wording only has to agree in substance,
+// not byte-for-byte — both ultimately name the same catalog.Reason.
+func hiddenRuleLabel(reason catalog.Reason) string {
+	switch reason {
+	case catalog.ReasonNonChatModality, catalog.ReasonNonChatLimit, catalog.ReasonNonChatSampling:
+		return "catalog.curate.chat_only"
+	case catalog.ReasonDeprecated:
+		return "catalog.hide_deprecated"
+	case catalog.ReasonSuperseded:
+		return "catalog.curate.hide_superseded"
+	case catalog.ReasonDatedTwin:
+		return "catalog.curate.hide_dated_twins"
+	case catalog.ReasonLatestAlias:
+		return "catalog.curate.hide_latest"
+	case catalog.ReasonUserGlob:
+		return "your hide list"
+	case catalog.ReasonUnhealthy:
+		return "health check"
+	default:
+		return string(reason)
+	}
+}

@@ -384,3 +384,137 @@ func TestSlashModelsCommandWithUnrecognisedArgumentFallsThroughToTheListing(t *t
 		t.Fatalf("expected the ordinary listing, got %v", got.transcript)
 	}
 }
+
+// rootWithCatalogAndHidden is rootWithCatalog plus Root.hidden attached
+// directly, mirroring rootWithCatalogAndCuration's own pattern — this is
+// what stands in for Options.Hidden (app.go's real wiring) in these tests.
+func rootWithCatalogAndHidden(cat *catalog.Catalog, hidden []catalog.Hidden) Root {
+	root := rootWithCatalog(cat)
+	root.hidden = hidden
+	return root
+}
+
+// TestHiddenByRefFindsExactRefCaseInsensitively pins hiddenByRef's own
+// contract: the same case-insensitive comparison catalog.Catalog.Get
+// itself uses, so a hidden-model lookup can never disagree with the
+// catalog about which ref is which.
+func TestHiddenByRefFindsExactRefCaseInsensitively(t *testing.T) {
+	root := rootWithCatalogAndHidden(catalogWithModels("other/unrelated"), []catalog.Hidden{
+		{Model: catalog.Model{Ref: "gemini-direct/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
+	})
+
+	h, ok := root.hiddenByRef("GEMINI-DIRECT/Gemini-Embedding-2")
+	if !ok {
+		t.Fatal("hiddenByRef should find the ref case-insensitively")
+	}
+	if h.Reason != catalog.ReasonNonChatLimit {
+		t.Errorf("Reason = %q, want %q", h.Reason, catalog.ReasonNonChatLimit)
+	}
+
+	if _, ok := root.hiddenByRef("other/unrelated"); ok {
+		t.Error("hiddenByRef must not report a ref that is not in m.hidden")
+	}
+}
+
+// TestSlashModelExactRefOnAnAutomaticallyHiddenModelStillSwitches pins
+// design doc §2.3's second closing criterion / principle 4: a model
+// catalog.Curate removed from m.cat entirely (an automatic
+// [catalog.curate] rule — m.cat, built from the CURATED snapshot, never
+// contains it at all, so catalog.Resolve above can never decide) is still
+// resolvable by its exact ref through /model, and the resulting
+// confirmation explicitly says it is hidden rather than reading like an
+// ordinary switch or silently opening the picker on a plausible-looking
+// query.
+func TestSlashModelExactRefOnAnAutomaticallyHiddenModelStillSwitches(t *testing.T) {
+	hiddenRef := "gemini-direct/gemini-embedding-2"
+	root := rootWithCatalogAndHidden(catalogWithModels("other/unrelated"), []catalog.Hidden{
+		{Model: catalog.Model{Ref: hiddenRef}, Reason: catalog.ReasonNonChatLimit},
+	})
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model "+hiddenRef)
+
+	got := m.(Root)
+	if got.mode != ModeChat {
+		t.Fatalf("mode = %v, want ModeChat: a hidden-but-exact-ref match must not open the picker", got.mode)
+	}
+	if got.model != hiddenRef {
+		t.Errorf("model = %q, want %q — principle 1: hiding is a view, never a deletion, "+
+			"the model must still switch", got.model, hiddenRef)
+	}
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected exactly one notice, got %v", got.transcript)
+	}
+	notice := got.transcript[0].text
+	if !strings.Contains(notice, hiddenRef) {
+		t.Errorf("notice should name the model, got %q", notice)
+	}
+	if !strings.Contains(notice, "escondido") {
+		t.Errorf("notice should explicitly say the model is hidden (principle 4), got %q", notice)
+	}
+	if !strings.Contains(notice, hiddenRuleLabel(catalog.ReasonNonChatLimit)) {
+		t.Errorf("notice should name the rule that hid it, got %q", notice)
+	}
+}
+
+// TestSlashModelExactRefOnACurationJSONHiddenModelStillSwitches is the
+// same proof for a user-driven hide (ReasonUserGlob — a ctrl+x/`/model
+// hide` from a previous session, or before this session's CurationStore
+// ever saw it, per pickerRow.hidden's own doc comment on that
+// limitation): Options.Hidden carries these the same way it carries the
+// automatic rules, since both are applyCuration's own single audit trail.
+func TestSlashModelExactRefOnACurationJSONHiddenModelStillSwitches(t *testing.T) {
+	hiddenRef := "omni/son45"
+	root := rootWithCatalogAndHidden(catalogWithModels("other/unrelated"), []catalog.Hidden{
+		{Model: catalog.Model{Ref: hiddenRef}, Reason: catalog.ReasonUserGlob},
+	})
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model "+hiddenRef)
+
+	got := m.(Root)
+	if got.model != hiddenRef {
+		t.Errorf("model = %q, want %q", got.model, hiddenRef)
+	}
+	if len(got.transcript) != 1 || !strings.Contains(got.transcript[0].text, "escondido") {
+		t.Fatalf("expected a notice explicitly saying the model is hidden, got %v", got.transcript)
+	}
+}
+
+// TestSlashModelOrdinaryMatchNoticeUnaffectedByEmptyHidden confirms the
+// overwhelmingly common not-hidden case produces the exact same
+// confirmation line as before this field existed — hiddenSuffixFor must
+// contribute nothing when the ref switched to is not in m.hidden.
+func TestSlashModelOrdinaryMatchNoticeUnaffectedByEmptyHidden(t *testing.T) {
+	root := rootWithCatalog(catalogWithModels("omni/son45", "other/unrelated"))
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model omni/son45")
+
+	got := m.(Root)
+	if len(got.transcript) != 1 {
+		t.Fatalf("expected exactly one notice, got %v", got.transcript)
+	}
+	if strings.Contains(got.transcript[0].text, "escondido") {
+		t.Errorf("an ordinary, not-hidden switch must not mention hiding, got %q", got.transcript[0].text)
+	}
+}
+
+// TestSlashModelAmbiguousQueryStillOpensPickerWhenNotAnExactHiddenRef
+// guards the fallback's own boundary: a query that neither m.cat.Resolve
+// decides NOR matches a hidden ref by exact string still opens the
+// picker prefiltered — the hidden-fallback must not swallow every
+// unresolved query into a false "not found in the hidden list either".
+func TestSlashModelAmbiguousQueryStillOpensPickerWhenNotAnExactHiddenRef(t *testing.T) {
+	root := rootWithCatalogAndHidden(catalogWithModels("a/gpt-5", "b/gpt-5"), []catalog.Hidden{
+		{Model: catalog.Model{Ref: "gemini-direct/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
+	})
+	var m tea.Model = root
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = typeAndEnter(m, "/model gpt5")
+
+	got := m.(Root)
+	if got.mode != ModePicker {
+		t.Fatalf("mode = %v, want ModePicker for a genuinely ambiguous query", got.mode)
+	}
+}
