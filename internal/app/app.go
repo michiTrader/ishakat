@@ -418,9 +418,16 @@ func Run(version string, resume bool) int {
 		// from disk rather than reuse this run's own boot-time cfg —
 		// see NewReloadFactory's own doc comment for why.
 		ReloadFor: NewReloadFactory(),
-		Model:     model,
-		System:    system,
-		Catalog:   &snap.Catalog,
+		// PathLister is F18's own "@" path-completion seam
+		// (internal/tui/atmenu.go, internal/app/pathlister.go):
+		// closed over nothing, since every call must re-list the
+		// requested directory fresh rather than reuse a snapshot
+		// taken once at boot — see NewPathLister's own doc comment
+		// for why.
+		PathLister: NewPathLister(),
+		Model:      model,
+		System:     system,
+		Catalog:    &snap.Catalog,
 		// DiscoverSkills reuses the exact same gate SystemPrompt (called
 		// inside BuildEngine, above) already applied when it built system:
 		// a second, disk-only call rather than threading the first result

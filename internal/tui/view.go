@@ -248,6 +248,9 @@ func (m Root) renderRaw() string {
 	if menu := m.slashMenuBlock(); menu != "" {
 		b.WriteString(menu)
 	}
+	if menu := m.atMenuBlock(); menu != "" {
+		b.WriteString(menu)
+	}
 	b.WriteString(InputBox(m.lay, m.styles, m.input.View()))
 	b.WriteString("\n")
 	b.WriteString(RenderFooter(m.lay, m.footerState(), m.footerItems))
@@ -264,6 +267,20 @@ func (m Root) slashMenuBlock() string {
 		return ""
 	}
 	return renderSlashMenu(m.lay, m.styles, m.menu) + "\n"
+}
+
+// atMenuBlock is F18's own "@" path-completion dropdown as drawn directly
+// above the input box (atmenu.go) — the exact structural sibling of
+// slashMenuBlock above, kept as its own method for the identical reason:
+// render and cursorFor must agree on its height down to the row. By
+// construction at most one of slashMenuBlock/atMenuBlock is ever non-""
+// for the same Root (see updateChat's own comment on why m.menu and
+// m.atMenu never hold simultaneously), so the two blocks never stack.
+func (m Root) atMenuBlock() string {
+	if !m.atMenu.Active() {
+		return ""
+	}
+	return renderAtMenu(m.lay, m.styles, m.atMenu) + "\n"
 }
 
 // head is everything drawn above the input box: the start-up banner (only
@@ -345,7 +362,7 @@ func headRows(head string) int { return strings.Count(head, "\n") }
 func (m Root) restRows() int {
 	inputBoxRows := strings.Count(InputBox(m.lay, m.styles, m.input.View()), "\n") + 1
 	footerRows := strings.Count(RenderFooter(m.lay, m.footerState(), m.footerItems), "\n") + 1
-	return headRows(m.slashMenuBlock()) + inputBoxRows + footerRows
+	return headRows(m.slashMenuBlock()) + headRows(m.atMenuBlock()) + inputBoxRows + footerRows
 }
 
 // headBudget is the most rows head() is allowed to occupy: frameBudget
@@ -496,7 +513,7 @@ func (m Root) cursorFor() *tea.Cursor {
 	}
 	dx, dy := InputOrigin(m.lay)
 	c.Position.X += dx
-	c.Position.Y += dy + headRows(m.head()) + headRows(m.slashMenuBlock())
+	c.Position.Y += dy + headRows(m.head()) + headRows(m.slashMenuBlock()) + headRows(m.atMenuBlock())
 	return c
 }
 
