@@ -265,7 +265,13 @@ func runAgentTurnHeadless(
 	// turn — see newSubAgentRunner's own doc comment for the identical
 	// reasoning already applied to every other capability it threads
 	// through unchanged.
-	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate, asker)
+	//
+	// req.Params (F9's --effort/msg.Effort override, already resolved by
+	// this function's own caller — Headless or serve.go — before req ever
+	// reached here) is threaded through unchanged too, per
+	// newSubAgentRunner's own doc comment on why a dispatched task
+	// answers at the same effort level as the turn that dispatched it.
+	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate, asker, req.Params)
 	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner, asker)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)

@@ -232,7 +232,15 @@ func Run(version string, resume bool) int {
 		// dispatched turn can be given the same asker the parent turn gets
 		// (see newSubAgentRunner's own doc comment on why).
 		asker = newTUIAsker()
-		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker)
+		// params is nil here: this dispatchRunner closure is built once at
+		// boot, before Root (and therefore Root.effort, F9's own
+		// session-scoped choice) is even constructed, so there is no live
+		// per-turn effort value to close over here any more than there is
+		// a live ref.WireID/system for a later model switch — see
+		// newSubAgentRunner's own doc comment for why that is the correct,
+		// pre-existing limitation this call site already accepts for
+		// model/system, not a new gap F9 introduces.
+		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker, nil)
 		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, asker)
 		warnp.Warn(os.Stderr, toolsWarn)
 

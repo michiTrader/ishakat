@@ -74,6 +74,25 @@ import (
 // every dispatch_e2e_test.go/dispatch_mission_e2e_test.go call today)
 // means a sub-agent's own ask_user degrades exactly like the parent's
 // does with no asker wired -- see AskUser.Run's own doc comment.
+//
+// params is F9's own answer to "does a sub-agent inherit the parent
+// turn's effort/thinking-level override?" (docs/ROADMAP-ux-2026-08-20.md
+// W5): yes, by the same "same conversation, same model and instructions"
+// reasoning this function's doc comment already gives for model/system
+// above -- a dispatched task answered at a different effort level than
+// the turn that dispatched it would be a surprising, undocumented
+// asymmetry, not a deliberate feature. Concretely this is
+// engine.Request.Params verbatim from whichever top-level req the caller
+// already built for its own turn: runAgentTurnHeadless (agentturn.go)
+// passes its own req.Params through unchanged, since a fresh
+// newSubAgentRunner closure is built there on every call with that turn's
+// own already-resolved value in scope. app.go's Run, by contrast, builds
+// its dispatchRunner once at boot -- before Root (and therefore
+// Root.effort, session-scoped and chosen only after a session starts) is
+// even constructed -- so it has no live per-turn value to close over any
+// more than it does for model/system (both frozen at that same boot-time
+// snapshot, per this function's own doc comment above); that call site
+// passes nil, matching pre-F9 behaviour exactly.
 func newSubAgentRunner(
 	eng *engine.Engine,
 	model string,
@@ -84,6 +103,7 @@ func newSubAgentRunner(
 	caps tools.Caps,
 	hasTTY bool,
 	asker ask.Asker,
+	params map[string]any,
 ) tools.SubAgentRunner {
 	return func(ctx context.Context, task string) (string, error) {
 		if eng == nil {
@@ -104,7 +124,7 @@ func newSubAgentRunner(
 		hist := &convo.Conversation{}
 		hist.Add(convo.User(task))
 
-		req := engine.Request{Model: model, System: system}
+		req := engine.Request{Model: model, System: system, Params: params}
 
 		// RunAgentTurn already honors ctx cancellation internally (it
 		// checks ctx.Err() at the top of every iteration, exactly like the

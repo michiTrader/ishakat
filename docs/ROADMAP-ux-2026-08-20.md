@@ -754,6 +754,26 @@ six-liner, plus DECISION-3.
 
 **Closes:** F4, F17, F9, F12, F15, F18.
 
+> **Status (2026-08-23): W5 CLOSED — all six items landed.** F12 (`/name`),
+> F4 (part 1 scope — the 4-key `[ui]` live-apply slice), F15 (the spinner),
+> F17 (`/reload`), and F18 (`@` path completion) closed across parts 1-4 and
+> the standalone F18 slice (PRs #215-#219). F9 closes last, across four
+> commits on PR #220: the wire-level foundation (`engine.Request.Params`,
+> dotted-key `applyParam` in all three provider dialects, the inert
+> `EffortCycle` chord), the per-dialect effort-mapping function
+> (`internal/app/effort.go`), the interactive TUI's own `/effort` command and
+> the now-real `EffortCycle` dispatch, the `--effort` headless flag, the
+> `serve` WebSocket door's own per-message `Effort` field, and — as the
+> closing question — sub-agent effort inheritance through `dispatch`'s
+> `newSubAgentRunner`. F9's own roadmap row ("Effort/thinking-level picker, a
+> chord to cycle it, and a headless-equivalent flag") is satisfied across all
+> three doors an ishakat turn can start from (interactive TUI, `-p`
+> headless, `serve`'s WebSocket), plus sub-agent inheritance as an in-scope
+> extension of "headless-equivalent" the row's own wording already implies.
+> See `docs/PLAN.md` §17, 2026-08-23 "W5 (part 5, closing)" for the full
+> detail. **W6 is next**, per the approved
+> W0→W1→W3→W2→W4→W5→W6 order.
+
 ### W6 · Distribution and sub-agents
 
 - **F1** the branded one-line installers (`install.ps1` for PowerShell
