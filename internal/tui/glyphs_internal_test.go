@@ -129,6 +129,75 @@ func TestCrushFrameKeepsItsWidthInBothRepertoires(t *testing.T) {
 	}
 }
 
+// F15 (roadmap W5, "prefer a single rotating glyph over the current
+// animation"): CrushFrame used to crawl a nine-column wave of shading
+// blocks, which read as a loading bar rather than a spinner. This pins the
+// fix at the width axis — crushWidth itself, not a hardcoded literal, so a
+// future change to the constant does not silently desync this test from
+// TestCrushFrameKeepsItsWidthInBothRepertoires above.
+func TestCrushFrameIsNowASingleRotatingGlyph(t *testing.T) {
+	if crushWidth != 1 {
+		t.Fatalf("crushWidth is %d, want 1 (F15: one rotating glyph, not a crawling strip)", crushWidth)
+	}
+	for _, set := range []theme.GlyphSet{theme.GlyphsUnicode, theme.GlyphsASCII} {
+		lay := NewLayout(80, 24, 0, false, false).WithGlyphs(set)
+		if got := lipglossWidth(CrushFrame(lay, 0)); got != 1 {
+			t.Errorf("CrushFrame(%s, 0) is %d columns wide, want 1", set, got)
+		}
+	}
+}
+
+// The animation has to keep moving frame to frame — a "spinner" whose glyph
+// never changes is a static icon, not motion — and it has to eventually
+// repeat, since CrushFrame only ever indexes into a small fixed table
+// (glyphs.spinner). This pins both properties without pinning the exact
+// characters chosen, so retheming the glyph itself later does not require
+// touching this test.
+func TestCrushFrameActuallyRotates(t *testing.T) {
+	for _, set := range []theme.GlyphSet{theme.GlyphsUnicode, theme.GlyphsASCII} {
+		t.Run(set.String(), func(t *testing.T) {
+			lay := NewLayout(80, 24, 0, false, false).WithGlyphs(set)
+			seen := map[string]bool{}
+			for offset := 0; offset < 8; offset++ {
+				seen[CrushFrame(lay, offset)] = true
+			}
+			if len(seen) < 2 {
+				t.Errorf("CrushFrame(%s, ...) drew only %d distinct frame(s) across 8 offsets; the spinner never moves", set, len(seen))
+			}
+			if got := CrushFrame(lay, 0); got != CrushFrame(lay, len(lay.glyphs().spinner)) {
+				t.Errorf("CrushFrame(%s, 0) = %q but CrushFrame at one full cycle later = %q; the rotation should repeat", set, got, CrushFrame(lay, len(lay.glyphs().spinner)))
+			}
+		})
+	}
+}
+
+// The braille glyph the roadmap's own report quoted verbatim ("⠴ Working...")
+// is outside WGL4 (the whole U+2800..U+28FF Braille Patterns block is), so
+// F15 replaced it with a turning-arrow rotation instead. This is not a check
+// on the exact characters — a future retheme is free to change them — it is
+// a check that whatever the Unicode table's spinner is, it stays inside the
+// same WGL4 promise every other decorative glyph in this table already
+// makes (glyphs.go's own header comment), so this repertoire's whole reason
+// to exist does not quietly regress one field at a time.
+func TestSpinnerGlyphsStayInsideWGL4(t *testing.T) {
+	// The WGL4 ranges this project already relies on elsewhere (box drawing,
+	// shading blocks, the scrollHint arrows) plus the arrow block F15 draws
+	// from — deliberately narrow rather than the full ~650-character list,
+	// because the point is "did this field's author reach for something
+	// documented", not re-deriving WGL4 from scratch inside a test.
+	inWGL4 := func(r rune) bool {
+		return r <= 0x00FF || // Latin-1
+			(r >= 0x2010 && r <= 0x2027) || // general punctuation
+			(r >= 0x2190 && r <= 0x2195) || // the arrows scrollHint already uses
+			(r >= 0x2500 && r <= 0x25FF) // box drawing + block elements + geometric (WGL4 subset)
+	}
+	for _, r := range unicodeGlyphs.spinner {
+		if !inWGL4(r) {
+			t.Errorf("unicodeGlyphs.spinner has %q (U+%04X), which is outside this test's WGL4 allow-list", r, r)
+		}
+	}
+}
+
 func assertASCII(t *testing.T, where, view string) {
 	t.Helper()
 	for _, r := range view {

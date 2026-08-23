@@ -4,17 +4,30 @@ import "strings"
 
 // crushWidth is how many columns the animation occupies. It is fixed so the
 // text that follows it never shifts sideways between frames.
-const crushWidth = 9
+//
+// F15 (roadmap W5, "prefer a single rotating glyph over the current
+// animation") is why this is 1 rather than 9: the strip used to crawl a
+// nine-column wave of shading blocks across the screen, which read as a
+// loading bar, not as "the model is thinking". One rotating glyph — the
+// same shape every terminal spinner uses — says the same thing in one
+// column instead of nine, and the fixed width still holds the invariant
+// this constant exists for (the "pensando Ns" text after it never shifts).
+const crushWidth = 1
 
 // CrushFrame builds the strip of characters for the frame at offset, in
 // whichever repertoire lay allows.
 //
 // The strip used to be a hardcoded run of quadrant blocks (U+259A, U+259E,
-// U+2598, U+259D, U+2597) — exactly the family Consolas does not ship, so on
-// the console in the report the "thinking" line was nine boxes crawling across
-// the screen. The Unicode table uses the shading blocks instead: they are in
-// WGL4 and in cp437, and a wave of them reads as motion better than the
-// corners did.
+// U+2598, U+259D, U+2597) — exactly the family Consolas does not ship — then
+// (§17 2026-08-13) a nine-column wave of shading blocks, which are in WGL4
+// and in cp437 but read as a progress bar rather than a spinner. F15 (roadmap
+// W5) replaced that wave with glyphs.spinner's own now-single-rune-per-frame
+// rotation: a classic four-position turning glyph. The Unicode table's frames
+// (↑ → ↓ ←, U+2190..U+2195) are in WGL4 and in cp437 — every requirement this
+// package's own repertoire rule checks for — which is also why a literal
+// braille frame (the "⠴" the report asked for verbatim) was rejected: the
+// whole U+2800..U+28FF Braille Patterns block is outside WGL4, exactly the
+// class of glyph this file's own convention already excludes on sight.
 //
 // It takes the Layout rather than the glyph table because every other renderer
 // in the package takes the Layout, and one function with a different convention
