@@ -84,6 +84,28 @@ type MDModel struct {
 	// yet; it exists so a future non-conversational filter (§1.2 of that
 	// same design) has the field parsed and ready.
 	Temperature *bool `json:"temperature,omitempty"`
+
+	// EffortLevels is the model-side data F9 (roadmap: "/effort,
+	// effort/thinking-level picker, a chord to cycle it, and a
+	// headless-equivalent flag") needs before any picker/chord/flag can be
+	// built: the actual set of effort strings *this* model accepts, e.g.
+	// ["minimal","low","medium","high"] for gpt-5, or ["low","high"] for
+	// gemini-3-pro-image — never a fixed global list, because the values
+	// and their count both vary per model (confirmed against a live
+	// models.dev snapshot: some models support two levels, some six, and
+	// the vocabulary itself differs — "xhigh"/"max" exist on some models
+	// and not others). Populated only from models.dev's own
+	// reasoning_options entries of type "effort"; a model can also carry
+	// "toggle" (on/off, e.g. Claude's extended thinking) or
+	// "budget_tokens" (a raw token count) reasoning_options, neither of
+	// which is an effort *level* and both are deliberately left unparsed
+	// here — a separate, later concern from this field's own name. Empty
+	// means "no discrete effort levels known", which covers both
+	// non-reasoning models and reasoning models that only expose
+	// toggle/budget_tokens control, not "reasoning is off": Reasoning
+	// (above) already answers that question and this field must not be
+	// used to re-derive it.
+	EffortLevels []string `json:"effort_levels,omitempty"`
 }
 
 // Caps turns the models.dev flags into the catalog's own capability set.
@@ -192,6 +214,24 @@ type wireMDModelRaw struct {
 		Output  int `json:"output"`
 	} `json:"limit"`
 	Cost *MDCost `json:"cost"`
+
+	// ReasoningOptions is models.dev's own per-model control-surface list:
+	// each entry names a "type" ("effort" | "toggle" | "budget_tokens")
+	// and, for "effort", the exact "values" this particular model accepts
+	// — see MDModel.EffortLevels's own doc comment for why that has to
+	// stay per-model rather than a fixed global vocabulary. Absent on a
+	// non-reasoning model, and can be an empty array even when Reasoning
+	// is true (confirmed on a live snapshot: some reasoning models expose
+	// no client-controllable knob at all).
+	ReasoningOptions []wireReasoningOption `json:"reasoning_options"`
+}
+
+// wireReasoningOption is one entry of a wireMDModelRaw's reasoning_options
+// array. Values is nil/empty for a "toggle" or "budget_tokens" entry, which
+// carry no discrete level list at all — only "effort" entries do.
+type wireReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values"`
 }
 
 func (w wireMDModelRaw) digest(id string) MDModel {
@@ -205,23 +245,37 @@ func (w wireMDModelRaw) digest(id string) MDModel {
 			vision = true
 		}
 	}
+	// Only "effort" entries carry a discrete level list (see
+	// MDModel.EffortLevels's doc comment); "toggle"/"budget_tokens" are
+	// deliberately skipped here, not merged in, since neither is a level
+	// string this field's own contract could return honestly. A model can
+	// in principle declare more than one "effort" entry; every one seen so
+	// far in a live snapshot has at most one, but appending rather than
+	// overwriting costs nothing and cannot lose data if that ever changes.
+	var effort []string
+	for _, ro := range w.ReasoningOptions {
+		if strings.EqualFold(ro.Type, "effort") {
+			effort = append(effort, ro.Values...)
+		}
+	}
 	return MDModel{
-		ID:          id,
-		Name:        w.Name,
-		Family:      w.Family,
-		Context:     w.Limit.Context,
-		Output:      w.Limit.Output,
-		Cost:        w.Cost,
-		Tools:       w.ToolCall,
-		Reasoning:   w.Reasoning,
-		Vision:      vision,
-		Attachments: w.Attachment,
-		JSONSchema:  w.StructuredOutput,
-		Modalities:  w.Modalities.Output,
-		OpenWeights: w.OpenWeights,
-		ReleaseDate: w.ReleaseDate,
-		Status:      w.Status,
-		Temperature: w.Temperature,
+		ID:           id,
+		Name:         w.Name,
+		Family:       w.Family,
+		Context:      w.Limit.Context,
+		Output:       w.Limit.Output,
+		Cost:         w.Cost,
+		Tools:        w.ToolCall,
+		Reasoning:    w.Reasoning,
+		Vision:       vision,
+		Attachments:  w.Attachment,
+		JSONSchema:   w.StructuredOutput,
+		Modalities:   w.Modalities.Output,
+		OpenWeights:  w.OpenWeights,
+		ReleaseDate:  w.ReleaseDate,
+		Status:       w.Status,
+		Temperature:  w.Temperature,
+		EffortLevels: effort,
 	}
 }
 

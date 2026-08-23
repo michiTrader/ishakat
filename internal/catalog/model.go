@@ -218,6 +218,20 @@ type Model struct {
 	// would silently turn "unknown" into "hide", violating principle 10.
 	Temperature *bool `json:"temperature,omitempty"`
 
+	// EffortLevels is the model-side data F9 (the roadmap's `/effort`
+	// picker, cycle chord, and headless flag) needs before any of that
+	// UI can be built: the discrete effort-level vocabulary *this*
+	// model accepts, e.g. ["minimal","low","medium","high"] for gpt-5
+	// or ["low","high"] for gemini-3-pro-image — always per-model, never
+	// a fixed global list, because both the count and the vocabulary
+	// vary model to model (see MDModel.EffortLevels in modelsdev.go for
+	// the full survey this was based on). Empty means "no discrete
+	// effort levels known" — either the model does not reason at all,
+	// or it only exposes a toggle/budget_tokens control instead of
+	// named levels; Caps.Reasoning is what answers "does it reason",
+	// this field must never be used to re-derive that.
+	EffortLevels []string `json:"effort_levels,omitempty"`
+
 	Cost *Cost    `json:"cost,omitempty"` // nil = UNKNOWN, which is not the same as free
 	Caps Caps     `json:"caps,omitzero"`
 	Tags []string `json:"tags,omitempty"`

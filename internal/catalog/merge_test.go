@@ -474,6 +474,34 @@ func TestApplyModelsDevCarriesModalitiesAndTemperature(t *testing.T) {
 	}
 }
 
+func TestApplyModelsDevCarriesEffortLevelsOnlyWhenUnset(t *testing.T) {
+	ix := NewIndex()
+	ix.ByProvider["gw"] = map[string]MDModel{
+		"gpt-5":       {ID: "gpt-5", EffortLevels: []string{"minimal", "low", "medium", "high"}},
+		"toggle-only": {ID: "toggle-only"}, // reasoning_options had no "effort" entry
+	}
+	p := okProvider("gw", []DiscoveredModel{
+		{WireID: "gpt-5"}, {WireID: "toggle-only"},
+	})
+	cat := Build(BuildInput{Providers: []ProviderInput{p}, ModelsDev: ix})
+
+	gpt5 := find(t, cat, "gw/gpt-5")
+	want := []string{"minimal", "low", "medium", "high"}
+	if len(gpt5.EffortLevels) != len(want) {
+		t.Fatalf("gpt-5.EffortLevels = %v, want %v", gpt5.EffortLevels, want)
+	}
+	for i, v := range want {
+		if gpt5.EffortLevels[i] != v {
+			t.Errorf("gpt-5.EffortLevels[%d] = %q, want %q", i, gpt5.EffortLevels[i], v)
+		}
+	}
+
+	toggle := find(t, cat, "gw/toggle-only")
+	if len(toggle.EffortLevels) != 0 {
+		t.Errorf("toggle-only.EffortLevels = %v, want empty (models.dev had no effort entry)", toggle.EffortLevels)
+	}
+}
+
 // TestNotesAreHonestAboutFailures: a provider that could not be reached, or
 // has no credential, produces a one-liner the interface can show. Never an
 // error that aborts the startup.
