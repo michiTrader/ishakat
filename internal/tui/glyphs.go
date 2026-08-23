@@ -51,10 +51,15 @@ type glyphs struct {
 	// themselves cannot be drawn.
 	scrollHint string
 
-	// spinner is the strip of the "thinking" animation, one rune per column.
-	// It used to be built from quadrant blocks (▚ ▞ ▘ ▝ ▗) — the exact family
-	// Consolas is missing. The shading blocks are in WGL4 and in cp437, and a
-	// wave of them reads better as motion anyway.
+	// spinner is the frames of the "thinking" animation, cycled one rune per
+	// tick (spinner.go's CrushFrame). It used to be built from quadrant
+	// blocks (▚ ▞ ▘ ▝ ▗) — the exact family Consolas is missing — then from
+	// nine shading blocks (░ ▒ ▓ █ ▓ ▒ ░ ▒ ▓) crawling across a nine-column
+	// strip, which were in WGL4 and in cp437 but, per F15 (roadmap W5), read
+	// as a loading bar rather than a spinner. This is the single rotating
+	// glyph that replaced it: a turning arrow, which is also in WGL4 and in
+	// cp437 (U+2190..U+2195, the same block DetectGlyphsEnv's own arrow
+	// checks already rely on).
 	spinner []rune
 
 	// warnMark prefixes an error that belongs to a completed turn.
@@ -92,7 +97,7 @@ var unicodeGlyphs = glyphs{
 	rule:          "─",
 	dot:           "·",
 	scrollHint:    "↑↓",
-	spinner:       []rune("░▒▓█▓▒░▒▓"),
+	spinner:       []rune("↑→↓←"),
 	warnMark:      "⚠",
 	foldMark:      "▸",
 	clipMark:      "…",
@@ -111,7 +116,7 @@ var asciiGlyphs = glyphs{
 	rule:          "-",
 	dot:           "-",
 	scrollHint:    "up/down",
-	spinner:       []rune(".:-=+=-:."),
+	spinner:       []rune(`|/-\`),
 	warnMark:      "!",
 	foldMark:      ">",
 	clipMark:      "...",
