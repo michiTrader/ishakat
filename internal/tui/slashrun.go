@@ -135,6 +135,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runStats()
 	case slash.KindResume:
 		return m.runResumeCommand()
+	case slash.KindName:
+		return m.runNameCommand(args)
 	case slash.KindModels:
 		return m.runModelsCommand(args)
 	case slash.KindSkills:

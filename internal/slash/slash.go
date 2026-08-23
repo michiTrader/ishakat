@@ -160,6 +160,13 @@ const (
 	// git line), over Root's own already-detected git facts rather than
 	// re-probing the filesystem a second time.
 	KindTrust
+	// KindName implements /name (F12, docs/ROADMAP-ux-2026-08-20.md W5):
+	// "/name [text]" renames the session. No argument reports the
+	// current title (namecmd.go's own reportTitle); an argument applies
+	// it immediately and persists it through SessionTitleStore, the
+	// same live-apply-then-persist shape KindTheme already follows for
+	// its own single-value write.
+	KindName
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -207,6 +214,7 @@ var Commands = []Command{
 	{Name: "compact", Describe: "resumir contexto", Kind: KindCompact},
 	{Name: "new", Describe: "conversacion nueva", Kind: KindNew},
 	{Name: "resume", Describe: "reabrir una sesion", Kind: KindResume},
+	{Name: "name", ArgHint: "[texto]", Describe: "nombrar o ver el titulo de la sesion", Kind: KindName},
 	{Name: "clear", Describe: "limpiar pantalla", Kind: KindClear},
 	{Name: "copy", ArgHint: "[n]", Describe: "copiar respuesta", Kind: KindCopy},
 	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
