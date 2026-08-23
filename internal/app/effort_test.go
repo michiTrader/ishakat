@@ -82,3 +82,54 @@ func TestEffortParamsForReadsProviderKind(t *testing.T) {
 		t.Errorf("EffortParamsFor(zero-value, \"low\") = %#v, want %#v", got, want)
 	}
 }
+
+// TestNewEffortResolverWalksTheSameResolveModelFindProviderPath pins
+// NewEffortResolver's own doc-comment promise: it must resolve ref through
+// the exact same ResolveModel/FindProvider chain NewEngineFactory uses for
+// the same ref, so a turn's effort override and the engine it runs on can
+// never disagree about which provider dialect they are both addressing.
+func TestNewEffortResolverWalksTheSameResolveModelFindProviderPath(t *testing.T) {
+	cfg := &config.Config{
+		Schema: config.Schema,
+		Providers: []config.Provider{
+			{ID: "omniroute", Kind: "openai", Enabled: true, AuthOK: true},
+			{ID: "gem", Kind: "gemini", Enabled: true, AuthOK: true},
+		},
+	}
+
+	resolve := NewEffortResolver(cfg)
+
+	got := resolve("omniroute/gpt-5", "high")
+	want := map[string]any{"reasoning_effort": "high"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("resolve(omniroute/gpt-5, high) = %#v, want %#v", got, want)
+	}
+
+	got = resolve("gem/gemini-3-pro", "low")
+	want = map[string]any{"generationConfig.thinkingConfig.thinkingLevel": "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("resolve(gem/gemini-3-pro, low) = %#v, want %#v", got, want)
+	}
+}
+
+// TestNewEffortResolverReturnsNilOnAResolutionFailure pins the "silence, not
+// refusal" rule for a ref this resolver cannot place a provider for (a
+// disabled or undeclared provider, or a malformed ref): F9 is additive, so
+// a turn must never fail just because its effort override could not be
+// resolved.
+func TestNewEffortResolverReturnsNilOnAResolutionFailure(t *testing.T) {
+	cfg := &config.Config{
+		Schema: config.Schema,
+		Providers: []config.Provider{
+			{ID: "omniroute", Kind: "openai", Enabled: false, AuthOK: true},
+		},
+	}
+	resolve := NewEffortResolver(cfg)
+
+	if got := resolve("nope/does-not-exist", "high"); got != nil {
+		t.Errorf("resolve(undeclared provider) = %#v, want nil", got)
+	}
+	if got := resolve("omniroute/gpt-5", "high"); got != nil {
+		t.Errorf("resolve(disabled provider) = %#v, want nil", got)
+	}
+}

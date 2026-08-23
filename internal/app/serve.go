@@ -343,6 +343,12 @@ type clientMsg struct {
 	Text   string `json:"text,omitempty"`
 	Model  string `json:"model,omitempty"`
 	System string `json:"system,omitempty"`
+	// Effort is F9's headless-equivalent for the WebSocket door (docs/
+	// ROADMAP-ux-2026-08-20.md W5): the same per-turn effort-level
+	// override --effort gives `-p`, and /effort plus EffortCycle give the
+	// interactive TUI. Empty means "no override this turn" — the
+	// provider's own default, exactly as if the field were absent.
+	Effort string `json:"effort,omitempty"`
 
 	// "permission_response"
 	ID           string `json:"id,omitempty"`
@@ -433,6 +439,12 @@ type serveSession struct {
 	modelCost *catalog.Cost
 	modelCaps tools.Caps
 	system    string
+	// providerCfg is the resolved config.Provider backing sess.prov —
+	// kept alongside it (rather than re-resolved per turn) so runTurn can
+	// call EffortParamsFor(sess.providerCfg, msg.Effort) for F9's own
+	// per-turn --effort-equivalent (msg.Effort, clientMsg's own doc
+	// comment) without a second FindProvider lookup per turn.
+	providerCfg config.Provider
 }
 
 func newServeSession(cfg *config.Config, version string, allowToolCreate bool, idleTimeout time.Duration, conn *wsproto.Conn) *serveSession {
@@ -577,6 +589,11 @@ func (sess *serveSession) runTurn(msg clientMsg) {
 		// Same [ui].reasoning answer every other door gives, so a session over
 		// the WebSocket bridge is not the one place reasoning goes missing.
 		IncludeReasoning: ReasoningWanted(sess.cfg),
+		// F9's own per-turn effort override for this door (msg.Effort,
+		// clientMsg's own doc comment) — resolved against
+		// sess.providerCfg, cached by resolveModel above so this does not
+		// need its own FindProvider lookup per turn.
+		Params: EffortParamsFor(sess.providerCfg, msg.Effort),
 	}
 
 	started := time.Now()
@@ -664,6 +681,7 @@ func (sess *serveSession) resolveModel(modelText string) error {
 	sess.prov = prov
 	sess.modelCost = cost
 	sess.modelCaps = caps
+	sess.providerCfg = pc
 	sess.resolved = true
 	return nil
 }

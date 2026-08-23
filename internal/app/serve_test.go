@@ -271,6 +271,38 @@ func TestServeRoundTripsAPromptToDone(t *testing.T) {
 	}
 }
 
+// TestServeEffortReachesTheWire pins F9's own WebSocket-door equivalent
+// (docs/ROADMAP-ux-2026-08-20.md W5, clientMsg.Effort's own doc comment): a
+// "prompt" message's own Effort field must reach the request body through
+// EffortParamsFor(sess.providerCfg, msg.Effort), the same per-dialect
+// mapping every other door (headless --effort, the interactive TUI's
+// /effort and EffortCycle) already goes through.
+func TestServeEffortReachesTheWire(t *testing.T) {
+	var gotBody map[string]any
+	srv := fake.SSEServer(fake.SSEOptions{
+		Chunks: []string{fake.SSEDelta("ok"), fake.SSEDone()},
+		OnRequest: func(_ *http.Request, body []byte) {
+			_ = json.Unmarshal(body, &gotBody)
+		},
+	})
+	defer srv.Close()
+
+	cfg := serveCfg(t, srv.URL, false)
+	wsURL := startServe(t, ServeOptions{Config: cfg})
+	conn := dialServe(t, wsURL, "")
+
+	if hello := readEvent(t, conn); hello.Type != "hello" {
+		t.Fatalf("first event = %q, want hello", hello.Type)
+	}
+
+	sendClientMsg(t, conn, clientMsg{Type: "prompt", Text: "say hi", Effort: "high"})
+	_ = readEventUntil(t, conn, "done")
+
+	if gotBody["reasoning_effort"] != "high" {
+		t.Errorf("the sent body does not carry the prompt's Effort override: %+v", gotBody)
+	}
+}
+
 // TestServePermissionRoundTrip is this file's headline case, and the one
 // no other test in the package can exercise: a real permission_request
 // sent over the wire, answered by this test's own fake client (standing

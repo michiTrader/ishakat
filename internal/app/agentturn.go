@@ -291,7 +291,18 @@ func runAgentTurnHeadless(
 		// Messages is rebuilt every iteration inside RunAgentTurn from
 		// hist.Active() — see agentloop.go's own comment on iterReq — so
 		// what's set here never actually reaches the wire; Model and
-		// System are the only fields RunAgentTurn does not overwrite.
+		// System are the only other fields RunAgentTurn does not
+		// overwrite.
+		//
+		// Params is carried straight through from req (provider.Request),
+		// which Headless/serve.go already populated via EffortParamsFor
+		// (--effort, F9) before calling this function — copied here so a
+		// tools-enabled headless/serve turn's effort override reaches the
+		// wire exactly as a tools-disabled runTurn call already does
+		// through req itself. agentloop.go's own iterReq := req then
+		// copies this same map across every iteration of the loop, so one
+		// assignment here is enough for the whole turn.
+		Params: req.Params,
 	}
 
 	hist.Add(user)
