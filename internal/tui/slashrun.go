@@ -214,6 +214,19 @@ func (m Root) runModelCommand(args string) (tea.Model, tea.Cmd) {
 	if res.Outcome.Decided() {
 		return m.applyModelChosen(res.Model.Ref)
 	}
+	// design doc §2.3's second closing criterion / principle 4: a model
+	// curation removed from m.cat entirely — an automatic [catalog.curate]
+	// rule, or a curation.json hide from before this session started (see
+	// Options.Hidden's own doc comment for why catalog.Resolve above can
+	// never find these; m.cat simply does not contain them) — is still
+	// resolvable by its exact ref rather than opening an empty/wrong
+	// picker. applyModelChosen still runs the ordinary switch path;
+	// commitModelSwitch's own hiddenNotice check is what makes the
+	// resulting confirmation explicitly say the model is hidden, instead
+	// of silently succeeding as if nothing curated it out at all.
+	if h, ok := m.hiddenByRef(text); ok {
+		return m.applyModelChosen(h.Model.Ref)
+	}
 	return m.openPicker(res.Query)
 }
 

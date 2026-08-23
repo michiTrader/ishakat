@@ -744,6 +744,14 @@ type Root struct {
 	// comment already documents.
 	curationStore CurationStore
 
+	// hidden is Options.Hidden, carried unchanged: internal/app's own
+	// applyCuration audit trail, read by runModelCommand's hidden-model
+	// fallback (slashrun.go) to answer design doc principle 4 for
+	// automatic-rule hides that CurationStore itself never tracked. See
+	// Options.Hidden's own doc comment for why this is a plain
+	// []catalog.Hidden rather than a richer app-side type.
+	hidden []catalog.Hidden
+
 	// mission is §21.6's ModeMission overlay's own state (mission.go),
 	// live only while mode == ModeMission.
 	mission missionDialog
@@ -1170,6 +1178,24 @@ type Options struct {
 	// Root.curationStore's own comment for why nil is a supported value.
 	CurationStore CurationStore
 
+	// Hidden is internal/app's own applyCuration audit trail
+	// (app.CatalogSnapshot.Hidden's own doc comment): every model Layer
+	// 0/1/2 curation removed from Catalog above, and why. It exists so
+	// design doc §2.3's second closing criterion — "/model says [a hidden
+	// model] is hidden rather than failing" (principle 4) — can be
+	// answered for automatic-rule hides too, not just the user's own
+	// CurationStore.Reason (which only ever knows about curation.json's
+	// own entries, see that interface's own doc comment). A plain
+	// []catalog.Hidden, not a richer app-side type, because
+	// internal/catalog is one of the two pure packages every boundary may
+	// import (§6.1) — unlike CatalogSnapshot itself, which stays on
+	// internal/app's side of the line. nil is a supported value (every
+	// test in this package, and any session where curation hid nothing):
+	// runModelCommand's hidden-fallback lookup simply never finds
+	// anything, the same "session behaves correctly, just answers less"
+	// degradation CurationStore's own nil case already establishes.
+	Hidden []catalog.Hidden
+
 	// MissionGuard is §21.6's own enforcement seam (mission.go's own doc
 	// comment) — see Root.missionGuard's own comment for why nil is a
 	// supported value. internal/app is expected to pass the same
@@ -1278,6 +1304,7 @@ func NewRoot(o Options) Root {
 		themeStore:        o.ThemeStore,
 		trustStore:        o.TrustStore,
 		curationStore:     o.CurationStore,
+		hidden:            o.Hidden,
 		gitInGit:          o.GitInGit,
 		gitClean:          o.GitClean,
 		gitBranch:         o.GitBranch,
@@ -1879,16 +1906,40 @@ func (m Root) applyModelChosen(ref string) (tea.Model, tea.Cmd) {
 // replaces the confirmation line with a warning that says plainly the new
 // model has no working provider, so the very next turn's failure does not
 // arrive as a surprise "no hay proveedor configurado" with no context.
+//
+// The trailing hiddenSuffixFor(ref) is design doc principle 4's "resolving
+// one explicitly says so": committing a switch to a model m.hidden still
+// remembers (an automatic [catalog.curate] rule, or a curation.json entry
+// from before this session — see Options.Hidden's own doc comment) never
+// looks like an ordinary switch, whether it was reached through
+// runModelCommand's exact-ref fallback, a stale ctrl+p selection, or any
+// other caller of this shared tail. An empty suffix (the overwhelmingly
+// common, not-hidden case) leaves both notice lines byte-identical to
+// before this field existed.
 func (m Root) commitModelSwitch(ref string) (tea.Model, tea.Cmd) {
 	next, err := switchEngine(m, ref)
 	m = next
 	m.model = ref
 	m.footer.Model = ref
+	suffix := m.hiddenSuffixFor(ref)
 	if err != nil {
 		return m.slashNotice(m.lay.glyphs().warnMark + " cambiado a " + ref +
-			", pero no se pudo preparar ese proveedor: " + err.Error())
+			", pero no se pudo preparar ese proveedor: " + err.Error() + suffix)
 	}
-	return m.slashNotice(confirmLine(m.lay.glyphs(), ref))
+	return m.slashNotice(confirmLine(m.lay.glyphs(), ref) + suffix)
+}
+
+// hiddenSuffixFor is commitModelSwitch's own line-continuation: "" when ref
+// is not in m.hidden, otherwise a second line naming the rule that hid it —
+// hiddenRuleLabel's own wording (curation.go), so a chat notice and
+// `ishakat models --why`'s "hidden by" column never disagree about what a
+// given catalog.Reason is called.
+func (m Root) hiddenSuffixFor(ref string) string {
+	h, ok := m.hiddenByRef(ref)
+	if !ok {
+		return ""
+	}
+	return "\n" + m.lay.glyphs().warnMark + " este modelo esta escondido (" + hiddenRuleLabel(h.Reason) + ") — sigue siendo utilizable por ref exacto"
 }
 
 // applySessionChosen is sessionChosenMsg's only handler (§13): the §13

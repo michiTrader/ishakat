@@ -1,10 +1,13 @@
 package app
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/MichiTrader/ishakat/internal/curation"
+	"github.com/MichiTrader/ishakat/internal/xdg"
 )
 
 func TestFileCurationStoreHidePersistsAndReloads(t *testing.T) {
@@ -154,5 +157,90 @@ func TestFileCurationStoreResetDropsHidesKeepsKeptAndPersists(t *testing.T) {
 	}
 	if !onDisk.IsKept("omni/kept-one") {
 		t.Error("Reset must not touch Kept")
+	}
+}
+
+// TestFileCurationStoreNeverTouchesConfigTOML is design doc §2.3's first
+// closing criterion, asserted byte-for-byte: a full Layer 2 cycle — Hide,
+// Keep (which also un-hides), Unhide, and Reset, on both fileCurationStore
+// directly and through curationRules' own config.toml-adjacent read path —
+// must leave config.toml's bytes, comments included, completely
+// unchanged. This is principle 7's own "the config file the user wrote
+// stays byte-identical" (§2), and the mechanism that makes it true is
+// structural: fileCurationStore only ever calls curation.Save against its
+// own path (xdg.CurationFile(), a different file in $XDG_STATE_HOME, never
+// $XDG_CONFIG_HOME/ishakat/config.toml) — this test pins that fact against
+// a real hand-written fixture with comments, rather than only trusting the
+// source read.
+func TestFileCurationStoreNeverTouchesConfigTOML(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	// A realistic hand-written config.toml, comments and all — exactly the
+	// kind of file principle 7 says must survive untouched. Curation has
+	// no reason to ever open this path, but the fixture exists so a
+	// regression that DID open it (a future refactor that threads cfg
+	// into the wrong writer, say) would be caught here rather than only
+	// showing up as a bug report about vanished comments.
+	fixture := "# personal config, hand-tuned -- do not clobber my comments\n" +
+		"[app]\n" +
+		"default_model = \"omni/son45\" # my daily driver\n" +
+		"\n" +
+		"[catalog.curate]\n" +
+		"chat_only = true\n"
+	if err := os.MkdirAll(filepath.Dir(xdg.ConfigFile()), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(xdg.ConfigFile(), []byte(fixture), 0o644); err != nil {
+		t.Fatalf("WriteFile(config.toml): %v", err)
+	}
+
+	before, err := os.ReadFile(xdg.ConfigFile())
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) before: %v", err)
+	}
+
+	// A full Layer 2 cycle through the real, on-disk-backed store --
+	// exactly what ctrl+x/ctrl+h, /model hide|keep, and /models reset all
+	// eventually call.
+	store := newFileCurationStore(xdg.CurationFile())
+	if err := store.Hide("gemini-direct/gemini-embedding-2"); err != nil {
+		t.Fatalf("Hide: %v", err)
+	}
+	if err := store.Keep("other/kept-model"); err != nil {
+		t.Fatalf("Keep: %v", err)
+	}
+	if err := store.Unhide("gemini-direct/gemini-embedding-2"); err != nil {
+		t.Fatalf("Unhide: %v", err)
+	}
+	if err := store.Hide("omni/hidden-again"); err != nil {
+		t.Fatalf("Hide (again): %v", err)
+	}
+	if err := store.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	// curationRules is the OTHER read path near config.toml's own -- it
+	// loads curation.json (via xdg.CurationFile()) inside the same
+	// function that also reads cfg.Catalog.Curate off an already-loaded
+	// *config.Config, so this exercises that neighbor too, not only the
+	// picker/slash-command write path above.
+	_ = curationRules(nil)
+
+	after, err := os.ReadFile(xdg.ConfigFile())
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("config.toml changed by Layer 2 curation:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	// curation.json itself DID change (sanity check that the cycle above
+	// actually exercised the real write path, rather than this test
+	// passing vacuously because nothing was written anywhere).
+	if _, err := os.Stat(xdg.CurationFile()); err != nil {
+		t.Fatalf("expected curation.json to exist after a real Hide/Keep/Reset cycle: %v", err)
 	}
 }
