@@ -367,7 +367,14 @@ func Run(version string, resume bool) int {
 		// store failed to open — the same supported-nil rule Recorder
 		// already documents.
 		TitleStore: titleStore,
-		NoTTY:      noTTY,
+		// SettingsStore persists /settings' own writes (F4,
+		// internal/tui/settingscmd.go's own SettingsStore doc comment on
+		// the §6.1 seam this draws): a fileSettingsStore over
+		// config.SetSetting (settingsstore.go), the same
+		// "only internal/app touches internal/config's write path" rule
+		// fileThemeStore already follows above.
+		SettingsStore: &fileSettingsStore{},
+		NoTTY:         noTTY,
 		// battery_saver = "auto" (the default) means "6fps on Termux", not "6fps
 		// literally everywhere": without this, every desktop session with no
 		// override would have read the same false that a phone should, and the
