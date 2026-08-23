@@ -182,6 +182,17 @@ const (
 	// same live-apply-then-persist shape KindTheme already follows for
 	// its own single-value write.
 	KindName
+	// KindReload implements /reload (F17, docs/ROADMAP-ux-2026-08-20.md
+	// W5: "reload keybindings, skills, prompts, themes, context files").
+	// No argument — there is nothing to parse into, since this re-reads
+	// everything it knows how to reload in a single pass: the keymap,
+	// the rung-0 skills listing, and the effective system prompt
+	// (which itself folds in AGENTS.md, the roadmap's own "context
+	// files"). Theme and catalog/config already had a live-reload path
+	// before this Kind existed (/theme, and F2's own hot-apply seam),
+	// so /reload's runner (reload.go) calls into ReloadFactory only for
+	// the three pieces that did not.
+	KindReload
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -236,6 +247,7 @@ var Commands = []Command{
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
 	{Name: "settings", ArgHint: "[clave valor]", Describe: "ver o cambiar ajustes", Kind: KindSettings},
+	{Name: "reload", Describe: "recargar atajos, skills y contexto", Kind: KindReload},
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
 	{Name: "permissions", Describe: "autonomia y reglas", Kind: KindPermissions},

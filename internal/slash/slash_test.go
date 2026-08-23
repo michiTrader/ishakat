@@ -40,12 +40,13 @@ func TestDefaultRegistryCoversTheFullPlanTable(t *testing.T) {
 	// §13 names sixteen commands by name, plus /permissions (Step 32),
 	// /trust (Step 30 part 2), /hotkeys (roadmap-2026-08-20 W3, F3's
 	// dedicated shortcuts overlay), /name (roadmap-2026-08-20 W5, F12's
-	// manual session rename), and /settings (roadmap-2026-08-20 W5, F4's
-	// first slice); every one of them has to resolve, or /help and the
-	// dropdown would silently disagree with the PLAN.
+	// manual session rename), /settings (roadmap-2026-08-20 W5, F4's
+	// first slice), and /reload (roadmap-2026-08-20 W5, F17); every one
+	// of them has to resolve, or /help and the dropdown would silently
+	// disagree with the PLAN.
 	want := []string{
 		"help", "hotkeys", "model", "models", "skills", "theme", "compact", "new", "resume",
-		"name", "clear", "copy", "retry", "stats", "config", "settings", "debug", "tools",
+		"name", "clear", "copy", "retry", "stats", "config", "settings", "reload", "debug", "tools",
 		"permissions", "trust", "login", "exit",
 	}
 	r := slash.Default()
