@@ -726,6 +726,19 @@ six-liner, plus DECISION-3.
 
 **Closes:** F5, F10, F11, F2, F9's model-side needs.
 
+> **Status: CLOSED.** F2, F10, F11 closed in earlier slices; F5 (Layers 0/1/2)
+> closed in `docs/PLAN.md` 2026-08-23 "W4 (part 12)" — all 6 of
+> `docs/DESIGN-model-curation.md` §2.3's closing criteria satisfied. F9's
+> model-side needs closed in `docs/PLAN.md` 2026-08-23 "W4 (part 13)":
+> models.dev's per-model `reasoning_options` field is now parsed into
+> `catalog.Model.EffortLevels []string`, the discrete effort-level
+> vocabulary (which varies per model in both count and values, e.g.
+> `["minimal","low","medium","high"]` for gpt-5 vs `["low","high"]` for
+> gemini-3-pro-image) the future W5 `/effort` picker needs. The picker UI
+> itself, its cycle chord, and its headless flag are untouched — those
+> remain W5's own "F9" bullet below, deliberately deferred. See parts 12/13
+> for the full detail.
+
 ### W5 · Configuration and command surface
 
 - **F4** `/settings`: searchable, described, live-applying editor over the

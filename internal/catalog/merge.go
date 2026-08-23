@@ -353,6 +353,14 @@ func applyModelsDev(m *Model, ix *Index) {
 		m.Temperature = md.Temperature
 	}
 
+	// EffortLevels is F9's model-side data (see Model.EffortLevels and
+	// MDModel.EffortLevels): same copy-only-if-unset rule, so a value
+	// discovery already set — none currently do, but the rule is the
+	// same for every field in this function — always wins.
+	if len(m.EffortLevels) == 0 && len(md.EffortLevels) > 0 {
+		m.EffortLevels = md.EffortLevels
+	}
+
 	// models.dev's own lifecycle field. This is what makes hide_deprecated
 	// (merge.go's HideDeprecated below) actually hide something: providers
 	// almost never send "deprecated": true on their own /models response

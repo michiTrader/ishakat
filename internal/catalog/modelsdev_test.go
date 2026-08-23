@@ -190,6 +190,70 @@ func TestParseAPIModalitiesIsOutputNotInput(t *testing.T) {
 	}
 }
 
+func TestParseAPIEffortLevelsOnlyComesFromEffortType(t *testing.T) {
+	raw := []byte(`{
+		"openai": {"id":"openai","name":"OpenAI","models":{
+			"gpt-5": {
+				"id": "gpt-5",
+				"reasoning": true,
+				"reasoning_options": [
+					{"type": "effort", "values": ["minimal","low","medium","high"]}
+				]
+			},
+			"claude-extended": {
+				"id": "claude-extended",
+				"reasoning": true,
+				"reasoning_options": [
+					{"type": "toggle", "values": ["on","off"]}
+				]
+			},
+			"budget-model": {
+				"id": "budget-model",
+				"reasoning": true,
+				"reasoning_options": [
+					{"type": "budget_tokens", "values": ["1024","4096"]}
+				]
+			},
+			"plain-model": {
+				"id": "plain-model"
+			}
+		}}
+	}`)
+	ix := NewIndex()
+	if err := ix.ParseAPI(raw); err != nil {
+		t.Fatalf("ParseAPI: %v", err)
+	}
+
+	gpt5, _ := ix.Lookup("openai", "gpt-5")
+	want := []string{"minimal", "low", "medium", "high"}
+	if len(gpt5.EffortLevels) != len(want) {
+		t.Fatalf("gpt-5.EffortLevels = %v, want %v", gpt5.EffortLevels, want)
+	}
+	for i, v := range want {
+		if gpt5.EffortLevels[i] != v {
+			t.Errorf("gpt-5.EffortLevels[%d] = %q, want %q", i, gpt5.EffortLevels[i], v)
+		}
+	}
+
+	toggle, _ := ix.Lookup("openai", "claude-extended")
+	if len(toggle.EffortLevels) != 0 {
+		t.Errorf("claude-extended (toggle-only) EffortLevels = %v, want empty — toggle is not an effort level", toggle.EffortLevels)
+	}
+	if !toggle.Reasoning {
+		t.Errorf("claude-extended.Reasoning = false, want true — EffortLevels being empty must not be confused with Reasoning being false")
+	}
+
+	budget, _ := ix.Lookup("openai", "budget-model")
+	if len(budget.EffortLevels) != 0 {
+		t.Errorf("budget-model (budget_tokens-only) EffortLevels = %v, want empty — budget_tokens is not an effort level", budget.EffortLevels)
+	}
+
+	plain, _ := ix.Lookup("openai", "plain-model")
+	if len(plain.EffortLevels) != 0 {
+		t.Errorf("plain-model (no reasoning_options at all) EffortLevels = %v, want empty", plain.EffortLevels)
+	}
+}
+
 func TestParseAPISkipsBrokenEntriesButKeepsGoodOnes(t *testing.T) {
 	raw := []byte(`{
 		"anthropic": {"id":"anthropic","name":"Anthropic","models":{
