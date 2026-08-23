@@ -225,6 +225,15 @@ type Root struct {
 	// restart.
 	settingsStore SettingsStore
 
+	// reloadFor is /reload's own hot-apply seam (F17, reload.go's own
+	// ReloadFactory doc comment) — the same §6.1 boundary
+	// catalogRefreshFor already crosses, for the pieces F2 does not
+	// already cover (keymap, skills, system prompt). nil is the
+	// supported "not wired" value: every test in this package, and any
+	// caller with nothing wired, gets runReloadCommand's own notice
+	// instead of a silent no-op.
+	reloadFor ReloadFactory
+
 	input textarea.Model
 	live  liveTurn
 
@@ -1003,6 +1012,11 @@ type Options struct {
 	// than reuse Cfg above, and why nil is a supported value.
 	CatalogRefreshFor CatalogRefreshFactory
 
+	// ReloadFor is /reload's own hot-apply seam (F17, reload.go's own
+	// ReloadFactory doc comment) — see Root.reloadFor's own comment for
+	// the §6.1 boundary this crosses and why nil is a supported value.
+	ReloadFor ReloadFactory
+
 	// Model is the model reference to show and to send, in §4.2's Ref form
 	// ("provider/model" or a bare alias as the user typed it), never the
 	// wire ID directly: Root resolves the Ref to its WireID (wireModel, in
@@ -1335,6 +1349,7 @@ func NewRoot(o Options) Root {
 		themeStore:        o.ThemeStore,
 		titleStore:        o.TitleStore,
 		settingsStore:     o.SettingsStore,
+		reloadFor:         o.ReloadFor,
 		trustStore:        o.TrustStore,
 		curationStore:     o.CurationStore,
 		hidden:            o.Hidden,
@@ -1588,6 +1603,9 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CatalogRefreshedMsg:
 		return m.applyCatalogRefreshed(msg)
+
+	case ReloadedMsg:
+		return m.applyReloaded(msg)
 
 	case compactDoneMsg:
 		// A stale result from a compaction cancelCompact already closed —
