@@ -147,6 +147,8 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		return m.runThemeCommand(args)
 	case slash.KindConfig:
 		return m.runConfigCommand()
+	case slash.KindSettings:
+		return m.runSettingsCommand(args)
 	case slash.KindDebug:
 		return m.runDebugCommand()
 	case slash.KindTools:

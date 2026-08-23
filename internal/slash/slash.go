@@ -112,6 +112,21 @@ const (
 	// (§6.1) — `ishakat config init`/a text editor remain how it is
 	// actually changed.
 	KindConfig
+	// KindSettings implements /settings (F4, docs/ROADMAP-ux-2026-08-20.md
+	// W5's own largest item: "per-key metadata... instead of a
+	// hand-maintained UI"). No argument lists the schema keys this first
+	// slice covers (internal/config.Settings), each with its current
+	// value and a short help string — the same read-only-by-default shape
+	// KindConfig already uses. "/settings <clave> <valor>" is the write
+	// half: applies immediately to the running session (no engine
+	// rebuild, no restart) and persists best-effort through
+	// SettingsStore, the same live-apply-then-persist shape KindTheme and
+	// KindPermissions's "autonomy <level>" already follow. Deliberately
+	// narrow this slice: only the four [ui] keys with an already-wired,
+	// restart-free apply path are covered; the rest of schema.go and the
+	// roadmap's own interactive searchable overlay are later slices, not
+	// this one.
+	KindSettings
 	// KindDebug implements /debug (§13, Step 18's other left-over half,
 	// closed alongside /config's own §17 2026-08-13 entry): a local-only
 	// diagnostic snapshot — version, platform, cgo/termux, config paths,
@@ -220,6 +235,7 @@ var Commands = []Command{
 	{Name: "retry", Describe: "reintentar ultimo", Kind: KindRetry},
 	{Name: "stats", Describe: "tokens y costo", Kind: KindStats},
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
+	{Name: "settings", ArgHint: "[clave valor]", Describe: "ver o cambiar ajustes", Kind: KindSettings},
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
 	{Name: "permissions", Describe: "autonomia y reglas", Kind: KindPermissions},

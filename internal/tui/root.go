@@ -215,6 +215,16 @@ type Root struct {
 	// the running session, it just does not survive a restart.
 	titleStore SessionTitleStore
 
+	// settingsStore is /settings' own persistence seam (F4,
+	// settingscmd.go's own SettingsStore doc comment) — the same §6.1
+	// mirror themeStore/titleStore already draw, one level more general
+	// since a single Set(key, value) covers every key config.Settings
+	// knows about instead of one method per feature. nil is the
+	// supported "do not persist" value: a /settings write still applies
+	// in memory for the running session, it just does not survive a
+	// restart.
+	settingsStore SettingsStore
+
 	input textarea.Model
 	live  liveTurn
 
@@ -869,6 +879,13 @@ type Options struct {
 	// session, it just does not survive a restart.
 	TitleStore SessionTitleStore
 
+	// SettingsStore persists /settings' own writes (F4,
+	// settingscmd.go's own SettingsStore doc comment on the §6.1 seam
+	// this draws). nil is a supported value: a settings change still
+	// applies for the running session, it just does not survive a
+	// restart.
+	SettingsStore SettingsStore
+
 	NoTTY bool
 
 	// TUIMode is DECISION-1(d)'s already-resolved render-mode verdict
@@ -1317,6 +1334,7 @@ func NewRoot(o Options) Root {
 		themesDir:         o.ThemesDir,
 		themeStore:        o.ThemeStore,
 		titleStore:        o.TitleStore,
+		settingsStore:     o.SettingsStore,
 		trustStore:        o.TrustStore,
 		curationStore:     o.CurationStore,
 		hidden:            o.Hidden,
