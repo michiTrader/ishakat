@@ -380,7 +380,9 @@ func cmdModels(args []string) int {
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "one JSON object per line, for jq")
 	refresh := fs.Bool("refresh", false, "go to the network before printing")
-	all := fs.Bool("all", false, "also show deprecated models hidden by catalog.hide_deprecated")
+	all := fs.Bool("all", false, "bypass curation entirely and show every discovered model")
+	hidden := fs.Bool("hidden", false, "list only what curation hid, and why")
+	why := fs.String("why", "", "explain a single model's hidden/visible status in full")
 	filter := fs.String("filter", "", "keep only refs/names containing this substring")
 	cfgPath := fs.String("config", "", "alternate config.toml path")
 	if err := fs.Parse(args); err != nil {
@@ -395,6 +397,8 @@ func cmdModels(args []string) int {
 		JSON:       *jsonOut,
 		Refresh:    *refresh,
 		All:        *all,
+		Hidden:     *hidden,
+		Why:        *why,
 		Filter:     *filter,
 		ConfigPath: *cfgPath,
 	})

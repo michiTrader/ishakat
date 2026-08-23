@@ -40,6 +40,20 @@ type CatalogSnapshot struct {
 	// Expired says whether the TTL elapsed, which is what decides if a
 	// background refresh is worth launching.
 	Expired bool
+
+	// Hidden is applyCuration's own audit trail (design doc §2.1's CLI
+	// table: `ishakat models --hidden`/`--why`): every model catalog.Curate
+	// removed from Catalog on this snapshot, and why. It is the reporting
+	// twin of Catalog itself — Catalog is "what to show", Hidden is "what
+	// was NOT shown and the reason", and neither can be derived from the
+	// other once applyCuration has already run (Catalog.Models no longer
+	// contains these refs at all — principle 1's "hiding is a view, never
+	// a deletion" is about the CATALOG the rest of the program reads, not
+	// about this audit trail, which exists precisely so nothing is lost).
+	// Nil whenever applyCuration hid nothing, or was skipped entirely (the
+	// "would hide every model" guard) — never a reason on its own to
+	// treat the snapshot as broken.
+	Hidden []catalog.Hidden
 }
 
 // CatalogCachePath resolves [catalog].cache_file, falling back to the XDG
@@ -190,20 +204,27 @@ func curationRules(cfg *config.Config) catalog.Rules {
 // found nothing sane to show" and skipped entirely, with a note explaining
 // why — an empty picker is a worse failure than a noisy one, and nothing in
 // [catalog.curate] should be able to brick the model list.
-func applyCuration(cat catalog.Catalog, r catalog.Rules) catalog.Catalog {
+//
+// The second return value is CatalogSnapshot.Hidden's own source: every
+// model actually removed, and why (nil whenever nothing was hidden, or the
+// "would hide every model" guard fired — in both cases nothing was
+// removed, so there is nothing to report). This is what makes `ishakat
+// models --hidden`/`--why` possible without CatalogSnapshot.Catalog itself
+// having to carry the models it no longer contains.
+func applyCuration(cat catalog.Catalog, r catalog.Rules) (catalog.Catalog, []catalog.Hidden) {
 	if cat.Len() == 0 {
-		return cat
+		return cat, nil
 	}
 	kept, hidden := catalog.Curate(cat, r)
 	if len(hidden) == 0 {
-		return cat
+		return cat, nil
 	}
 	if kept.Len() == 0 {
 		cat.Note("catalog.curate would hide every model; showing the uncurated list instead")
-		return cat
+		return cat, nil
 	}
 	kept.Note(strconv.Itoa(len(hidden)) + " model(s) hidden by catalog.curate")
-	return kept
+	return kept, hidden
 }
 
 // LoadCatalog builds the snapshot from disk. It NEVER touches the network
@@ -266,13 +287,54 @@ func LoadCatalog(cfg *config.Config) CatalogSnapshot {
 	// snapshot that is actually going to be shown — after the seed
 	// fallback, never instead of it, so a first run with nothing cached
 	// still gets a usable list before anything is filtered from it.
-	snap.Catalog = applyCuration(snap.Catalog, curationRules(cfg))
+	snap.Catalog, snap.Hidden = applyCuration(snap.Catalog, curationRules(cfg))
 	if snap.Catalog.Stale && !snap.Catalog.Seeded {
 		if age := cache.Age(now); age < time.Duration(1<<62-1) {
 			snap.Catalog.Note("catalog from " + humanAge(age) + " ago")
 		}
 	}
 	return snap
+}
+
+// UncuratedCatalog rebuilds the catalog from snap's own Cache/Index —
+// exactly what LoadCatalog/RefreshCatalog already fetched, no new network
+// call — but skips both Layer 0 (BuildInput.HideDeprecated) and Layer 1/2
+// curation (applyCuration) entirely: design doc §2.1's `ishakat models
+// --all`, "existing flag, now bypasses curation". Before this, --all's own
+// doc comment promised "disables the display filters" but ModelsOptions.All
+// was never actually read past Models' own call site (writeModelsText took
+// an `all bool` parameter and never consulted it) — this is the fix, and it
+// now bypasses every layer, not only [catalog].hide_deprecated.
+//
+// It still runs the seed fallback: an empty cache/index with declared
+// config models should show those, --all or not, for the same reason
+// LoadCatalog's own seed fallback exists (a first run must never look
+// broken). Deliberately does NOT re-derive the staleness note or re-run
+// PruneStats — those are snapshot bookkeeping, not curation, and snap
+// already carries the correct Stale/Seeded/FetchedAt values from whichever
+// of LoadCatalog/RefreshCatalog built it.
+func UncuratedCatalog(cfg *config.Config, snap CatalogSnapshot) catalog.Catalog {
+	cache := snap.Cache
+	if cache == nil {
+		cache = catalog.LoadCache(CatalogCachePath(cfg))
+	}
+	index := snap.Index
+	if index == nil {
+		index = catalog.NewIndex()
+	}
+	inputs := providerInputs(cfg, cache)
+	built := catalog.Build(catalog.BuildInput{
+		Providers: inputs,
+		ModelsDev: index,
+		Stats:     cache.Stats,
+		Stale:     snap.Catalog.Stale,
+	})
+	if built.Len() == 0 {
+		if seeded := catalog.SeedCatalog(inputs); seeded.Len() > 0 {
+			built = seeded
+		}
+	}
+	return built
 }
 
 // RefreshCatalog goes to the network: discovery against every enabled
@@ -396,7 +458,7 @@ func RefreshCatalog(ctx context.Context, cfg *config.Config, version string, pre
 	}
 	cache.PruneStats(alive, 500)
 
-	cat := applyCuration(built, curationRules(cfg))
+	cat, hiddenList := applyCuration(built, curationRules(cfg))
 
 	if err := cache.Save(cachePath); err != nil {
 		cat.Note("could not write the cache: " + err.Error())
@@ -412,6 +474,7 @@ func RefreshCatalog(ctx context.Context, cfg *config.Config, version string, pre
 		CachePath:  cachePath,
 		DigestPath: digestPath,
 		Expired:    false,
+		Hidden:     hiddenList,
 	}, firstErr
 }
 
