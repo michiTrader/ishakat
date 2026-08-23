@@ -208,6 +208,13 @@ type Root struct {
 	themesDir  string
 	themeStore ThemeStore
 
+	// titleStore is /name's own persistence seam (F12, session.go's own
+	// SessionTitleStore doc comment) — the exact mirror of themeStore
+	// above for a session rename instead of a theme switch. nil is the
+	// supported "do not persist" value: /name still renames m.conv for
+	// the running session, it just does not survive a restart.
+	titleStore SessionTitleStore
+
 	input textarea.Model
 	live  liveTurn
 
@@ -855,6 +862,13 @@ type Options struct {
 	// does not survive a restart.
 	ThemeStore ThemeStore
 
+	// TitleStore persists /name's own rename (F12, session.go's own
+	// SessionTitleStore doc comment on the §6.1 seam this draws, the
+	// same one ThemeStore already draws for its own write). nil is a
+	// supported value: the rename still applies for the running
+	// session, it just does not survive a restart.
+	TitleStore SessionTitleStore
+
 	NoTTY bool
 
 	// TUIMode is DECISION-1(d)'s already-resolved render-mode verdict
@@ -1302,6 +1316,7 @@ func NewRoot(o Options) Root {
 		styles:            styles,
 		themesDir:         o.ThemesDir,
 		themeStore:        o.ThemeStore,
+		titleStore:        o.TitleStore,
 		trustStore:        o.TrustStore,
 		curationStore:     o.CurationStore,
 		hidden:            o.Hidden,

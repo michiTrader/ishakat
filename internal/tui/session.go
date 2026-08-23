@@ -127,6 +127,25 @@ type SessionSummary struct {
 	UpdatedAt time.Time
 }
 
+// SessionTitleStore is /name's own persistence seam (F12,
+// docs/ROADMAP-ux-2026-08-20.md W5): the same §6.1 seam ThemeStore
+// (theme.go) already draws for /theme's own write, applied here to
+// convo.Store.SetTitle instead of config.SetTheme — this package still
+// never imports internal/convo's write path directly, only the narrow
+// capability a rename actually needs.
+//
+// nil is a supported value, the identical "nothing wired, nothing
+// happens beyond the in-memory rename" default ThemeStore/EvolveStore
+// already establish: runNameCommand still updates m.conv.Title for the
+// running session, it just does not survive a restart.
+type SessionTitleStore interface {
+	// SetTitle renames the current session on disk. An error means the
+	// rename was not persisted; the caller still applies it in memory,
+	// the same best-effort shape switchTheme's own ThemeStore.Save call
+	// already follows.
+	SetTitle(title string) error
+}
+
 // SessionLister is where the §13 /resume menu gets its rows and its full
 // conversations from. internal/app implements it over *convo.Store; tests
 // implement it in a few lines, the same shape fakeRecorder already follows

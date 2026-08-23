@@ -445,6 +445,91 @@ func TestResumeSessionHonoursResumeLastWithoutTheFlag(t *testing.T) {
 	}
 }
 
+// TestSessionRecorderSetTitleRenamesAnExistingFile is SetTitle's ordinary
+// case (F12's /name, session.go's own doc comment): a session already
+// created (conv != nil, after at least one Append) is renamed on disk
+// immediately, via the store's own rewrite, and the in-memory conv.Title
+// used by AppendMission/Append's own titleFrom fallback is kept in sync.
+func TestSessionRecorderSetTitleRenamesAnExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = dir
+
+	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	if err := rec.Append(convo.User("primer mensaje")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	sr := rec.(*sessionRecorder)
+	if err := sr.SetTitle("mi sesion favorita"); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+	if sr.conv.Title != "mi sesion favorita" {
+		t.Errorf("in-memory conv.Title = %q, want %q", sr.conv.Title, "mi sesion favorita")
+	}
+
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if len(files) != 1 {
+		t.Fatalf("session files after SetTitle = %d, want still 1 (rewrite, not a new file)", len(files))
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"title":"mi sesion favorita"`) {
+		t.Errorf("on-disk header should carry the new title:\n%s", raw)
+	}
+}
+
+// TestSessionRecorderSetTitleBeforeFirstAppendIsRememberedAsPending is
+// SetTitle's other case: /name typed before the very first message has no
+// file to rewrite yet (conv is still nil, per this struct's own doc
+// comment on lazy creation), so the title must be remembered and applied
+// by lazy creation itself the moment there finally is a file — not
+// silently dropped, and not fabricating an empty conversation just to
+// hold a name.
+func TestSessionRecorderSetTitleBeforeFirstAppendIsRememberedAsPending(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Session.Save = true
+	cfg.Session.Dir = dir
+
+	rec, warn := NewSessionRecorder(cfg, "openai/gpt-4o", nil)
+	if warn != "" {
+		t.Fatalf("unexpected warning: %q", warn)
+	}
+	sr := rec.(*sessionRecorder)
+
+	if err := sr.SetTitle("nombre elegido antes de escribir"); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")); len(files) != 0 {
+		t.Fatalf("SetTitle before any Append should not create a file yet: %v", files)
+	}
+
+	// titleFrom's own guess ("primera pregunta") must lose to the explicit
+	// /name pending title once the session is finally created.
+	if err := rec.Append(convo.User("primera pregunta")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if len(files) != 1 {
+		t.Fatalf("session files after the first Append = %d, want 1", len(files))
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"title":"nombre elegido antes de escribir"`) {
+		t.Errorf("on-disk header should carry the pending /name title, not titleFrom's guess:\n%s", raw)
+	}
+}
+
 // TestSessionRecorderAppendsToAResumedConversation is sessionRecorder's half
 // of --resume: when conv is already set (the caller passed a resumed
 // conversation), Append must write to that same file from its very first

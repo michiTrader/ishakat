@@ -317,9 +317,17 @@ func Run(version string, resume bool) int {
 	warnp.Warn(os.Stderr, sessionWarn)
 	var recorder tui.Recorder
 	var missionRecorder tui.MissionRecorder
+	var titleStore tui.SessionTitleStore
 	if sessRec != nil {
 		recorder = sessRec
 		missionRecorder = sessRec
+		// F12's /name (session.go's own SessionTitleStore doc comment):
+		// the same *sessionRecorder already boxed into Recorder/
+		// MissionRecorder above also implements SetTitle over the
+		// identical *convo.Store/*convo.Conversation pair, so a rename
+		// always lands in the exact file this run's own messages are
+		// going to.
+		titleStore = sessRec
 	}
 
 	// §13's third item: /resume's own read side. resumeStore is reused when
@@ -353,6 +361,12 @@ func Run(version string, resume bool) int {
 		// internal/app touches internal/config's write path" rule.
 		ThemesDir:  xdg.ThemesDir(),
 		ThemeStore: &fileThemeStore{},
+		// TitleStore persists /name's own rename (F12,
+		// internal/tui/session.go's own SessionTitleStore doc comment):
+		// titleStore above, or nil when [session] save = false / the
+		// store failed to open — the same supported-nil rule Recorder
+		// already documents.
+		TitleStore: titleStore,
 		NoTTY:      noTTY,
 		// battery_saver = "auto" (the default) means "6fps on Termux", not "6fps
 		// literally everywhere": without this, every desktop session with no

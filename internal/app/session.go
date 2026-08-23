@@ -39,12 +39,32 @@ type sessionRecorder struct {
 	conv     *convo.Conversation
 	model    string
 	keepLast int
+
+	// pendingTitle is a title set via /name (SetTitle, below) before the
+	// session file exists yet — the TUI's own NewRoot-time gap conv's own
+	// doc comment describes, where there is nothing on disk to rewrite
+	// because nothing has been typed yet either. Lazy creation (the two
+	// "if r.conv == nil" branches below) consults this instead of
+	// titleFrom once it is set, so an explicit /name before the first
+	// message wins over the inferred first-line title exactly the way a
+	// user's own /model pick already outranks autoselection.
+	pendingTitle string
+}
+
+// firstConvTitle is the title lazy creation gives a brand-new session:
+// pendingTitle (an explicit /name typed before anything else was sent)
+// if set, otherwise the ordinary titleFrom guess.
+func (r *sessionRecorder) firstConvTitle(fallback string) string {
+	if r.pendingTitle != "" {
+		return r.pendingTitle
+	}
+	return titleFrom(fallback)
 }
 
 // Append implements tui.Recorder.
 func (r *sessionRecorder) Append(m convo.Message) error {
 	if r.conv == nil {
-		conv, err := r.store.New(titleFrom(m.Text()), r.model)
+		conv, err := r.store.New(r.firstConvTitle(m.Text()), r.model)
 		if err != nil {
 			return err
 		}
@@ -78,7 +98,7 @@ func (r *sessionRecorder) Append(m convo.Message) error {
 // depending on which of the two happens to run first in a given turn.
 func (r *sessionRecorder) AppendMission(ev convo.MissionEvent) error {
 	if r.conv == nil {
-		conv, err := r.store.New(titleFrom(ev.Goal), r.model)
+		conv, err := r.store.New(r.firstConvTitle(ev.Goal), r.model)
 		if err != nil {
 			return err
 		}
@@ -90,6 +110,33 @@ func (r *sessionRecorder) AppendMission(ev convo.MissionEvent) error {
 	if r.keepLast > 0 {
 		_, _ = r.store.Rotate(r.keepLast)
 	}
+	return nil
+}
+
+// SetTitle implements tui.SessionTitleStore (F12's /name, session.go's own
+// doc comment on the seam): the one write convo.Store.SetTitle has always
+// offered but that, before this, nothing in the running program ever
+// called — grep confirms it (§17's F12 investigation): only store.go's own
+// definition and doc comments named it.
+//
+// Two cases, mirroring Append's own "conv starts nil" split (this struct's
+// own doc comment): a session already on disk (conv != nil, the ordinary
+// case once at least one message has been recorded) renames it immediately
+// via the store's own rewrite. A session that has not been created yet —
+// /name typed before the very first message, in the brief window between
+// NewRoot and submit — has nothing to rewrite, so the title is remembered
+// in pendingTitle instead and applied by Append/AppendMission's own lazy
+// creation the moment there is finally a file to create it with; it does
+// not fabricate a conversation just to hold a name nobody has started yet.
+func (r *sessionRecorder) SetTitle(title string) error {
+	if r.conv == nil {
+		r.pendingTitle = title
+		return nil
+	}
+	if err := r.store.SetTitle(r.conv.ID, title); err != nil {
+		return err
+	}
+	r.conv.Title = title
 	return nil
 }
 
