@@ -404,3 +404,82 @@ func TestFullscreenExitTranscriptDisabledPrintsNothing(t *testing.T) {
 		t.Errorf("ExitTranscript() = %q, want \"\" when FullscreenExitTranscript is false", got)
 	}
 }
+
+// TestFirstMessageDoesNotCorruptFullscreen is the reported "sending my
+// first message bugs out the whole interface, my own message doesn't even
+// show up" bug (W5 UI-bugs follow-up), reproduced against a real
+// tea.Program/renderer, not a bare Update/View string.
+//
+// The mechanism: submit's own comment (root.go) already documents that
+// bannerText()'s transition from non-empty to empty happens on exactly one
+// frame — the very first submitted message, ever, for a session — and that
+// printBannerCmd is what "retires" the banner through tea.Println/
+// insertAbove so the shrinking live region never has to rely on the
+// renderer's own diff to erase it. That reasoning holds for regular mode,
+// where insertAbove's target (real terminal scrollback) exists. It does
+// not hold for fullscreen: reading bubbletea's own cursed_renderer.go
+// confirms insertAbove writes ANSI straight to the writer, bypassing
+// s.cellbuf/s.lastView (the renderer's own diff bookkeeping) entirely,
+// with no check anywhere in its body for whether AltScreen is active —
+// despite renderer.go's doc comment claiming "if the altscreen is active
+// no output will be printed" (a doc/code discrepancy already flagged in
+// docs/PLAN.md's W3 part 6 entry). Called while AltScreen is active, that
+// out-of-band write desyncs the renderer's bookkeeping from what is
+// actually on screen from that frame on — exactly a "the interface bugs
+// out" symptom, and exactly why evictOverflow (the sibling call site using
+// the identical mechanism) already carries a fullscreen early-return.
+// printBannerCmd's own fix mirrors that guard.
+//
+// This test would have failed before that guard existed: with it removed,
+// printBannerCmd's unconditional tea.Println corrupts the cursor/erase
+// bookkeeping on this exact transition, and the assertions below (the
+// user's own first message findable on the grid, the assistant's answer
+// findable, no scrollback populated, no line wider than the terminal)
+// catch it — see this test's own commit message for the before/after
+// repro this file's own history records.
+func TestFirstMessageDoesNotCorruptFullscreen(t *testing.T) {
+	const w, h = 60, 20
+	s := testterm.Start(t, newFullscreenScreenRoot(t, false), w, h)
+
+	// This Type/Enter pair is the one frame bannerText() flips on: the
+	// banner is still on screen (transcript is empty) right up until this
+	// Enter, and gone the instant it lands.
+	askAndWait(s, "hola desde el primer mensaje")
+
+	if !s.Grid().ContainsAnywhere("hola desde el primer mensaje") {
+		t.Errorf("the user's own first message is not on screen after "+
+			"submitting it — this is the reported \"no aparece mi "+
+			"mensaje\" symptom.\n%s", s.Dump("screen after the first message:"))
+	}
+	// The echo engine answers with the same text it was sent, so its
+	// presence a second time also confirms the assistant's reply landed
+	// (echoChunkSize means it arrives as several redraws, exercising more
+	// than one frame past the banner-retirement transition).
+	if got := s.Grid().Count("hola desde el primer mensaje"); got < 2 {
+		t.Errorf("expected the prompt to appear at least twice on screen "+
+			"(user's turn + echoed answer), got %d.\n%s", got,
+			s.Dump("screen after the first message:"))
+	}
+
+	// Fullscreen must never populate real scrollback (evictOverflow's own
+	// comment, and printBannerCmd's fix follows the identical reasoning):
+	// insertAbove would have no valid destination for it. A leaked write
+	// here — even one that did not visibly corrupt the alt screen — would
+	// mean the guard is not actually preventing insertAbove from running.
+	if sb := s.Grid().Scrollback(); len(sb) != 0 {
+		t.Errorf("fullscreen must never populate real scrollback via the "+
+			"banner-retirement path, got %d rows: %v", len(sb), sb)
+	}
+
+	// A desynced renderer diff is exactly the kind of bug that manifests
+	// as a line drawn past the terminal's own width (the renderer's cursor
+	// arithmetic went wrong, so wrapText's own invariant — never emit a
+	// line wider than the frame — no longer held for whatever got drawn
+	// next).
+	if width, row := s.Grid().Widest(); width > w {
+		t.Errorf("a line %d columns wide (row %d) was drawn on a "+
+			"%d-column fullscreen terminal — consistent with a desynced "+
+			"renderer diff after an out-of-band insertAbove write.\n%s",
+			width, row, w, s.Dump("screen after the first message:"))
+	}
+}

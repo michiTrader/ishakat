@@ -2186,18 +2186,33 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// any line below that, up is ordinary cursor movement inside a
 			// multi-line draft, exactly like a shell's line editor leaves
 			// up/down alone once the cursor is not on the edge line.
+			//
+			// Deliberately does NOT recompute next.menu/next.atMenu from
+			// the recalled text (unlike the post-switch fallthrough below,
+			// which recomputes on every real keystroke). This is the fix
+			// for the reported "browsing history gets permanently stuck
+			// once it lands on a line that looks like a slash command"
+			// bug: if a recalled entry (e.g. "/model") happened to open
+			// m.menu here, the very next up/down press would be consumed
+			// by updateSlashMenu's own unconditional up/down cases (this
+			// same switch's m.menu.Active() branch, above) instead of
+			// ever reaching HistoryPrev/HistoryNext again — with no way
+			// back to browsing short of Esc (closes the menu) or Enter
+			// (runs the command), which is exactly the "queda estancado"
+			// symptom reported. Leaving the dropdown closed here costs
+			// nothing browsing-history-wise: a real command needs its
+			// argument typed to be useful, and the moment the user does
+			// type into a recalled "/..." line, the fallthrough path a few
+			// lines down recomputes the menu from that keystroke exactly
+			// as it always has.
 			if m.input.Line() == 0 {
 				if next, ok := m.historyPrev(); ok {
-					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
-					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
 		case m.keys.HistoryNext:
 			if m.input.Line() == m.input.LineCount()-1 {
 				if next, ok := m.historyNext(); ok {
-					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
-					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
@@ -2538,7 +2553,7 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
-	cmds = append(cmds, printBannerCmd(bannerText))
+	cmds = append(cmds, printBannerCmd(bannerText, m.tuiMode))
 	return m, tea.Batch(cmds...)
 }
 
@@ -2556,8 +2571,29 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 // Returns nil, not a no-op Cmd, when there is nothing to print: tea.Batch
 // already drops nil commands (see its own doc comment), so every caller can
 // unconditionally append this without its own bannerText != "" check.
-func printBannerCmd(bannerText string) tea.Cmd {
-	if bannerText == "" {
+//
+// mode == termenv.ModeFullscreen is an early-return, mirroring
+// evictOverflow's own fullscreen guard exactly and for the identical
+// reason: this function's only mechanism is tea.Println/insertAbove, and
+// reading bubbletea's own cursed_renderer.go confirms insertAbove writes
+// straight to the terminal (bypassing s.cellbuf/s.lastView, the renderer's
+// own diff state) with no AltScreen check anywhere in its body — despite
+// renderer.go's doc comment claiming "if the altscreen is active no output
+// will be printed" (already flagged as a doc/code discrepancy in this
+// project's own docs/PLAN.md, W3 part 6). In fullscreen there is no real
+// scrollback for insertAbove to retire the banner into: AltScreen's buffer
+// is the alternate screen, and writing into it out of band from the
+// renderer's own frame desyncs the renderer's next diff from what is
+// actually on screen — this was confirmed to be the mechanism behind the
+// reported "sending the first message corrupts the whole interface" bug
+// (W5 UI-bugs follow-up), reproduced with TestFirstMessageDoesNotCorruptFullscreen.
+// Fullscreen needs no equivalent of this call at all: render() already
+// recomputes bannerText() (which returns "" the instant the transcript is
+// non-empty) from m.transcript on every frame, so the banner simply stops
+// being drawn on the very next redraw — nothing needs to be separately
+// "retired" the way regular mode's real terminal scrollback does.
+func printBannerCmd(bannerText string, mode termenv.Mode) tea.Cmd {
+	if bannerText == "" || mode == termenv.ModeFullscreen {
 		return nil
 	}
 	// The trailing "\n" is the same blank separator line head() used to

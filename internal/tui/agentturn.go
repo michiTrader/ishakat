@@ -147,7 +147,7 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	// printBannerCmd (root.go): the one shared banner-to-scrollback producer,
 	// so this fork and startEngineTurn's plain path can never drift apart on
 	// what "retire the banner" means (RC-5, "one banner producer").
-	cmds = append(cmds, printBannerCmd(bannerText))
+	cmds = append(cmds, printBannerCmd(bannerText, m.tuiMode))
 	return m, tea.Batch(cmds...)
 }
 
