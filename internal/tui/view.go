@@ -407,6 +407,46 @@ func (m Root) headBudget() int {
 	return budget
 }
 
+// maxScrollOffsetFor is the ceiling clipHead's own offset clamp (below)
+// computes internally, pulled out to a standalone function so
+// Root.maxScrollOffset (root.go's scrollBy calls it, root.go) can compute
+// the exact same number without duplicating the arithmetic and risking the
+// two ever disagreeing. n is head()'s content row count (clipHead's own
+// "n", the count of that "\n"-split content, not headRows(raw) directly —
+// see clipHead's own call site for why those are the same number here);
+// budget is headBudget(). The +1 reserves one row for the "…N rows above"
+// affordance a full scroll-back always needs, mirroring clipHead's own
+// comment on the identical line.
+func maxScrollOffsetFor(n, budget int) int {
+	maxOffset := n - budget + 1
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return maxOffset
+}
+
+// maxScrollOffset is how far Root.scrollOffset (root.go) may validly reach
+// right now — the same ceiling clipHead's own per-frame clamp computes
+// against headContent()'s actual row count and headBudget(), exposed here
+// so scrollBy (root.go) can clamp the persisted field itself instead of
+// leaving the ceiling to clipHead's local, render-only clamp.
+//
+// This is what fixes the reported "scroll up 50 wheel-lines when only ~10
+// have headroom, then have to scroll back down through the invisible 40
+// before the view moves" bug: without this, m.scrollOffset could grow
+// arbitrarily far past what clipHead would ever actually draw, because
+// clipHead's own clamp was purely local to that one render call and never
+// written back to the model. Called with the same headContent()/headBudget()
+// this frame's own head() call is about to use, so the two clamps can never
+// drift apart — a resize or an eviction between one Update and the next
+// View is not a problem either, since this is computed fresh every time
+// scrollBy runs, the same "rebuild from state, never memoized" rule every
+// other measurement in this package already follows.
+func (m Root) maxScrollOffset() int {
+	n := headRows(m.headContent())
+	return maxScrollOffsetFor(n, m.headBudget())
+}
+
 // frameRowsUnclipped is how tall the live-managed region would be with no
 // clipping at all — headContent()'s real height plus everything below it.
 // evictOverflow measures against this, not against render()'s own (already
@@ -456,11 +496,13 @@ func (m Root) frameRowsUnclipped() int {
 // and contentRows can only shrink by the exact amount already deducted.
 //
 // offset is clamped against this call's own n and budget before any of
-// that — never pre-validated by whoever set Root.scrollOffset (see that
-// field's own doc comment for why) — so a resize, an eviction, or a
-// shrinking transcript between one frame and the next can never leave this
-// function trying to show a window past either end of what content
-// actually holds.
+// that, via the same maxScrollOffsetFor helper Root.maxScrollOffset (below)
+// calls to also clamp Root.scrollOffset itself at write-time (see that
+// field's own doc comment) — so a resize, an eviction, or a shrinking
+// transcript between one frame and the next can never leave this function
+// trying to show a window past either end of what content actually holds,
+// regardless of whether scrollOffset's own write-time clamp already ran
+// against a now-stale frame.
 //
 // budget <= 0 means there is no room for anything, not even an affordance
 // line — returns "" rather than a lone clip line that would itself
@@ -487,10 +529,10 @@ func clipHead(raw string, g glyphs, budget int, offset int) string {
 	// budget-1 rows starting at the very first line (one row reserved for
 	// the "above" affordance that a full scroll-back always needs, since
 	// row 0 of content is never itself a valid start past the top).
-	maxOffset := n - budget + 1
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	// maxScrollOffsetFor is the same computation Root.maxScrollOffset
+	// (below) calls to clamp Root.scrollOffset itself — pulled into its
+	// own function specifically so the two can never drift apart.
+	maxOffset := maxScrollOffsetFor(n, budget)
 	if offset > maxOffset {
 		offset = maxOffset
 	}

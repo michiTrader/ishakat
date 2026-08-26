@@ -384,15 +384,26 @@ type Root struct {
 	// turns into an actual visible window instead of always showing the
 	// tail.
 	//
-	// Deliberately a raw accumulator, never pre-clamped here: clipHead
-	// (view.go) clamps it against whatever the *current* frame's content
-	// and budget allow every time it draws, the same "rebuild from state,
-	// no memoization" discipline render()'s own doc comment already
-	// establishes for everything else in this package. That means a
-	// resize, an eviction, or a shrinking transcript can never leave this
-	// field pointing past the end of what actually exists — the next
-	// frame's clipHead call simply clamps it back into range — so nothing
-	// else in Update has to remember to re-validate it.
+	// Clamped on every write by scrollBy (below), against
+	// maxScrollOffset() (view.go) — the same ceiling clipHead's own
+	// per-frame render clamp computes, via the shared maxScrollOffsetFor
+	// helper the two call identically so they can never disagree. This
+	// field used to be a raw, never-pre-clamped accumulator, relying
+	// entirely on clipHead's clamp to keep the *drawn* window in range on
+	// every frame — which it did, but a reported bug showed that was not
+	// enough: clipHead's clamp is local to one render call and never
+	// written back here, so this field could grow arbitrarily past what
+	// was ever visible (scroll up 50 wheel-lines when only ~10 have
+	// headroom, and the view stops moving after 10 but this field still
+	// reaches 150), which then had to be silently "paid back" before
+	// scrolling down did anything at all. Clamping here too, in scrollBy,
+	// closes that gap — see its own doc comment for the fix and why
+	// clamping at write-time cannot drift from clipHead's read-time one.
+	// A resize, an eviction, or a shrinking transcript between one write
+	// and the next View still cannot leave this field pointing past the
+	// end of what actually exists: clipHead's own clamp remains an
+	// unconditional second line of defense on every render regardless of
+	// what this field currently holds.
 	//
 	// Reset to 0 wherever printedUpTo also resets (ClearScreen, /clear,
 	// /new): a scroll position measured against a transcript that is
@@ -2019,19 +2030,39 @@ func (m Root) scrollWheel(button tea.MouseButton) Root {
 
 // scrollBy moves Root.scrollOffset by delta rows — positive scrolls back
 // towards the start of the transcript, negative scrolls forward towards the
-// live tail — and clamps only the "never negative" floor here. The upper
-// bound (never past the actual start of content) is deliberately left to
-// clipHead's own per-frame clamp (view.go), not duplicated here: this
-// method has no access to the frame clipHead will actually draw against
-// (headBudget/headContent can both change between this call and the next
-// View, e.g. a resize riding the same tea.Msg batch), so guessing a ceiling
-// here could only ever be wrong in one direction or the other, while
-// clipHead's own clamp is always right because it runs against the exact
-// content and budget of the frame it is about to draw.
+// live tail — and clamps both ends: never negative, and never past
+// maxScrollOffset() (view.go), the exact same ceiling clipHead's own
+// per-frame clamp computes.
+//
+// This method used to clamp only the floor, deliberately leaving the
+// ceiling to clipHead's own per-frame clamp — reasoning that this method
+// "has no access to the frame clipHead will actually draw against". That
+// was wrong in a way a user actually hit: clipHead's clamp is purely local
+// to one render call, so it can hide the overflow *visually* on every frame
+// without that clamped value ever being written back to m.scrollOffset
+// itself. The field kept accumulating past what was visible — scroll up 50
+// wheel-lines' worth when only ~10 lines of headroom exist, and the view
+// stops moving after 10 but m.scrollOffset still ends up at 150 rows'
+// worth — so scrolling back down had to first "pay back" the whole
+// invisible 140-row debt before the view moved at all. Clamping here too
+// closes that gap: maxScrollOffset() (view.go) calls m.headContent()/
+// m.headBudget() itself, using this Update-time Root's own current state
+// exactly the way headBudget/headContent are read fresh on every other call
+// in this package (no memoization anywhere here to begin with, so "this
+// call's Root" already is "the frame about to be drawn" for every other
+// value scrollBy's callers already depend on — m.transcript, m.live, m.lay
+// — none of which get any staler by also reading them here). A resize
+// riding the same tea.Msg batch still cannot desync the two clamps: both
+// this one and clipHead's ultimately call the identical
+// maxScrollOffsetFor(n, budget) (view.go), so whichever frame's n/budget
+// either one sees, they agree by construction.
 func (m Root) scrollBy(delta int) Root {
 	m.scrollOffset += delta
 	if m.scrollOffset < 0 {
 		m.scrollOffset = 0
+	}
+	if max := m.maxScrollOffset(); m.scrollOffset > max {
+		m.scrollOffset = max
 	}
 	return m
 }
