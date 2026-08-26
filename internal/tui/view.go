@@ -93,10 +93,37 @@ type Frame struct {
 //     that has to be handled entirely outside this package's Update/View
 //     loop, by Root.ExitTranscript (below) and internal/app.Run, not by
 //     anything emit or View could safely do here.
+//
+// MouseMode is the reported fix for "mouse wheel loads earlier messages
+// instead of scrolling" (Bug 1): xterm's own ctlseqs reference documents
+// DECSET mode 1007, "Alternate Scroll Mode" — while the alternate screen
+// buffer is showing (AltScreen=true) *and* the application has not itself
+// claimed mouse tracking, the terminal silently rewrites every wheel tick
+// into a synthetic up/down arrow keypress before the application ever sees
+// it. Fullscreen sets AltScreen unconditionally (above), so with MouseMode
+// left at MouseModeNone (the old, unconditional value), every fullscreen
+// wheel tick was arriving as a plain "up"/"down" tea.KeyPressMsg — exactly
+// what HistoryPrev/HistoryNext (root.go's updateChat) bind, which is the
+// reported "loads earlier messages" symptom. Claiming the mouse via
+// MouseModeCellMotion (click/release/wheel/drag-motion) is what suppresses
+// that translation, so a real tea.MouseWheelMsg reaches Update instead (see
+// Root.scrollOffset's own doc comment for what consumes it). Regular mode
+// is untouched — it never sets AltScreen, so mode 1007 was never in play
+// there, and MouseModeNone keeps the terminal's own native scrollback and
+// text selection working exactly as before. MouseModeAllMotion (adding
+// unconditional motion events even with no button held) was considered and
+// rejected: this package has no feature that wants a stream of bare cursor
+// moves, and claiming it would add terminal chatter and interfere with
+// mouse-based text selection inside the alternate screen for nothing this
+// fix needs.
 func emit(f Frame, mode termenv.Mode, cursor *tea.Cursor) tea.View {
 	var v tea.View
 	v.SetContent(f.Content)
-	v.MouseMode = tea.MouseModeNone
+	if mode == termenv.ModeFullscreen {
+		v.MouseMode = tea.MouseModeCellMotion
+	} else {
+		v.MouseMode = tea.MouseModeNone
+	}
 	v.Cursor = cursor
 	v.AltScreen = mode == termenv.ModeFullscreen
 	return v
@@ -302,7 +329,7 @@ func (m Root) head() string {
 		// blind would just be a second way to get the arithmetic wrong.
 		return m.headContent()
 	}
-	return clipHead(m.headContent(), m.lay.glyphs(), m.headBudget())
+	return clipHead(m.headContent(), m.lay.glyphs(), m.headBudget(), m.scrollOffset)
 }
 
 // headContent builds head()'s full, unclipped content: the start-up banner,
@@ -403,14 +430,47 @@ func (m Root) frameRowsUnclipped() int {
 // good (printed to real scrollback); clipHead's are merely not drawn this
 // frame.
 //
-// budget <= 0 means there is no room for anything, not even the affordance
-// line — returns "" rather than a lone clip line that would itself overflow.
-func clipHead(raw string, g glyphs, budget int) string {
+// offset is Root.scrollOffset (Bug 1's fix): 0 is this function's original,
+// only behaviour — pin to the tail, show at most one "…N rows above"
+// affordance and never a "below" one. A positive offset asks for a window
+// scrolled back by that many rows from the tail instead: end = n - offset
+// fixes where the window stops, a "…N rows below" affordance appears
+// whenever offset > 0 (there is live content past the window, which is what
+// tells the user they are not looking at the tail any more), and a "…N rows
+// above" affordance appears whenever the window's own start is still > 0
+// (there is more transcript above the window than budget rows can show).
+//
+// The two-pass shape below (guess assuming no top affordance, then spend one
+// more budget row on it and recompute if that guess left start > 0) exists
+// because showing the top affordance costs a row out of the same budget the
+// content window is drawn from — a naive one-pass "start = end - budget"
+// can round to exactly 0, which would make needTop false while the
+// affordance line the first pass never accounted for silently doesn't
+// exist, or conversely leave the reported "N rows above" count one row
+// short of the truth once the affordance itself is inserted. Recomputing
+// start after reserving the row settles both without needing a third pass:
+// spending a row can only ever move start up (reveal fewer content rows),
+// never down, so a second fixed point is always reached in exactly one more
+// step — offset (and therefore end) never changes between passes, so the
+// second start = end - contentRows uses the same end the first pass did,
+// and contentRows can only shrink by the exact amount already deducted.
+//
+// offset is clamped against this call's own n and budget before any of
+// that — never pre-validated by whoever set Root.scrollOffset (see that
+// field's own doc comment for why) — so a resize, an eviction, or a
+// shrinking transcript between one frame and the next can never leave this
+// function trying to show a window past either end of what content
+// actually holds.
+//
+// budget <= 0 means there is no room for anything, not even an affordance
+// line — returns "" rather than a lone clip line that would itself
+// overflow.
+func clipHead(raw string, g glyphs, budget int, offset int) string {
 	if budget <= 0 {
 		return ""
 	}
 	rows := headRows(raw)
-	if rows <= budget {
+	if rows <= budget && offset <= 0 {
 		return raw
 	}
 	// raw always ends in "\n" (every block headContent writes ends with
@@ -418,21 +478,75 @@ func clipHead(raw string, g glyphs, budget int) string {
 	// which is the empty string after that final newline.
 	lines := strings.Split(raw, "\n")
 	content := lines[:len(lines)-1]
-	keep := budget - 1 // one row of the budget is spent on the affordance itself
-	if keep < 0 {
-		keep = 0
+	n := len(content)
+
+	if offset < 0 {
+		offset = 0
 	}
-	hidden := len(content) - keep
-	tail := content[len(content)-keep:]
+	// The window can never be asked to scroll back further than showing
+	// budget-1 rows starting at the very first line (one row reserved for
+	// the "above" affordance that a full scroll-back always needs, since
+	// row 0 of content is never itself a valid start past the top).
+	maxOffset := n - budget + 1
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+
+	end := n - offset
+	needBottom := offset > 0
+
+	// First pass: guess assuming no top affordance is needed.
+	contentRows := budget
+	if needBottom {
+		contentRows--
+	}
+	if contentRows < 0 {
+		contentRows = 0
+	}
+	start := end - contentRows
+	if start < 0 {
+		start = 0
+	}
+	needTop := start > 0
+
+	// Second pass: the first guess left content above the window, so
+	// reserve one more budget row for that affordance and recompute start
+	// against the smaller contentRows. end is untouched — offset (and
+	// therefore where the window ends) never depends on how many
+	// affordance rows the window needs.
+	if needTop {
+		contentRows--
+		if contentRows < 0 {
+			contentRows = 0
+		}
+		start = end - contentRows
+		if start < 0 {
+			start = 0
+		}
+		needTop = start > 0
+	}
 
 	out := make([]string, 0, budget)
-	unit := "row"
-	if hidden != 1 {
-		unit = "rows"
+	if needTop {
+		out = append(out, fmt.Sprintf("%s %d %s above", g.clipMark, start, rowUnit(start)))
 	}
-	out = append(out, fmt.Sprintf("%s %d %s above", g.clipMark, hidden, unit))
-	out = append(out, tail...)
+	out = append(out, content[start:end]...)
+	if needBottom {
+		hiddenBelow := n - end
+		out = append(out, fmt.Sprintf("%s %d %s below", g.clipMark, hiddenBelow, rowUnit(hiddenBelow)))
+	}
 	return strings.Join(out, "\n") + "\n"
+}
+
+// rowUnit is clipHead's singular/plural affordance-count noun.
+func rowUnit(n int) string {
+	if n == 1 {
+		return "row"
+	}
+	return "rows"
 }
 
 // bannerText is the startup banner's rendered form, or "" once it should no

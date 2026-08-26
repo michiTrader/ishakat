@@ -54,6 +54,22 @@ type HeadlessOptions struct {
 	Model  string // -m / --model
 	System string // --system (wins over app.system_prompt)
 
+	// Effort is --effort (F9, docs/ROADMAP-ux-2026-08-20.md W5): the
+	// headless-equivalent of the interactive TUI's own /effort command
+	// and EffortCycle chord (internal/tui/effortcmd.go). Empty means
+	// "no override" — the provider's own default, exactly the behaviour
+	// every script had before this flag existed. A non-empty value is
+	// not validated against the resolved model's own
+	// catalog.Model.EffortLevels here the way runEffortCommand validates
+	// interactively: EffortParamsFor (effort.go) already degrades a
+	// value its dialect switch does not recognize to "no override"
+	// rather than erroring, and a model whose EffortLevels the catalog
+	// has never populated simply never uses the resulting Params key —
+	// the same "silence, not refusal" contract this flag's underlying
+	// function already documents, so a stale --effort left in a script
+	// after switching models cannot fail a headless run outright.
+	Effort string
+
 	JSON   bool  // --json: one event per line
 	Stream *bool // --stream / --no-stream; nil = app.stream
 	Save   *bool // --no-save; nil = session.save
@@ -294,6 +310,12 @@ func Headless(opts HeadlessOptions) int {
 		// reported through the sink's own reasoning channel, which already
 		// existed and had nothing to carry.
 		IncludeReasoning: ReasoningWanted(cfg),
+		// F9's own --effort flag, resolved against pc (already known at
+		// this point in the function) the same way NewEffortResolver
+		// resolves it for the interactive TUI — see EffortParamsFor's own
+		// doc comment for why nil (opts.Effort == "") is the ordinary,
+		// unremarkable case.
+		Params: EffortParamsFor(pc, opts.Effort),
 	}
 
 	// 7. The turn. SIGINT and SIGTERM cancel the context instead of killing

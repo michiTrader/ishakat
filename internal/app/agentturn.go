@@ -265,7 +265,13 @@ func runAgentTurnHeadless(
 	// turn — see newSubAgentRunner's own doc comment for the identical
 	// reasoning already applied to every other capability it threads
 	// through unchanged.
-	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate, asker)
+	//
+	// req.Params (F9's --effort/msg.Effort override, already resolved by
+	// this function's own caller — Headless or serve.go — before req ever
+	// reached here) is threaded through unchanged too, per
+	// newSubAgentRunner's own doc comment on why a dispatched task
+	// answers at the same effort level as the turn that dispatched it.
+	dispatchRunner := newSubAgentRunner(eng, req.Model, req.System, cfgTools, guard, cost, caps, allowToolCreate, asker, req.Params)
 	opts, toolsWarn := buildAgentOptions(cfgTools, guard, cost, caps, allowToolCreate, dispatchRunner, asker)
 	if toolsWarn != "" {
 		s.warn(toolsWarn)
@@ -291,7 +297,18 @@ func runAgentTurnHeadless(
 		// Messages is rebuilt every iteration inside RunAgentTurn from
 		// hist.Active() — see agentloop.go's own comment on iterReq — so
 		// what's set here never actually reaches the wire; Model and
-		// System are the only fields RunAgentTurn does not overwrite.
+		// System are the only other fields RunAgentTurn does not
+		// overwrite.
+		//
+		// Params is carried straight through from req (provider.Request),
+		// which Headless/serve.go already populated via EffortParamsFor
+		// (--effort, F9) before calling this function — copied here so a
+		// tools-enabled headless/serve turn's effort override reaches the
+		// wire exactly as a tools-disabled runTurn call already does
+		// through req itself. agentloop.go's own iterReq := req then
+		// copies this same map across every iteration of the loop, so one
+		// assignment here is enough for the whole turn.
+		Params: req.Params,
 	}
 
 	hist.Add(user)

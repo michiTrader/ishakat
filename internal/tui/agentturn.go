@@ -129,6 +129,7 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	req := engine.Request{
 		Model:  wireModel(m.cat, m.model),
 		System: m.system,
+		Params: m.effortParams(),
 		// Messages is left empty: RunAgentTurn rebuilds it every iteration
 		// from hist.Active() (see agentloop.go's own comment on iterReq),
 		// so nothing set here would ever reach the wire.
@@ -146,7 +147,7 @@ func (m Root) startAgentTurn(bannerText string) (tea.Model, tea.Cmd) {
 	// printBannerCmd (root.go): the one shared banner-to-scrollback producer,
 	// so this fork and startEngineTurn's plain path can never drift apart on
 	// what "retire the banner" means (RC-5, "one banner producer").
-	cmds = append(cmds, printBannerCmd(bannerText))
+	cmds = append(cmds, printBannerCmd(bannerText, m.tuiMode))
 	return m, tea.Batch(cmds...)
 }
 

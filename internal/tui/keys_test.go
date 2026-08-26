@@ -90,6 +90,24 @@ func TestNewMapEditQueueRespectsConfiguration(t *testing.T) {
 	}
 }
 
+// TestNewMapEffortCycleDefaultsToCtrlG and
+// TestNewMapEffortCycleRespectsConfiguration pin F9's new chord the same
+// way every other chord in this file is pinned: an empty config falls back
+// to the documented default, and a configured value survives unchanged.
+func TestNewMapEffortCycleDefaultsToCtrlG(t *testing.T) {
+	m := tui.NewMap(config.Keys{})
+	if m.EffortCycle != "ctrl+g" {
+		t.Errorf("EffortCycle default = %q, want %q", m.EffortCycle, "ctrl+g")
+	}
+}
+
+func TestNewMapEffortCycleRespectsConfiguration(t *testing.T) {
+	m := tui.NewMap(config.Keys{EffortCycle: "ctrl+e"})
+	if m.EffortCycle != "ctrl+e" {
+		t.Errorf("EffortCycle = %q, want the configured %q", m.EffortCycle, "ctrl+e")
+	}
+}
+
 // TestNewMapQuitRepeatDefaultsToTwo is RC-1's safety net when Load is
 // skipped: an empty Keys (what newTestRoot used to feed, and what a
 // caller that never set Cfg still does) must still require two presses.

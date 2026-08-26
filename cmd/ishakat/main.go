@@ -52,6 +52,7 @@ FLAGS
   -p, --prompt <text>    question to answer without opening the interface
   -m, --model <ref>      model to use (ref, alias, wire_id, or id[provider])
       --system <text>    system prompt for this turn
+      --effort <level>   effort/thinking-level override for this turn (model-specific)
       --json             one JSON event per line (for jq)
       --stream           force streaming
       --no-stream        request the full response at once
@@ -134,6 +135,7 @@ func main() {
 		model           = fs.String("m", "", "model to use")
 		modelLong       = fs.String("model", "", "same as -m")
 		system          = fs.String("system", "", "system prompt for this turn")
+		effort          = fs.String("effort", "", "effort/thinking-level override for this turn (model-specific, e.g. low/medium/high)")
 		jsonOut         = fs.Bool("json", false, "one JSON event per line")
 		stream          = fs.Bool("stream", false, "force streaming")
 		noStream        = fs.Bool("no-stream", false, "request the full response at once")
@@ -196,6 +198,7 @@ func main() {
 			Prompt:          p,
 			Model:           firstNonEmpty(*model, *modelLong),
 			System:          *system,
+			Effort:          *effort,
 			JSON:            *jsonOut,
 			Stream:          streamPtr,
 			Save:            savePtr,

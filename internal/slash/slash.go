@@ -193,6 +193,21 @@ const (
 	// so /reload's runner (reload.go) calls into ReloadFactory only for
 	// the three pieces that did not.
 	KindReload
+	// KindEffort implements /effort (F9, docs/ROADMAP-ux-2026-08-20.md
+	// W5: "effort/thinking-level picker, a chord to cycle it, and a
+	// headless-equivalent flag"). No argument reports the active
+	// model's current effort level plus its own discrete vocabulary
+	// (catalog.Model.EffortLevels — always per-model, never a fixed
+	// global list); an argument sets a new level, validated
+	// case-insensitively against that same per-model vocabulary rather
+	// than accepted as an arbitrary string the way /name's title is.
+	// The EffortCycle chord (keys.go, default ctrl+g) steps through the
+	// identical vocabulary without typing a command at all — see
+	// effortcmd.go for both runners. Deliberately not persisted through
+	// any *Store: an effort level is a per-turn request parameter, not
+	// saved session state, the same reasoning already keeping
+	// Root.system/Root.compactModel in-memory-only.
+	KindEffort
 	// KindUnimplemented is a command that already has a row in the table —
 	// so /help and the dropdown both list it, matching §13's full command
 	// list — but no runner behind it yet. The caller reports that instead of
@@ -248,6 +263,7 @@ var Commands = []Command{
 	{Name: "config", Describe: "config efectiva", Kind: KindConfig},
 	{Name: "settings", ArgHint: "[clave valor]", Describe: "ver o cambiar ajustes", Kind: KindSettings},
 	{Name: "reload", Describe: "recargar atajos, skills y contexto", Kind: KindReload},
+	{Name: "effort", ArgHint: "[nivel]", Describe: "ver o cambiar el nivel de esfuerzo", Kind: KindEffort},
 	{Name: "debug", Describe: "diagnostico", Kind: KindDebug},
 	{Name: "tools", ArgHint: "[nombre]", Describe: "herramientas creadas", Kind: KindTools},
 	{Name: "permissions", Describe: "autonomia y reglas", Kind: KindPermissions},

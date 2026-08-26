@@ -135,13 +135,23 @@ func TestBannerAppearsExactlyOnceInBothModes(t *testing.T) {
 }
 
 // TestEmitIsTheOnlyModeAwareFunction checks Rule 2's other half directly:
-// build one Frame, call emit with both modes, and confirm the only thing
-// that is allowed to differ is exactly what emit's own doc comment names as
-// the actual mode-aware decision — AltScreen. If render() ever grows a mode
-// parameter, or if some future change makes regular and fullscreen disagree
-// about MouseMode or the cursor, this is the test that catches it: those
-// are style-level policies, and unlike AltScreen there is no design note
-// anywhere permitting them to differ per mode.
+// build one Frame, call emit with both modes, and confirm the only things
+// that are allowed to differ are exactly what emit's own doc comment names
+// as its mode-aware decisions — AltScreen, and (as of the Bug 1 fix)
+// MouseMode. Content must never differ: render()'s output has to pass
+// through emit unchanged regardless of mode, or render() itself has grown
+// mode-awareness it should not have (Rule 2).
+//
+// MouseMode is deliberately asserted asymmetric, not equal, unlike a plain
+// "the two views must agree" check: regular must keep MouseModeNone (native
+// terminal scrollback/selection, unchanged since before this fix), and
+// fullscreen must claim MouseModeCellMotion — this is what suppresses
+// xterm's own DECSET mode 1007 "Alternate Scroll Mode" from rewriting mouse
+// wheel ticks into synthetic up/down keypresses once AltScreen is showing
+// (see emit's own doc comment for the full mechanism). An older version of
+// this test asserted MouseMode must be identical between modes; that
+// assertion was the correct invariant before Bug 1 was understood, and is
+// now the wrong one on purpose.
 func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 	f := Frame{Content: "line one\nline two"}
 	var cursor *tea.Cursor
@@ -153,8 +163,11 @@ func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 		t.Errorf("emit changed Content based on mode; render()'s output must pass through unchanged. regular=%q fullscreen=%q",
 			regularView.Content, fullscreenView.Content)
 	}
-	if regularView.MouseMode != fullscreenView.MouseMode {
-		t.Errorf("emit changed MouseMode based on mode: regular=%v fullscreen=%v", regularView.MouseMode, fullscreenView.MouseMode)
+	if regularView.MouseMode != tea.MouseModeNone {
+		t.Errorf("regular must keep MouseMode at MouseModeNone (native terminal scrollback/selection), got %v", regularView.MouseMode)
+	}
+	if fullscreenView.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("fullscreen must claim the mouse via MouseModeCellMotion (Bug 1 fix: this is what suppresses xterm's mode-1007 wheel-to-arrow-key translation), got %v", fullscreenView.MouseMode)
 	}
 	if regularView.AltScreen {
 		t.Errorf("regular must never set AltScreen")
@@ -402,5 +415,84 @@ func TestFullscreenExitTranscriptDisabledPrintsNothing(t *testing.T) {
 	}
 	if got := root.ExitTranscript(); got != "" {
 		t.Errorf("ExitTranscript() = %q, want \"\" when FullscreenExitTranscript is false", got)
+	}
+}
+
+// TestFirstMessageDoesNotCorruptFullscreen is the reported "sending my
+// first message bugs out the whole interface, my own message doesn't even
+// show up" bug (W5 UI-bugs follow-up), reproduced against a real
+// tea.Program/renderer, not a bare Update/View string.
+//
+// The mechanism: submit's own comment (root.go) already documents that
+// bannerText()'s transition from non-empty to empty happens on exactly one
+// frame — the very first submitted message, ever, for a session — and that
+// printBannerCmd is what "retires" the banner through tea.Println/
+// insertAbove so the shrinking live region never has to rely on the
+// renderer's own diff to erase it. That reasoning holds for regular mode,
+// where insertAbove's target (real terminal scrollback) exists. It does
+// not hold for fullscreen: reading bubbletea's own cursed_renderer.go
+// confirms insertAbove writes ANSI straight to the writer, bypassing
+// s.cellbuf/s.lastView (the renderer's own diff bookkeeping) entirely,
+// with no check anywhere in its body for whether AltScreen is active —
+// despite renderer.go's doc comment claiming "if the altscreen is active
+// no output will be printed" (a doc/code discrepancy already flagged in
+// docs/PLAN.md's W3 part 6 entry). Called while AltScreen is active, that
+// out-of-band write desyncs the renderer's bookkeeping from what is
+// actually on screen from that frame on — exactly a "the interface bugs
+// out" symptom, and exactly why evictOverflow (the sibling call site using
+// the identical mechanism) already carries a fullscreen early-return.
+// printBannerCmd's own fix mirrors that guard.
+//
+// This test would have failed before that guard existed: with it removed,
+// printBannerCmd's unconditional tea.Println corrupts the cursor/erase
+// bookkeeping on this exact transition, and the assertions below (the
+// user's own first message findable on the grid, the assistant's answer
+// findable, no scrollback populated, no line wider than the terminal)
+// catch it — see this test's own commit message for the before/after
+// repro this file's own history records.
+func TestFirstMessageDoesNotCorruptFullscreen(t *testing.T) {
+	const w, h = 60, 20
+	s := testterm.Start(t, newFullscreenScreenRoot(t, false), w, h)
+
+	// This Type/Enter pair is the one frame bannerText() flips on: the
+	// banner is still on screen (transcript is empty) right up until this
+	// Enter, and gone the instant it lands.
+	askAndWait(s, "hola desde el primer mensaje")
+
+	if !s.Grid().ContainsAnywhere("hola desde el primer mensaje") {
+		t.Errorf("the user's own first message is not on screen after "+
+			"submitting it — this is the reported \"no aparece mi "+
+			"mensaje\" symptom.\n%s", s.Dump("screen after the first message:"))
+	}
+	// The echo engine answers with the same text it was sent, so its
+	// presence a second time also confirms the assistant's reply landed
+	// (echoChunkSize means it arrives as several redraws, exercising more
+	// than one frame past the banner-retirement transition).
+	if got := s.Grid().Count("hola desde el primer mensaje"); got < 2 {
+		t.Errorf("expected the prompt to appear at least twice on screen "+
+			"(user's turn + echoed answer), got %d.\n%s", got,
+			s.Dump("screen after the first message:"))
+	}
+
+	// Fullscreen must never populate real scrollback (evictOverflow's own
+	// comment, and printBannerCmd's fix follows the identical reasoning):
+	// insertAbove would have no valid destination for it. A leaked write
+	// here — even one that did not visibly corrupt the alt screen — would
+	// mean the guard is not actually preventing insertAbove from running.
+	if sb := s.Grid().Scrollback(); len(sb) != 0 {
+		t.Errorf("fullscreen must never populate real scrollback via the "+
+			"banner-retirement path, got %d rows: %v", len(sb), sb)
+	}
+
+	// A desynced renderer diff is exactly the kind of bug that manifests
+	// as a line drawn past the terminal's own width (the renderer's cursor
+	// arithmetic went wrong, so wrapText's own invariant — never emit a
+	// line wider than the frame — no longer held for whatever got drawn
+	// next).
+	if width, row := s.Grid().Widest(); width > w {
+		t.Errorf("a line %d columns wide (row %d) was drawn on a "+
+			"%d-column fullscreen terminal — consistent with a desynced "+
+			"renderer diff after an out-of-band insertAbove write.\n%s",
+			width, row, w, s.Dump("screen after the first message:"))
 	}
 }

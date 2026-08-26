@@ -163,7 +163,7 @@ func TestDispatchSubAgentRoundTripsThroughToolResult(t *testing.T) {
 	// unit test with a fake Runner: the real closure dispatch.go's own
 	// production call sites (app.go's Run, agentturn.go's
 	// runAgentTurnHeadless) build, reusing this same *engine.Engine.
-	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false, nil)
+	dispatchRunner := newSubAgentRunner(eng, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false, nil, nil)
 	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}
@@ -259,7 +259,7 @@ func TestDispatchWithoutRunnerReportsAsToolErrorNotPanic(t *testing.T) {
 	// gates that, and this one is non-nil -- see registry.go's own
 	// MetaToolsOptions.DispatchRunner doc comment), but the closure itself
 	// always fails, exactly like an eng == nil newSubAgentRunner would.
-	dispatchRunner := newSubAgentRunner(nil, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false, nil)
+	dispatchRunner := newSubAgentRunner(nil, "auto/coding", "", cfg.Tools, guard, nil, tools.Caps{}, false, nil, nil)
 	opts, _ := buildAgentOptions(cfg.Tools, guard, nil, tools.Caps{}, false, dispatchRunner, nil)
 
 	hist := &convo.Conversation{}

@@ -282,6 +282,16 @@ type Root struct {
 	// engine bound to the destination Ref before committing the switch.
 	engineFor EngineFactory
 
+	// effortFor is F9's own §6.1 seam (effortcmd.go's own EffortResolver
+	// doc comment): turns m.model + m.effort into the
+	// engine.Request.Params override startEngineTurn/startAgentTurn
+	// attach to the request they are about to send. nil is a supported
+	// value, the same discipline engineFor/reloadFor/pathLister already
+	// establish: every test in this package, and any caller with
+	// nothing wired, simply never attaches an effort override — exactly
+	// the behaviour a session had before F9 existed.
+	effortFor EffortResolver
+
 	// loginFor drives the §13/Step 24 in-session /login wizard's actual
 	// network calls (loginfactory.go) — nil is a supported value
 	// (every test in this package, and any caller with nothing wired):
@@ -340,7 +350,57 @@ type Root struct {
 	model  string
 	system string
 
+	// effort is F9's own session-scoped state (docs/ROADMAP-ux-2026-08-20.md
+	// W5, effortcmd.go): the effort/thinking-level the user picked via
+	// /effort or the EffortCycle chord, exactly as it appears in the
+	// active model's own catalog.Model.EffortLevels — never the user's
+	// raw typed casing (setEffort/matchEffortLevel already normalize
+	// that before this is assigned). "" means "nothing chosen this
+	// session, use whatever the provider defaults to" — the same
+	// "absence is a legitimate value, not an error" convention system
+	// above already follows for "no system prompt configured": every
+	// turn-start site reads this fresh (startEngineTurn/startAgentTurn)
+	// and simply omits the effort override from engine.Request.Params
+	// when it is empty, rather than sending an empty string on the wire.
+	//
+	// Deliberately not persisted through any *Store: unlike titleStore/
+	// themeStore's own session-crossing writes, an effort level is a
+	// per-turn request parameter, not saved session state — the same
+	// reasoning that already keeps compactModel/system themselves
+	// in-memory-only fields on this struct.
+	effort string
+
 	transcript []transcriptEntry
+
+	// scrollOffset is fullscreen's own scroll position, in rows counted
+	// from the live tail: 0 means "pinned to the bottom, following new
+	// content as it arrives" (clipHead's original, only behaviour before
+	// this field existed); a positive value is how many rows the visible
+	// window has been scrolled back, towards the start of head()'s
+	// content. This is the fix for the reported "mouse wheel loads
+	// earlier messages instead of scrolling" bug — see emit's own doc
+	// comment (view.go) for the xterm mode-1007 mechanism that produced
+	// the symptom, and clipHead's own doc comment for how this offset
+	// turns into an actual visible window instead of always showing the
+	// tail.
+	//
+	// Deliberately a raw accumulator, never pre-clamped here: clipHead
+	// (view.go) clamps it against whatever the *current* frame's content
+	// and budget allow every time it draws, the same "rebuild from state,
+	// no memoization" discipline render()'s own doc comment already
+	// establishes for everything else in this package. That means a
+	// resize, an eviction, or a shrinking transcript can never leave this
+	// field pointing past the end of what actually exists — the next
+	// frame's clipHead call simply clamps it back into range — so nothing
+	// else in Update has to remember to re-validate it.
+	//
+	// Reset to 0 wherever printedUpTo also resets (ClearScreen, /clear,
+	// /new): a scroll position measured against a transcript that is
+	// about to be wiped has nothing left to mean. Also reset by submit
+	// (root.go): sending a new message is the user asking to continue the
+	// conversation, so it is reasonable to jump back to the live tail
+	// even if they had scrolled up to reread something.
+	scrollOffset int
 
 	// printedUpTo is how many of transcript's leading entries have already
 	// been handed to commitEntryCmd (tea.Println) and therefore live in the
@@ -1021,6 +1081,11 @@ type Options struct {
 	// nothing wired, keeps the pre-existing "relabel only" behaviour.
 	EngineFor EngineFactory
 
+	// EffortFor is F9's own §6.1 seam (effortcmd.go's own EffortResolver
+	// doc comment) — see Root.effortFor's own comment for what it is
+	// called with and why nil is a supported value.
+	EffortFor EffortResolver
+
 	// LoginFor drives /login's actual device-flow network calls
 	// (loginfactory.go) — see Root.loginFor's own comment for the §6.1
 	// boundary this crosses and why nil is a supported value.
@@ -1399,6 +1464,7 @@ func NewRoot(o Options) Root {
 		exitTranscript:    o.FullscreenExitTranscript,
 		eng:               engineOr(o.Engine),
 		engineFor:         o.EngineFor,
+		effortFor:         o.EffortFor,
 		loginFor:          o.LoginFor,
 		catalogRefreshFor: o.CatalogRefreshFor,
 		model:             model,
@@ -1709,6 +1775,24 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.finishAgentTurn(msg.result, msg.err)
 
+	case tea.MouseWheelMsg:
+		// Bug 1's own event: only ever meaningful in fullscreen, where
+		// emit (view.go) claims MouseModeCellMotion specifically so a
+		// real tea.MouseWheelMsg reaches here instead of xterm's mode
+		// 1007 silently rewriting the tick into an "up"/"down"
+		// tea.KeyPressMsg first. Global rather than folded into
+		// handleGlobalKey (which only ever sees tea.KeyPressMsg):
+		// scrolling to reread something is exactly the same "harmless to
+		// do while a turn is running, and simply unreachable from every
+		// overlay mode since each one's own updateX claims the keyboard
+		// first" case ToggleFold's own handleGlobalKey comment already
+		// describes, so it is handled the same way — before the mode
+		// switch, not gated to ModeChat.
+		if m.tuiMode != termenv.ModeFullscreen {
+			return m, nil
+		}
+		return m.scrollWheel(msg.Button), nil
+
 	case tea.KeyPressMsg:
 		if handled, next, cmd := m.handleGlobalKey(msg); handled {
 			return next, cmd
@@ -1816,6 +1900,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case m.keys.ClearScreen:
 		m.transcript = nil
 		m.printedUpTo = 0
+		m.scrollOffset = 0
 		return true, m, clearAndWipeCmd()
 
 	case m.keys.ModelPicker:
@@ -1862,8 +1947,93 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		// per handleGlobalKey's own doc comment.
 		m.foldCode = !m.foldCode
 		return true, m, nil
+
+	case m.keys.EffortCycle:
+		// Same "not gated to ModeChat" reasoning as ToggleFold above:
+		// cycling the effort level for the *next* turn is harmless to
+		// press while the current one is still streaming (ModeBusy), and
+		// every overlay mode's own updateX already claims the keyboard
+		// first, so this is simply unreachable there rather than needing
+		// its own guard. cycleEffort (effortcmd.go) is itself a silent
+		// no-op when the active model has no discrete effort levels, so
+		// no notice is shown either way — a chord is not a place to
+		// explain why it did nothing.
+		m = m.cycleEffort()
+		return true, m, nil
+
+	case m.keys.ScrollUp:
+		// Bug 1's keyboard half, alongside the tea.MouseWheelMsg case in
+		// updateDispatch above — handled here, before the mode switch,
+		// for the same reason ToggleFold's own comment gives: harmless
+		// to press mid-turn, and simply unreachable from any overlay
+		// mode since each claims the keyboard first. Handling it here
+		// specifically (rather than letting it fall through to
+		// updateChat/updateBusy's own tail, m.input.Update) is also what
+		// keeps it from ever reaching bubbles/v2's textarea, whose own
+		// KeyMap.PageUp binds the exact same "pgup" chord to moving the
+		// cursor inside the box — see Root.scrollOffset's own doc
+		// comment for why that box's cursor is not what this chord is
+		// for in fullscreen.
+		//
+		// Regular mode deliberately returns handled=false instead of
+		// swallowing the key: it has no scrollOffset concept (its
+		// scrollback is the terminal's own, per emit's own doc comment),
+		// so pgup/pgdown there fall through exactly as before this fix —
+		// to bubbles/v2's textarea's own PageUp/PageDown, moving the
+		// cursor inside a multi-line draft. Claiming the chord globally
+		// even in regular mode would have been a regression: it was
+		// never idle before this feature existed, and the config default
+		// (defaults.toml) only introduced a *fullscreen* meaning for it.
+		if m.tuiMode != termenv.ModeFullscreen {
+			return false, m, nil
+		}
+		return true, m.scrollBy(m.headBudget()), nil
+
+	case m.keys.ScrollDown:
+		if m.tuiMode != termenv.ModeFullscreen {
+			return false, m, nil
+		}
+		return true, m.scrollBy(-m.headBudget()), nil
 	}
 	return false, m, nil
+}
+
+// scrollWheel is one mouse-wheel tick's worth of Root.scrollOffset movement
+// — 3 rows per tick, the same MouseWheelDelta bubbles/v2's own viewport
+// widget defaults to, so a wheel tick here feels like the same amount of
+// content bubbles/v2's other scrollable widgets already move per tick,
+// rather than inventing a new, unfamiliar step size. Any button other than
+// MouseWheelUp/MouseWheelDown (a click, a horizontal wheel push) is a no-op:
+// this package has no other mouse feature to route it to yet.
+func (m Root) scrollWheel(button tea.MouseButton) Root {
+	const wheelStep = 3
+	switch button {
+	case tea.MouseWheelUp:
+		return m.scrollBy(wheelStep)
+	case tea.MouseWheelDown:
+		return m.scrollBy(-wheelStep)
+	default:
+		return m
+	}
+}
+
+// scrollBy moves Root.scrollOffset by delta rows — positive scrolls back
+// towards the start of the transcript, negative scrolls forward towards the
+// live tail — and clamps only the "never negative" floor here. The upper
+// bound (never past the actual start of content) is deliberately left to
+// clipHead's own per-frame clamp (view.go), not duplicated here: this
+// method has no access to the frame clipHead will actually draw against
+// (headBudget/headContent can both change between this call and the next
+// View, e.g. a resize riding the same tea.Msg batch), so guessing a ceiling
+// here could only ever be wrong in one direction or the other, while
+// clipHead's own clamp is always right because it runs against the exact
+// content and budget of the frame it is about to draw.
+func (m Root) scrollBy(delta int) Root {
+	m.scrollOffset += delta
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+	return m
 }
 
 // openPicker switches to ModePicker with a Picker built from the current
@@ -2137,18 +2307,33 @@ func (m Root) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// any line below that, up is ordinary cursor movement inside a
 			// multi-line draft, exactly like a shell's line editor leaves
 			// up/down alone once the cursor is not on the edge line.
+			//
+			// Deliberately does NOT recompute next.menu/next.atMenu from
+			// the recalled text (unlike the post-switch fallthrough below,
+			// which recomputes on every real keystroke). This is the fix
+			// for the reported "browsing history gets permanently stuck
+			// once it lands on a line that looks like a slash command"
+			// bug: if a recalled entry (e.g. "/model") happened to open
+			// m.menu here, the very next up/down press would be consumed
+			// by updateSlashMenu's own unconditional up/down cases (this
+			// same switch's m.menu.Active() branch, above) instead of
+			// ever reaching HistoryPrev/HistoryNext again — with no way
+			// back to browsing short of Esc (closes the menu) or Enter
+			// (runs the command), which is exactly the "queda estancado"
+			// symptom reported. Leaving the dropdown closed here costs
+			// nothing browsing-history-wise: a real command needs its
+			// argument typed to be useful, and the moment the user does
+			// type into a recalled "/..." line, the fallthrough path a few
+			// lines down recomputes the menu from that keystroke exactly
+			// as it always has.
 			if m.input.Line() == 0 {
 				if next, ok := m.historyPrev(); ok {
-					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
-					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
 		case m.keys.HistoryNext:
 			if m.input.Line() == m.input.LineCount()-1 {
 				if next, ok := m.historyNext(); ok {
-					next.menu = slashMenuFor(next.input.Value(), next.commands, next.menu)
-					next.atMenu = atMenuFor(currentWordAtEnd(next.input), next.pathLister, next.atMenu)
 					return next, nil
 				}
 			}
@@ -2416,6 +2601,15 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// very next frame it was never there to erase.
 	bannerText := m.bannerText()
 
+	// Sending a new message is the user asking to continue the
+	// conversation, so it is reasonable to jump back to the live tail even
+	// if they had scrolled up to reread something (Root.scrollOffset's own
+	// doc comment). Reset before appending: the new entry belongs at the
+	// tail scrollOffset is being reset towards, not somewhere a stale
+	// offset from before this call would still be treating as "scrolled
+	// back".
+	m.scrollOffset = 0
+
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "user", name: "tú", text: text, ts: time.Now(),
 	})
@@ -2477,6 +2671,7 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 		Model:    wireModel(m.cat, m.model),
 		Messages: m.conv.Active(),
 		System:   m.system,
+		Params:   m.effortParams(),
 	}, m.buf)
 
 	// The stream tick always runs — it is what delivers text. The animation
@@ -2488,7 +2683,7 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 	if !m.lay.AnimationsOff {
 		cmds = append(cmds, tickAnim(m.fps))
 	}
-	cmds = append(cmds, printBannerCmd(bannerText))
+	cmds = append(cmds, printBannerCmd(bannerText, m.tuiMode))
 	return m, tea.Batch(cmds...)
 }
 
@@ -2506,8 +2701,29 @@ func (m Root) startEngineTurn(bannerText string) (tea.Model, tea.Cmd) {
 // Returns nil, not a no-op Cmd, when there is nothing to print: tea.Batch
 // already drops nil commands (see its own doc comment), so every caller can
 // unconditionally append this without its own bannerText != "" check.
-func printBannerCmd(bannerText string) tea.Cmd {
-	if bannerText == "" {
+//
+// mode == termenv.ModeFullscreen is an early-return, mirroring
+// evictOverflow's own fullscreen guard exactly and for the identical
+// reason: this function's only mechanism is tea.Println/insertAbove, and
+// reading bubbletea's own cursed_renderer.go confirms insertAbove writes
+// straight to the terminal (bypassing s.cellbuf/s.lastView, the renderer's
+// own diff state) with no AltScreen check anywhere in its body — despite
+// renderer.go's doc comment claiming "if the altscreen is active no output
+// will be printed" (already flagged as a doc/code discrepancy in this
+// project's own docs/PLAN.md, W3 part 6). In fullscreen there is no real
+// scrollback for insertAbove to retire the banner into: AltScreen's buffer
+// is the alternate screen, and writing into it out of band from the
+// renderer's own frame desyncs the renderer's next diff from what is
+// actually on screen — this was confirmed to be the mechanism behind the
+// reported "sending the first message corrupts the whole interface" bug
+// (W5 UI-bugs follow-up), reproduced with TestFirstMessageDoesNotCorruptFullscreen.
+// Fullscreen needs no equivalent of this call at all: render() already
+// recomputes bannerText() (which returns "" the instant the transcript is
+// non-empty) from m.transcript on every frame, so the banner simply stops
+// being drawn on the very next redraw — nothing needs to be separately
+// "retired" the way regular mode's real terminal scrollback does.
+func printBannerCmd(bannerText string, mode termenv.Mode) tea.Cmd {
+	if bannerText == "" || mode == termenv.ModeFullscreen {
 		return nil
 	}
 	// The trailing "\n" is the same blank separator line head() used to

@@ -175,15 +175,68 @@ func (p *Provider) buildBody(req provider.Request, contents []wireContent, syste
 
 // applyParam es una copia de anthropic.applyParam/openai.applyParam: un
 // valor nil borra la clave, para poder quitar un campo desde el TOML.
+//
+// F9 extends this with one level (or more) of dotted-key nesting: a key
+// like "generationConfig.thinkingConfig.thinkingLevel" walks/creates the
+// intermediate objects and applies nil-deletes/sets-otherwise only to the
+// innermost one, instead of only ever touching a flat top-level field. This
+// matters concretely for this dialect: buildBody sets body["generationConfig"]
+// as a typed wireGenConfig struct (not a map[string]any) whenever haveGC is
+// true — descend's own comment explains why a JSON round-trip, not a naive
+// overwrite, is what lets a dotted params override reach inside that struct
+// (or inside its own nested *wireThinkingConfig) without discarding whatever
+// buildBody already put there. A flat key (every existing caller) behaves
+// exactly as before: this is purely additive.
 func applyParam(body map[string]any, k string, v any) {
 	if k == "" {
 		return
 	}
-	if v == nil {
-		delete(body, k)
+	segs := strings.Split(k, ".")
+	target := body
+	for _, seg := range segs[:len(segs)-1] {
+		if seg == "" {
+			return // malformed key ("a..b", leading/trailing dot): no-op, safer than guessing
+		}
+		target = descend(target, seg)
+	}
+	leaf := segs[len(segs)-1]
+	if leaf == "" {
 		return
 	}
-	body[k] = v
+	if v == nil {
+		delete(target, leaf)
+		return
+	}
+	target[leaf] = v
+}
+
+// descend es una copia de openai.descend: devuelve el mapa anidado en
+// body[seg], creando uno vacío si no existe. Si body[seg] ya contiene otra
+// cosa — aquí, típicamente, el struct tipado wireGenConfig que buildBody puso
+// antes de que corriera el bucle de params — se pasa primero por
+// encoding/json (Marshal/Unmarshal) para que sus campos existentes
+// sobrevivan como mapa en vez de perderse con un simple
+// "target[seg] = map[string]any{}". Esto funciona porque wireGenConfig y
+// wireThinkingConfig (wire.go) llevan sus propias etiquetas json:"..." en
+// cada campo. Un Marshal fallido (no debería pasar con nada que buildBody
+// construya) cae a un mapa vacío en vez de entrar en pánico o devolver un
+// error que nada aquí podría reportar de forma útil.
+func descend(body map[string]any, seg string) map[string]any {
+	switch existing := body[seg].(type) {
+	case map[string]any:
+		return existing
+	case nil:
+		m := map[string]any{}
+		body[seg] = m
+		return m
+	default:
+		m := map[string]any{}
+		if raw, err := json.Marshal(existing); err == nil {
+			_ = json.Unmarshal(raw, &m)
+		}
+		body[seg] = m
+		return m
+	}
 }
 
 // httpError interpreta una respuesta con estado distinto de 200 y la

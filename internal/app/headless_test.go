@@ -594,6 +594,64 @@ func TestBuildPrompt(t *testing.T) {
 	}
 }
 
+// TestHeadlessEffortFlagReachesTheWire pins F9's own headless-equivalent
+// (docs/ROADMAP-ux-2026-08-20.md W5, HeadlessOptions.Effort's own doc
+// comment): --effort must reach the request body through the exact same
+// EffortParamsFor(pc, level) call the interactive TUI's EffortResolver
+// makes, keyed by the resolved provider's own dialect ("openai" here, via
+// cfgFor, so the wire key is the flat "reasoning_effort").
+func TestHeadlessEffortFlagReachesTheWire(t *testing.T) {
+	var gotBody map[string]any
+	srv := fake.SSEServer(fake.SSEOptions{
+		Chunks: []string{fake.SSEDelta("ok"), fake.SSEDone()},
+		OnRequest: func(_ *http.Request, body []byte) {
+			_ = json.Unmarshal(body, &gotBody)
+		},
+	})
+	defer srv.Close()
+
+	code, _, _ := run(t, HeadlessOptions{
+		Config: cfgFor(t, srv.URL),
+		Prompt: "hi",
+		Effort: "high",
+	})
+	if code != ExitOK {
+		t.Fatalf("code = %d", code)
+	}
+
+	if gotBody["reasoning_effort"] != "high" {
+		t.Errorf("the sent body does not carry the --effort override: %+v", gotBody)
+	}
+}
+
+// TestHeadlessNoEffortFlagOmitsTheParam is the companion negative case: an
+// unset --effort (the ordinary, pre-F9 case) must not add any params
+// field at all, matching EffortParams' own "nil, not an empty map" rule
+// for "nothing to ask for" (effort_test.go's own
+// TestEffortParamsEmptyLevelReturnsNil).
+func TestHeadlessNoEffortFlagOmitsTheParam(t *testing.T) {
+	var gotBody map[string]any
+	srv := fake.SSEServer(fake.SSEOptions{
+		Chunks: []string{fake.SSEDelta("ok"), fake.SSEDone()},
+		OnRequest: func(_ *http.Request, body []byte) {
+			_ = json.Unmarshal(body, &gotBody)
+		},
+	})
+	defer srv.Close()
+
+	code, _, _ := run(t, HeadlessOptions{
+		Config: cfgFor(t, srv.URL),
+		Prompt: "hi",
+	})
+	if code != ExitOK {
+		t.Fatalf("code = %d", code)
+	}
+
+	if _, has := gotBody["reasoning_effort"]; has {
+		t.Errorf("the sent body should not carry reasoning_effort when --effort is unset: %+v", gotBody)
+	}
+}
+
 func TestTitleFrom(t *testing.T) {
 	if got := titleFrom("  a question \n and more "); got != "a question" {
 		t.Errorf("titleFrom = %q", got)

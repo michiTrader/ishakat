@@ -232,7 +232,15 @@ func Run(version string, resume bool) int {
 		// dispatched turn can be given the same asker the parent turn gets
 		// (see newSubAgentRunner's own doc comment on why).
 		asker = newTUIAsker()
-		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker)
+		// params is nil here: this dispatchRunner closure is built once at
+		// boot, before Root (and therefore Root.effort, F9's own
+		// session-scoped choice) is even constructed, so there is no live
+		// per-turn effort value to close over here any more than there is
+		// a live ref.WireID/system for a later model switch — see
+		// newSubAgentRunner's own doc comment for why that is the correct,
+		// pre-existing limitation this call site already accepts for
+		// model/system, not a new gap F9 introduces.
+		dispatchRunner := newSubAgentRunner(eng, ref.WireID, system, cfg.Tools, guard, modelCost, modelCaps, !noTTY, asker, nil)
 		agentOpts, toolsWarn = buildAgentOptions(cfg.Tools, guard, modelCost, modelCaps, !noTTY, dispatchRunner, asker)
 		warnp.Warn(os.Stderr, toolsWarn)
 
@@ -399,6 +407,11 @@ func Run(version string, resume bool) int {
 		// catalog says cannot take them — instead of inheriting whatever
 		// the boot model happened to support.
 		EngineFor: NewEngineFactory(cfg, &snap.Catalog, version, cfg.Tools.Enabled),
+		// EffortFor is F9's own seam (internal/tui/effortcmd.go's own
+		// EffortResolver doc comment): resolves /effort's and the
+		// EffortCycle chord's chosen level into the engine.Request.Params
+		// override that reaches the active model's own provider dialect.
+		EffortFor: NewEffortResolver(cfg),
 		// LoginFor drives /login's actual device-flow network calls
 		// (internal/tui/loginfactory.go's own §6.1 boundary comment) —
 		// see loginfactory.go's own doc comment for why every built-in

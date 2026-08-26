@@ -667,6 +667,90 @@ func TestStreamParamsSobrescribenElCuerpo(t *testing.T) {
 	}
 }
 
+// TestStreamParamsConClaveAnidadaCreaElObjetoIntermedio is F9's regression
+// guard for applyParam's dotted-key extension: a key like
+// "extra_body.google.thinking_config.include_thoughts" must walk/create the
+// intermediate objects and set only the innermost field, without disturbing
+// a sibling flat key applied in the same params map. This dialect's own
+// buildBody never pre-populates a nested struct at "extra_body" (unlike
+// gemini's typed generationConfig), so this exercises descend's `nil` branch,
+// not its JSON-round-trip branch — that branch is pinned separately in
+// gemini's own test for this same extension.
+func TestStreamParamsConClaveAnidadaCreaElObjetoIntermedio(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{"data: [DONE]\n\n"}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+
+	p := newProvider(t, srv.URL)
+	req := hola()
+	req.Params = map[string]any{
+		"extra_body.google.thinking_config.include_thoughts": true,
+		"top_p": 0.5, // sibling flat key: must survive alongside the nested one
+	}
+
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	if gotBody["top_p"] != 0.5 {
+		t.Errorf("una clave plana junto a una anidada debe seguir llegando: %+v", gotBody)
+	}
+	eb, ok := gotBody["extra_body"].(map[string]any)
+	if !ok {
+		t.Fatalf("extra_body no se creó como objeto: %+v", gotBody)
+	}
+	g, ok := eb["google"].(map[string]any)
+	if !ok {
+		t.Fatalf("extra_body.google no se creó como objeto: %+v", eb)
+	}
+	tc, ok := g["thinking_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("extra_body.google.thinking_config no se creó como objeto: %+v", g)
+	}
+	if tc["include_thoughts"] != true {
+		t.Errorf("include_thoughts = %v, want true", tc["include_thoughts"])
+	}
+}
+
+// TestStreamParamsAnidadosNilBorraSoloLaHoja pins the delete side of the
+// dotted-key extension: a nil at the leaf must delete only that innermost
+// key, leaving sibling fields at the same nesting level untouched.
+func TestStreamParamsAnidadosNilBorraSoloLaHoja(t *testing.T) {
+	var gotBody map[string]any
+	srv := sseServer(t, []string{"data: [DONE]\n\n"}, func(_ *http.Request, body []byte) {
+		_ = json.Unmarshal(body, &gotBody)
+	})
+
+	p := newProvider(t, srv.URL, func(s *provider.Settings) {
+		s.Params = map[string]any{
+			"extra_body.foo": "bar",
+			"extra_body.baz": "qux",
+		}
+	})
+	req := hola()
+	req.Params = map[string]any{"extra_body.foo": nil}
+
+	ch, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	drain(t, ch)
+
+	eb, ok := gotBody["extra_body"].(map[string]any)
+	if !ok {
+		t.Fatalf("extra_body no se creó como objeto: %+v", gotBody)
+	}
+	if _, hay := eb["foo"]; hay {
+		t.Errorf("un nil en una clave anidada debe borrar solo esa hoja: %+v", eb)
+	}
+	if eb["baz"] != "qux" {
+		t.Errorf("una hoja hermana no debe verse afectada por el borrado de otra: %+v", eb)
+	}
+}
+
 func TestStreamSystemVaPrimero(t *testing.T) {
 	var gotBody struct {
 		Messages []openai.ChatMessage `json:"messages"`
