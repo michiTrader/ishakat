@@ -571,16 +571,97 @@ func clipHead(raw string, g glyphs, budget int, offset int) string {
 		needTop = start > 0
 	}
 
+	// bar is the reported "no rectangle shows the vertical scroll position"
+	// gap, drawn onto whichever affordance line below is already going to
+	// print — never as a line of its own, so this costs none of the extra
+	// budget rows the RC-3 height invariant did not already reserve for it
+	// (see scrollBarText's own doc comment for why a whole separate footer
+	// item was tried and reverted). "" when maxOffset is 0: there is
+	// nothing to scroll, so nothing to show a position within.
+	//
+	// Appended to "below" in preference to "above" whenever both
+	// affordances are showing (scrolled to somewhere in the middle of a
+	// long transcript): "below" sits right above the input box, the row
+	// closest to where the user's eye already is after scrolling with the
+	// wheel or a chord, so that is where a fresh reading of the bar costs
+	// the least attention. "above" only gets it when there is no "below"
+	// to prefer, i.e. offset == 0 can never reach this branch (needBottom
+	// is offset > 0), so needTop-without-needBottom only happens with
+	// budget so tight the two-pass shape above never even reserved a
+	// bottom row to begin with — showing the bar there instead of nowhere
+	// is still strictly better than dropping it.
+	bar := ""
+	if maxOffset > 0 {
+		bar = "  " + scrollBarText(g, 1-float64(offset)/float64(maxOffset))
+	}
+
 	out := make([]string, 0, budget)
 	if needTop {
-		out = append(out, fmt.Sprintf("%s %d %s above", g.clipMark, start, rowUnit(start)))
+		topBar := bar
+		if needBottom {
+			topBar = ""
+		}
+		out = append(out, fmt.Sprintf("%s %d %s above%s", g.clipMark, start, rowUnit(start), topBar))
 	}
 	out = append(out, content[start:end]...)
 	if needBottom {
 		hiddenBelow := n - end
-		out = append(out, fmt.Sprintf("%s %d %s below", g.clipMark, hiddenBelow, rowUnit(hiddenBelow)))
+		out = append(out, fmt.Sprintf("%s %d %s below%s", g.clipMark, hiddenBelow, rowUnit(hiddenBelow), bar))
 	}
 	return strings.Join(out, "\n") + "\n"
+}
+
+// scrollBarText draws fullscreen's scroll-position indicator — the
+// reported "no rectangle shows the vertical scroll position" gap — as a
+// small thumb sliding across a fixed-width rail: "↕[  ▓  ]" near the
+// middle, "↕[▓    ]" at the top, "↕[    ▓]" at the live tail.
+//
+// This is appended to clipHead's own "…N rows above"/"…N rows below"
+// affordance line(s) (its only caller) rather than drawn as its own
+// footer item: a first version of this fix added a "scroll" entry to
+// footerItemOrder (footer.go) instead, and TestB2UserMessageSurvivesALongAnswer
+// caught the reason that was wrong — an item that sometimes wraps a narrow
+// footer into a second row changes headBudget() between the row-count
+// pass restRows() runs and the frame renderRaw() actually draws, which is
+// exactly the kind of drift RC-3's height invariant exists to rule out,
+// and it manifested as real, reproducible content loss. clipHead's
+// affordance line has no such problem: it is budget-accounted for already
+// (the two-pass shape above spends a row on it whenever it is shown,
+// whether or not this text is appended to it), so riding along on a line
+// that already exists costs nothing new to get wrong.
+//
+// rail is the count of cells between the brackets: 5 is enough columns for
+// the thumb's position to visibly move without the affordance line itself
+// growing unreasonably long next to its own "N rows above/below" text.
+func scrollBarText(g glyphs, pct float64) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	const rail = 5
+	// pct is 1 at the live tail and 0 at the top — thumb position walks
+	// the same direction, so the bar's right edge is the tail and its
+	// left edge is the top, matching how a reader already expects a
+	// vertical scrollbar's thumb to move as they scroll towards either
+	// end.
+	pos := int(pct*float64(rail-1) + 0.5)
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > rail-1 {
+		pos = rail - 1
+	}
+	cells := make([]string, rail)
+	for i := range cells {
+		if i == pos {
+			cells[i] = g.barFull
+		} else {
+			cells[i] = g.barEmpty
+		}
+	}
+	return g.scrollMark + "[" + strings.Join(cells, "") + "]"
 }
 
 // rowUnit is clipHead's singular/plural affordance-count noun.

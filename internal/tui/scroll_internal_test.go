@@ -7,6 +7,7 @@ package tui
 // and maxScrollOffset's (view.go) for the fix.
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -179,5 +180,77 @@ func TestScrollUpPastTopThenDownIsSymmetric(t *testing.T) {
 	}
 	if r.scrollOffset != 0 {
 		t.Fatalf("after scrolling down the same %d ticks it took to reach the top, scrollOffset = %d, want 0 (no leftover invisible debt)", realTicksUp, r.scrollOffset)
+	}
+}
+
+// TestScrollBarAppearsOnlyWhenThereIsSomethingToScroll is the other
+// reported gap's own regression: "no rectangle shows the vertical scroll
+// position". scrollBarText (view.go's g.scrollMark rail) is riding along
+// on clipHead's own "…N rows above"/"…N rows below" affordance line — see
+// its own doc comment for why a separate footer item was tried and
+// reverted — so the observable contract is "the rendered head() contains
+// the scroll glyph exactly when maxScrollOffset() > 0, never when it is
+// 0".
+func TestScrollBarAppearsOnlyWhenThereIsSomethingToScroll(t *testing.T) {
+	// Too few entries for headBudget() to ever clip: nothing to scroll,
+	// so the bar must not appear at all.
+	short := newScrollTestRoot(t, 60, 40, 2)
+	if max := short.maxScrollOffset(); max != 0 {
+		t.Fatalf("test setup: maxScrollOffset() = %d, want 0 (a terminal this tall with 2 entries should never clip)", max)
+	}
+	g := short.lay.glyphs()
+	// g.scrollMark alone ("|" in ASCII) collides with userMark's own "|"
+	// prefix on every transcript line, so the marker checked for here is
+	// scrollBarText's whole "mark[" opening — unambiguous in both
+	// repertoires, and exactly the substring scrollBarText (view.go)
+	// always emits together.
+	marker := g.scrollMark + "["
+	if got := short.head(); strings.Contains(got, marker) {
+		t.Errorf("head() contains the scroll bar %q with nothing to scroll:\n%s", marker, got)
+	}
+
+	// Enough entries to force the clip, and therefore the bar, to appear.
+	long := newScrollTestRoot(t, 60, 14, 8)
+	if max := long.maxScrollOffset(); max <= 0 {
+		t.Fatalf("test setup: maxScrollOffset() = %d, want > 0", max)
+	}
+	if got := long.head(); !strings.Contains(got, marker) {
+		t.Errorf("head() does not contain the scroll bar %q even though maxScrollOffset() > 0:\n%s", marker, got)
+	}
+}
+
+// TestScrollBarMovesTowardsTheTopAsScrollOffsetGrows pins scrollBarText's
+// own direction convention end to end: scrolling further back (larger
+// scrollOffset) must move the rendered thumb towards the rail's left edge,
+// and returning to the tail (scrollOffset == 0) must show it pinned at the
+// right edge — "↕[    ▓]" in the Unicode repertoire, matching how a reader
+// already expects a vertical scrollbar's thumb to move.
+func TestScrollBarMovesTowardsTheTopAsScrollOffsetGrows(t *testing.T) {
+	r := newScrollTestRoot(t, 60, 14, 40)
+	g := r.lay.glyphs()
+	max := r.maxScrollOffset()
+	if max <= 0 {
+		t.Fatalf("test setup: maxScrollOffset() = %d, want > 0", max)
+	}
+
+	tailBar := scrollBarText(g, 1) // pinned at the live tail
+	topBar := scrollBarText(g, 0)  // scrolled all the way back
+	if tailBar == topBar {
+		t.Fatalf("scrollBarText(pct=1) and scrollBarText(pct=0) produced the same text %q; the thumb must move", tailBar)
+	}
+	if !strings.HasSuffix(tailBar, g.barFull+"]") {
+		t.Errorf("scrollBarText(pct=1) = %q, want the thumb (%q) at the rail's right edge", tailBar, g.barFull)
+	}
+	if !strings.HasPrefix(topBar, g.scrollMark+"["+g.barFull) {
+		t.Errorf("scrollBarText(pct=0) = %q, want the thumb (%q) at the rail's left edge", topBar, g.barFull)
+	}
+
+	r = r.scrollBy(max) // scroll all the way back
+	if got := r.head(); !strings.Contains(got, topBar) {
+		t.Errorf("head() at scrollOffset=max does not contain the top-of-rail bar %q:\n%s", topBar, got)
+	}
+	r = r.scrollBy(-max) // back to the tail
+	if got := r.head(); !strings.Contains(got, tailBar) {
+		t.Errorf("head() at scrollOffset=0 does not contain the tail-of-rail bar %q:\n%s", tailBar, got)
 	}
 }
