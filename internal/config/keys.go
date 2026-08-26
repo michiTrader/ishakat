@@ -52,6 +52,8 @@ func validateKeys(c *Config) error {
 		{"queue_followup", k.QueueFollowup},
 		{"edit_queue", k.EditQueue},
 		{"effort_cycle", k.EffortCycle},
+		{"scroll_up", k.ScrollUp},
+		{"scroll_down", k.ScrollDown},
 	} {
 		if f.value == "" {
 			continue

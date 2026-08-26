@@ -135,13 +135,23 @@ func TestBannerAppearsExactlyOnceInBothModes(t *testing.T) {
 }
 
 // TestEmitIsTheOnlyModeAwareFunction checks Rule 2's other half directly:
-// build one Frame, call emit with both modes, and confirm the only thing
-// that is allowed to differ is exactly what emit's own doc comment names as
-// the actual mode-aware decision — AltScreen. If render() ever grows a mode
-// parameter, or if some future change makes regular and fullscreen disagree
-// about MouseMode or the cursor, this is the test that catches it: those
-// are style-level policies, and unlike AltScreen there is no design note
-// anywhere permitting them to differ per mode.
+// build one Frame, call emit with both modes, and confirm the only things
+// that are allowed to differ are exactly what emit's own doc comment names
+// as its mode-aware decisions — AltScreen, and (as of the Bug 1 fix)
+// MouseMode. Content must never differ: render()'s output has to pass
+// through emit unchanged regardless of mode, or render() itself has grown
+// mode-awareness it should not have (Rule 2).
+//
+// MouseMode is deliberately asserted asymmetric, not equal, unlike a plain
+// "the two views must agree" check: regular must keep MouseModeNone (native
+// terminal scrollback/selection, unchanged since before this fix), and
+// fullscreen must claim MouseModeCellMotion — this is what suppresses
+// xterm's own DECSET mode 1007 "Alternate Scroll Mode" from rewriting mouse
+// wheel ticks into synthetic up/down keypresses once AltScreen is showing
+// (see emit's own doc comment for the full mechanism). An older version of
+// this test asserted MouseMode must be identical between modes; that
+// assertion was the correct invariant before Bug 1 was understood, and is
+// now the wrong one on purpose.
 func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 	f := Frame{Content: "line one\nline two"}
 	var cursor *tea.Cursor
@@ -153,8 +163,11 @@ func TestEmitIsTheOnlyModeAwareFunction(t *testing.T) {
 		t.Errorf("emit changed Content based on mode; render()'s output must pass through unchanged. regular=%q fullscreen=%q",
 			regularView.Content, fullscreenView.Content)
 	}
-	if regularView.MouseMode != fullscreenView.MouseMode {
-		t.Errorf("emit changed MouseMode based on mode: regular=%v fullscreen=%v", regularView.MouseMode, fullscreenView.MouseMode)
+	if regularView.MouseMode != tea.MouseModeNone {
+		t.Errorf("regular must keep MouseMode at MouseModeNone (native terminal scrollback/selection), got %v", regularView.MouseMode)
+	}
+	if fullscreenView.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("fullscreen must claim the mouse via MouseModeCellMotion (Bug 1 fix: this is what suppresses xterm's mode-1007 wheel-to-arrow-key translation), got %v", fullscreenView.MouseMode)
 	}
 	if regularView.AltScreen {
 		t.Errorf("regular must never set AltScreen")

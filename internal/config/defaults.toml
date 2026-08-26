@@ -100,6 +100,12 @@ edit_queue = "alt+up"
 # F9: cycles the current model's effort/thinking-level through its own
 # catalog.Model.EffortLevels.
 effort_cycle = "ctrl+g"
+# Fullscreen mode's own scrollback (Bug 1 fix): page the view back/forward
+# through the transcript. The mouse wheel does the same thing a row at a
+# time once fullscreen claims the mouse (view.go's emit); regular mode
+# never reads these, since its scrollback is the terminal's own.
+scroll_up = "pgup"
+scroll_down = "pgdown"
 
 [catalog]
 sources = ["provider", "modelsdev", "config"]

@@ -70,6 +70,18 @@ type Map struct {
 	// adopting a chord" discipline ToggleFold's own comment documents.
 	EffortCycle string
 
+	// ScrollUp/ScrollDown are fullscreen's own scrollback keys (Bug 1
+	// fix): pgup/pgdown page Root.scrollOffset back/forward through the
+	// transcript, the keyboard half of the fix alongside emit's
+	// MouseModeCellMotion (view.go) — see Root.scrollOffset's own doc
+	// comment (root.go) for the full mechanism. pgup/pgdown were already
+	// valid chords (namedKeys, internal/config/keys.go) before this fix,
+	// so no decoder/validator work was needed to bind them here; the
+	// naming follows bubbles/v2 list's own precedent for pgup/pgdown as
+	// "page/scroll" keys.
+	ScrollUp   string
+	ScrollDown string
+
 	// QuitRepeat is how many times Quit must be pressed inside the grace
 	// window to actually exit (§7.4, RC-1). 1 quits on the first press;
 	// 2 is the shipped double-press; N counts presses. 0 is treated as
@@ -95,6 +107,8 @@ var defaultMap = Map{
 	QueueFollowup: "alt+enter",
 	EditQueue:     "alt+up",
 	EffortCycle:   "ctrl+g",
+	ScrollUp:      "pgup",
+	ScrollDown:    "pgdown",
 	QuitRepeat:    2,
 }
 
@@ -123,6 +137,8 @@ func NewMap(k config.Keys) Map {
 		QueueFollowup: or(k.QueueFollowup, defaultMap.QueueFollowup),
 		EditQueue:     or(k.EditQueue, defaultMap.EditQueue),
 		EffortCycle:   or(k.EffortCycle, defaultMap.EffortCycle),
+		ScrollUp:      or(k.ScrollUp, defaultMap.ScrollUp),
+		ScrollDown:    or(k.ScrollDown, defaultMap.ScrollDown),
 		QuitRepeat:    repeat,
 	}
 	return m

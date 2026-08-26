@@ -178,6 +178,17 @@ type Keys struct {
 	// comment.
 	EditQueue string `toml:"edit_queue"`
 
+	// ScrollUp/ScrollDown are fullscreen's own scrollback keys (Bug 1
+	// fix): page the view back/forward through the transcript. Named
+	// after bubbles/v2 list's own "page/scroll" precedent for pgup/pgdown
+	// rather than invented fresh. Regular mode never reads these — its
+	// scrollback is the terminal's own — and the mouse wheel does the
+	// same thing a row at a time once fullscreen claims the mouse (see
+	// tui's emit, whose MouseModeCellMotion is the other half of this
+	// fix).
+	ScrollUp   string `toml:"scroll_up"`
+	ScrollDown string `toml:"scroll_down"`
+
 	// EffortCycle is F9's chord (docs/ROADMAP-ux-2026-08-20.md, W5):
 	// cycles the current model's effort/thinking-level through its own
 	// catalog.Model.EffortLevels, the same discrete per-model vocabulary

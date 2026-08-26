@@ -112,6 +112,7 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		// and what the next turn sends the model, is untouched.
 		m.transcript = nil
 		m.printedUpTo = 0
+		m.scrollOffset = 0
 		return m, clearAndWipeCmd()
 	case slash.KindNew:
 		// Unlike /clear, /new also drops the conversation itself: the next
@@ -119,6 +120,7 @@ func (m Root) runSlashCommand(cmd slash.Command, args string) (tea.Model, tea.Cm
 		m.conv = convo.Conversation{}
 		m.transcript = nil
 		m.printedUpTo = 0
+		m.scrollOffset = 0
 		return m, clearAndWipeCmd()
 	case slash.KindExit:
 		m.quitting = true

@@ -372,6 +372,36 @@ type Root struct {
 
 	transcript []transcriptEntry
 
+	// scrollOffset is fullscreen's own scroll position, in rows counted
+	// from the live tail: 0 means "pinned to the bottom, following new
+	// content as it arrives" (clipHead's original, only behaviour before
+	// this field existed); a positive value is how many rows the visible
+	// window has been scrolled back, towards the start of head()'s
+	// content. This is the fix for the reported "mouse wheel loads
+	// earlier messages instead of scrolling" bug — see emit's own doc
+	// comment (view.go) for the xterm mode-1007 mechanism that produced
+	// the symptom, and clipHead's own doc comment for how this offset
+	// turns into an actual visible window instead of always showing the
+	// tail.
+	//
+	// Deliberately a raw accumulator, never pre-clamped here: clipHead
+	// (view.go) clamps it against whatever the *current* frame's content
+	// and budget allow every time it draws, the same "rebuild from state,
+	// no memoization" discipline render()'s own doc comment already
+	// establishes for everything else in this package. That means a
+	// resize, an eviction, or a shrinking transcript can never leave this
+	// field pointing past the end of what actually exists — the next
+	// frame's clipHead call simply clamps it back into range — so nothing
+	// else in Update has to remember to re-validate it.
+	//
+	// Reset to 0 wherever printedUpTo also resets (ClearScreen, /clear,
+	// /new): a scroll position measured against a transcript that is
+	// about to be wiped has nothing left to mean. Also reset by submit
+	// (root.go): sending a new message is the user asking to continue the
+	// conversation, so it is reasonable to jump back to the live tail
+	// even if they had scrolled up to reread something.
+	scrollOffset int
+
 	// printedUpTo is how many of transcript's leading entries have already
 	// been handed to commitEntryCmd (tea.Println) and therefore live in the
 	// terminal's real scrollback. head() only redraws transcript[printedUpTo:]
@@ -1745,6 +1775,24 @@ func (m Root) updateDispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.finishAgentTurn(msg.result, msg.err)
 
+	case tea.MouseWheelMsg:
+		// Bug 1's own event: only ever meaningful in fullscreen, where
+		// emit (view.go) claims MouseModeCellMotion specifically so a
+		// real tea.MouseWheelMsg reaches here instead of xterm's mode
+		// 1007 silently rewriting the tick into an "up"/"down"
+		// tea.KeyPressMsg first. Global rather than folded into
+		// handleGlobalKey (which only ever sees tea.KeyPressMsg):
+		// scrolling to reread something is exactly the same "harmless to
+		// do while a turn is running, and simply unreachable from every
+		// overlay mode since each one's own updateX claims the keyboard
+		// first" case ToggleFold's own handleGlobalKey comment already
+		// describes, so it is handled the same way — before the mode
+		// switch, not gated to ModeChat.
+		if m.tuiMode != termenv.ModeFullscreen {
+			return m, nil
+		}
+		return m.scrollWheel(msg.Button), nil
+
 	case tea.KeyPressMsg:
 		if handled, next, cmd := m.handleGlobalKey(msg); handled {
 			return next, cmd
@@ -1852,6 +1900,7 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case m.keys.ClearScreen:
 		m.transcript = nil
 		m.printedUpTo = 0
+		m.scrollOffset = 0
 		return true, m, clearAndWipeCmd()
 
 	case m.keys.ModelPicker:
@@ -1911,8 +1960,80 @@ func (m Root) handleGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		// explain why it did nothing.
 		m = m.cycleEffort()
 		return true, m, nil
+
+	case m.keys.ScrollUp:
+		// Bug 1's keyboard half, alongside the tea.MouseWheelMsg case in
+		// updateDispatch above — handled here, before the mode switch,
+		// for the same reason ToggleFold's own comment gives: harmless
+		// to press mid-turn, and simply unreachable from any overlay
+		// mode since each claims the keyboard first. Handling it here
+		// specifically (rather than letting it fall through to
+		// updateChat/updateBusy's own tail, m.input.Update) is also what
+		// keeps it from ever reaching bubbles/v2's textarea, whose own
+		// KeyMap.PageUp binds the exact same "pgup" chord to moving the
+		// cursor inside the box — see Root.scrollOffset's own doc
+		// comment for why that box's cursor is not what this chord is
+		// for in fullscreen.
+		//
+		// Regular mode deliberately returns handled=false instead of
+		// swallowing the key: it has no scrollOffset concept (its
+		// scrollback is the terminal's own, per emit's own doc comment),
+		// so pgup/pgdown there fall through exactly as before this fix —
+		// to bubbles/v2's textarea's own PageUp/PageDown, moving the
+		// cursor inside a multi-line draft. Claiming the chord globally
+		// even in regular mode would have been a regression: it was
+		// never idle before this feature existed, and the config default
+		// (defaults.toml) only introduced a *fullscreen* meaning for it.
+		if m.tuiMode != termenv.ModeFullscreen {
+			return false, m, nil
+		}
+		return true, m.scrollBy(m.headBudget()), nil
+
+	case m.keys.ScrollDown:
+		if m.tuiMode != termenv.ModeFullscreen {
+			return false, m, nil
+		}
+		return true, m.scrollBy(-m.headBudget()), nil
 	}
 	return false, m, nil
+}
+
+// scrollWheel is one mouse-wheel tick's worth of Root.scrollOffset movement
+// — 3 rows per tick, the same MouseWheelDelta bubbles/v2's own viewport
+// widget defaults to, so a wheel tick here feels like the same amount of
+// content bubbles/v2's other scrollable widgets already move per tick,
+// rather than inventing a new, unfamiliar step size. Any button other than
+// MouseWheelUp/MouseWheelDown (a click, a horizontal wheel push) is a no-op:
+// this package has no other mouse feature to route it to yet.
+func (m Root) scrollWheel(button tea.MouseButton) Root {
+	const wheelStep = 3
+	switch button {
+	case tea.MouseWheelUp:
+		return m.scrollBy(wheelStep)
+	case tea.MouseWheelDown:
+		return m.scrollBy(-wheelStep)
+	default:
+		return m
+	}
+}
+
+// scrollBy moves Root.scrollOffset by delta rows — positive scrolls back
+// towards the start of the transcript, negative scrolls forward towards the
+// live tail — and clamps only the "never negative" floor here. The upper
+// bound (never past the actual start of content) is deliberately left to
+// clipHead's own per-frame clamp (view.go), not duplicated here: this
+// method has no access to the frame clipHead will actually draw against
+// (headBudget/headContent can both change between this call and the next
+// View, e.g. a resize riding the same tea.Msg batch), so guessing a ceiling
+// here could only ever be wrong in one direction or the other, while
+// clipHead's own clamp is always right because it runs against the exact
+// content and budget of the frame it is about to draw.
+func (m Root) scrollBy(delta int) Root {
+	m.scrollOffset += delta
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+	return m
 }
 
 // openPicker switches to ModePicker with a Picker built from the current
@@ -2479,6 +2600,15 @@ func (m Root) submit(text string) (tea.Model, tea.Cmd) {
 	// the live region never shrinks out from under a banner at all: from the
 	// very next frame it was never there to erase.
 	bannerText := m.bannerText()
+
+	// Sending a new message is the user asking to continue the
+	// conversation, so it is reasonable to jump back to the live tail even
+	// if they had scrolled up to reread something (Root.scrollOffset's own
+	// doc comment). Reset before appending: the new entry belongs at the
+	// tail scrollOffset is being reset towards, not somewhere a stale
+	// offset from before this call would still be treating as "scrolled
+	// back".
+	m.scrollOffset = 0
 
 	m.transcript = append(m.transcript, transcriptEntry{
 		role: "user", name: "tú", text: text, ts: time.Now(),
