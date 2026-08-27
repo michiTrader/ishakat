@@ -715,6 +715,10 @@ func (m Root) footerState() FooterState {
 		budget = footerMinCWD
 	}
 	st.CWD = ShortenPath(m.cwd, budget)
+	// 2026-08-27: surface F9's /effort override in the status bar — see
+	// FooterState.Effort's own doc comment for why this was never wired
+	// through before now.
+	st.Effort = m.effort
 	return st
 }
 

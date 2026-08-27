@@ -76,10 +76,16 @@ func SetInputPrefix(ta *textarea.Model, prefix string) {
 }
 
 // SetInputWidth gives the widget the width it can draw into: the inside of the
-// box when there is one, the whole content width otherwise. The prompt is not
-// subtracted here — textarea.SetWidth already reserves it.
+// box when there is one, the whole terminal width otherwise. The prompt is
+// not subtracted here — textarea.SetWidth already reserves it.
+//
+// This uses Layout.InputWidth, not ContentWidth (2026-08-27 fix, see
+// InputWidth's own doc comment): the input box is where the user is typing,
+// not prose being read back, so it should not shrink to ui.max_width the
+// way a wrapped paragraph does — it should always reach the terminal's own
+// right edge.
 func SetInputWidth(ta *textarea.Model, lay Layout) {
-	w := lay.ContentWidth()
+	w := lay.InputWidth()
 	if lay.ShowBoxedInput() {
 		w -= 2 // the two rounded vertical borders
 	}
@@ -92,6 +98,11 @@ func SetInputWidth(ta *textarea.Model, lay Layout) {
 // InputBox wraps the rendered widget in the box of §9.2/§9.3: full rounded
 // borders in the narrow/normal/wide breakpoints, no box at all in BPMinimo,
 // where every column stolen by a border is a column the text needed.
+//
+// The box width comes from Layout.InputWidth, matching SetInputWidth above —
+// both must agree on the same uncapped width or the border and the text
+// inside it drift apart (the border sized to ui.max_width, the widget's own
+// text sized to the full terminal, or vice versa).
 func InputBox(lay Layout, boxStyle stylesBoxLike, view string) string {
 	// textarea.View() ends its last line with a newline; keeping it would add
 	// a blank row inside the box and push the footer down by one.
@@ -99,7 +110,7 @@ func InputBox(lay Layout, boxStyle stylesBoxLike, view string) string {
 	if !lay.ShowBoxedInput() {
 		return view
 	}
-	return boxStyle.RenderBox(view, lay.ContentWidth())
+	return boxStyle.RenderBox(view, lay.InputWidth())
 }
 
 // InputOrigin is where the widget's own (0,0) ends up once InputBox has drawn

@@ -72,7 +72,12 @@ func TestRenderTranscriptLineHeaderColourDoesNotBleedIntoBody(t *testing.T) {
 	if strings.Contains(stripANSI(lines[1]), "\x1b") {
 		t.Errorf("body line still carries a raw escape byte after stripANSI, test helper itself is broken")
 	}
-	if got := stripANSI(lines[1]); got != "un mensaje sin formato especial" {
+	// TrimRight, not a bare ==: a user bubble's body is now padded with
+	// trailing spaces up to width by PaintBackground (2026-08-27, "full line
+	// background, not just under the letters") so the background reaches
+	// the same right edge on every line — that padding is the fix working
+	// as intended, not a change to the message text itself.
+	if got := strings.TrimRight(stripANSI(lines[1]), " "); got != "un mensaje sin formato especial" {
 		t.Errorf("body text changed by the header colouring: got %q", got)
 	}
 }

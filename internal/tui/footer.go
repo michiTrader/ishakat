@@ -49,6 +49,19 @@ type FooterState struct {
 	// empty, the same "empty is invisible" rule Autonomy itself follows
 	// for "not wired".
 	Phase string
+
+	// Effort is Root.effort verbatim (effortcmd.go's own doc comment: the
+	// exact spelling from the active model's catalog.Model.EffortLevels,
+	// never the user's raw typed casing) — reported 2026-08-27 ("necesito
+	// que el efford aparezca en la barra de informacion inferior"): F9's
+	// /effort picker and EffortCycle chord have set this since W5, but
+	// nothing ever surfaced it anywhere the user could see it without
+	// re-running /effort with no argument to ask. Empty means "nothing
+	// chosen this session, provider default" — the same "absence is a
+	// legitimate value" convention Root.effort's own field comment
+	// documents — and "effort" (below) draws nothing for it, the same
+	// "empty is invisible" rule every other optional footer item follows.
+	Effort string
 }
 
 // footerItemOrder son las claves válidas de ui.footer.items, en el mismo
@@ -62,7 +75,7 @@ type FooterState struct {
 // much can it decide alone") — rather than at either end, which would bury
 // it behind context/tokens/cost as the drop-from-the-right last resort
 // reaches for it.
-var footerItemOrder = []string{"model", "autonomy", "context", "tokens", "cost", "git", "cwd"}
+var footerItemOrder = []string{"model", "autonomy", "effort", "context", "tokens", "cost", "git", "cwd"}
 
 // footerMinAbbrevWidth is the narrowest a single footer item is allowed to
 // shrink to while other items are still present alongside it. Below this,
@@ -296,6 +309,10 @@ func renderFooterParts(g glyphs, st FooterState, items []string) []footerPart {
 				parts = append(parts, footerPart{it, st.Autonomy + g.dot + st.Phase})
 			case st.Autonomy != "":
 				parts = append(parts, footerPart{it, st.Autonomy})
+			}
+		case "effort":
+			if st.Effort != "" {
+				parts = append(parts, footerPart{it, g.effortMark + st.Effort})
 			}
 		case "context":
 			parts = append(parts, footerPart{it, contextBar(g, st.ContextPct)})

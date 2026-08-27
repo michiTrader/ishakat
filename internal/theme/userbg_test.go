@@ -71,7 +71,7 @@ func TestPaintBackgroundSurvivesNestedReset(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 
 	inner := styles.Accent.Render("red") + " plain " + styles.Accent.Render("red2")
-	out := styles.PaintBackground(inner)
+	out := styles.PaintBackground(inner, 0)
 
 	bgEsc := fmtBG(th.UserBG)
 	// The background escape must appear at least twice: once at the very
@@ -95,7 +95,7 @@ func TestPaintBackgroundNoColourIsNoOp(t *testing.T) {
 	styles := theme.NewStyles(th, theme.CapNone, theme.GlyphsUnicode)
 
 	block := "hola\nmundo"
-	if got := styles.PaintBackground(block); got != block {
+	if got := styles.PaintBackground(block, 40); got != block {
 		t.Errorf("CapNone debe ser un no-op: got %q, want %q", got, block)
 	}
 }
@@ -109,7 +109,7 @@ func TestPaintBackgroundSkipsBlankLines(t *testing.T) {
 	th := theme.Load("")
 	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
 
-	out := styles.PaintBackground("uno\n\ndos")
+	out := styles.PaintBackground("uno\n\ndos", 0)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 lines, got %d: %q", len(lines), out)
@@ -117,6 +117,71 @@ func TestPaintBackgroundSkipsBlankLines(t *testing.T) {
 	if lines[1] != "" {
 		t.Errorf("blank line should stay blank, got %q", lines[1])
 	}
+}
+
+// TestPaintBackgroundPadsShortLinesToWidth is the regression test for the
+// 2026-08-27 fix: before width existed, a short line's background stopped
+// right after its own last visible cell, so on screen the paint read as
+// "highlighted letters" rather than a full-width message bubble strip. This
+// confirms a line shorter than width is padded with plain spaces *inside*
+// the coloured span (prefix ... padding ... suffix), and that the padding
+// itself carries no visible character — only the background escape reaches
+// further right than the text did.
+func TestPaintBackgroundPadsShortLinesToWidth(t *testing.T) {
+	th := theme.Load("")
+	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
+
+	out := styles.PaintBackground("hi", 10)
+	bgEsc := fmtBG(th.UserBG)
+	i := strings.Index(out, bgEsc)
+	if i < 0 {
+		t.Fatalf("missing background escape entirely: %q", out)
+	}
+	// Strip the leading prefix escape and the trailing suffix reset, what's
+	// left between them is "hi" plus 8 padding spaces.
+	suffix := ansiFullResetFor(t, styles)
+	rest := strings.TrimSuffix(out[i+len(bgEsc):], suffix)
+	// rest may still start with an SGR terminator ("m") from the escape
+	// sequence itself; find where "hi" begins instead of assuming byte 0.
+	hPos := strings.Index(rest, "hi")
+	if hPos < 0 {
+		t.Fatalf("text missing from painted output: %q", out)
+	}
+	afterText := rest[hPos+len("hi"):]
+	if afterText != strings.Repeat(" ", 8) {
+		t.Errorf("expected 8 padding spaces after a 2-cell line at width 10, got %q (full output %q)", afterText, out)
+	}
+}
+
+// TestPaintBackgroundZeroWidthDoesNotPad pins width<=0's documented
+// "do not pad" behaviour: existing callers (mostly tests) that only care
+// about the reset-patching, not a real line width, must keep getting back
+// exactly the pre-width-parameter output.
+func TestPaintBackgroundZeroWidthDoesNotPad(t *testing.T) {
+	th := theme.Load("")
+	styles := theme.NewStyles(th, theme.CapTruecolor, theme.GlyphsUnicode)
+
+	withZero := styles.PaintBackground("hi", 0)
+	withNegative := styles.PaintBackground("hi", -1)
+	if withZero != withNegative {
+		t.Errorf("width<=0 should behave identically: width=0 got %q, width=-1 got %q", withZero, withNegative)
+	}
+	if strings.Contains(withZero, "  ") {
+		t.Errorf("width<=0 must not pad: got %q", withZero)
+	}
+}
+
+// ansiFullResetFor returns the exact suffix PaintBackground appends after
+// every painted line (the probe's own suffix half), so the padding test
+// above can strip it without hard-coding the escape sequence twice.
+func ansiFullResetFor(t *testing.T, s theme.Styles) string {
+	t.Helper()
+	probe := s.UserBG.Render("\x00")
+	i := strings.IndexByte(probe, 0)
+	if i < 0 {
+		t.Fatal("UserBG probe produced no escape at all")
+	}
+	return probe[i+1:]
 }
 
 // fmtBG mirrors the tui package's own ansiFG test helper (48 is the SGR base
