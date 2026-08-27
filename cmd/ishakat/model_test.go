@@ -15,14 +15,14 @@ func TestCmdModelSetNoFlagSetsDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	if code := cmdModel([]string{"set", "gemini-direct/gemini-2.5-flash"}); code != 0 {
+	if code := cmdModel([]string{"set", "google/gemini-2.5-flash"}); code != 0 {
 		t.Fatalf("cmdModel([set ref]) = %d, want 0", code)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.App.DefaultModel != "gemini-direct/gemini-2.5-flash" {
+	if cfg.App.DefaultModel != "google/gemini-2.5-flash" {
 		t.Errorf("DefaultModel = %q, want the gemini ref", cfg.App.DefaultModel)
 	}
 }
@@ -38,14 +38,14 @@ func TestCmdModelSetRefFirstThenCompactFlag(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	if code := cmdModel([]string{"set", "gemini-direct/gemini-2.5-flash-lite", "--compact"}); code != 0 {
+	if code := cmdModel([]string{"set", "google/gemini-2.5-flash-lite", "--compact"}); code != 0 {
 		t.Fatalf("cmdModel([set ref --compact]) = %d, want 0", code)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.App.CompactModel != "gemini-direct/gemini-2.5-flash-lite" {
+	if cfg.App.CompactModel != "google/gemini-2.5-flash-lite" {
 		t.Errorf("CompactModel = %q, want the lite ref (ref-before-flag ordering must work)", cfg.App.CompactModel)
 	}
 	if cfg.App.DefaultModel != "" {
@@ -77,14 +77,14 @@ func TestCmdModelSetAllSetsAllThreeKeys(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	if code := cmdModel([]string{"set", "gemini-direct/gemini-2.5-pro", "--all"}); code != 0 {
+	if code := cmdModel([]string{"set", "google/gemini-2.5-pro", "--all"}); code != 0 {
 		t.Fatalf("cmdModel([set ref --all]) = %d, want 0", code)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "gemini-direct/gemini-2.5-pro"
+	want := "google/gemini-2.5-pro"
 	if cfg.App.DefaultModel != want || cfg.App.CompactModel != want || cfg.App.FallbackModel != want {
 		t.Errorf("after --all: default=%q compact=%q fallback=%q, want all %q",
 			cfg.App.DefaultModel, cfg.App.CompactModel, cfg.App.FallbackModel, want)
@@ -159,14 +159,14 @@ func TestCmdModelAliasSet(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	if code := cmdModel([]string{"alias", "set", "smart", "gemini-direct/gemini-2.5-pro"}); code != 0 {
+	if code := cmdModel([]string{"alias", "set", "smart", "google/gemini-2.5-pro"}); code != 0 {
 		t.Fatalf("cmdModel([alias set smart ref]) = %d, want 0", code)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Alias["smart"] != "gemini-direct/gemini-2.5-pro" {
+	if cfg.Alias["smart"] != "google/gemini-2.5-pro" {
 		t.Errorf("alias[smart] = %q, want the pro ref", cfg.Alias["smart"])
 	}
 }
@@ -208,14 +208,14 @@ func TestCmdModelFavoriteAdd(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	if code := cmdModel([]string{"favorite", "add", "gemini-direct/gemini-2.5-flash"}); code != 0 {
+	if code := cmdModel([]string{"favorite", "add", "google/gemini-2.5-flash"}); code != 0 {
 		t.Fatalf("cmdModel([favorite add ref]) = %d, want 0", code)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "gemini-direct/gemini-2.5-flash" {
+	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "google/gemini-2.5-flash" {
 		t.Errorf("Favorites.List = %v, want exactly one entry", cfg.Favorites.List)
 	}
 }

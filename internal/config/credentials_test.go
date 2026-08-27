@@ -180,17 +180,17 @@ func TestSaveProviderConnectionPreservesCustomBaseURL(t *testing.T) {
 
 func TestRemoveCredentialDeletesPrivateFileAndDisables(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	preset, err := config.ResolveProviderPreset("gemini")
+	preset, err := config.ResolveProviderPreset("google")
 	if err != nil {
 		t.Fatalf("ResolveProviderPreset() error = %v", err)
 	}
 	if _, err := config.SaveProviderConnection(preset, false); err != nil {
 		t.Fatalf("SaveProviderConnection() error = %v", err)
 	}
-	if err := config.SaveCredential("gemini-direct", "gem-secret"); err != nil {
+	if err := config.SaveCredential("google", "gem-secret"); err != nil {
 		t.Fatalf("SaveCredential() error = %v", err)
 	}
-	if err := config.RemoveCredential("gemini-direct"); err != nil {
+	if err := config.RemoveCredential("google"); err != nil {
 		t.Fatalf("RemoveCredential() error = %v", err)
 	}
 	if _, err := os.Stat(xdg.CredentialsFile()); !os.IsNotExist(err) {
@@ -202,8 +202,8 @@ func TestRemoveCredentialDeletesPrivateFileAndDisables(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	for _, p := range cfg.Providers {
-		if p.ID == "gemini-direct" && p.Enabled {
-			t.Fatalf("provider gemini-direct still enabled in config.toml after RemoveCredential")
+		if p.ID == "google" && p.Enabled {
+			t.Fatalf("provider google still enabled in config.toml after RemoveCredential")
 		}
 	}
 }
@@ -306,27 +306,24 @@ func TestRemoveCredentialAppendsDisableOverrideWithNoExistingEntry(t *testing.T)
 }
 
 func TestResolveProviderPresetAliases(t *testing.T) {
-	for _, name := range []string{"gemini", "google"} {
-		p, err := config.ResolveProviderPreset(name)
-		if err != nil {
-			t.Fatalf("ResolveProviderPreset(%q) error = %v", name, err)
-		}
-		if p.ID != "gemini-direct" {
-			t.Errorf("ResolveProviderPreset(%q).ID = %q, want gemini-direct", name, p.ID)
-		}
+	p, err := config.ResolveProviderPreset("google")
+	if err != nil {
+		t.Fatalf("ResolveProviderPreset(%q) error = %v", "google", err)
+	}
+	if p.ID != "google" {
+		t.Errorf("ResolveProviderPreset(%q).ID = %q, want google", "google", p.ID)
 	}
 }
 
 // TestVerifyModelFor is P2's lookup: internal/app.ResolveModelForBoot uses
 // this to find a wire id known to work for a fallback provider without
-// touching the network (§4.4). "gemini-direct" is the preset's own ID
-// field, not the "gemini"/"google" friendly names ResolveProviderPreset
-// also accepts — VerifyModelFor is keyed by presetByID, i.e. the same ID a
+// touching the network (§4.4). "google" is the preset's own ID field —
+// VerifyModelFor is keyed by presetByID, i.e. the same ID a
 // config.Provider.ID would actually carry.
 func TestVerifyModelFor(t *testing.T) {
-	wire, ok := config.VerifyModelFor("gemini-direct")
+	wire, ok := config.VerifyModelFor("google")
 	if !ok {
-		t.Fatal("VerifyModelFor(\"gemini-direct\") ok = false, want true")
+		t.Fatal("VerifyModelFor(\"google\") ok = false, want true")
 	}
 	if wire != "gemini-2.0-flash" {
 		t.Errorf("wire = %q, want %q", wire, "gemini-2.0-flash")
@@ -340,17 +337,15 @@ func TestVerifyModelForUnknownID(t *testing.T) {
 }
 
 // TestLabelFor is F11's picker lookup (docs/ROADMAP-ux-2026-08-20.md's
-// DECISION-3): "gemini-direct" is the one preset whose Label deliberately
-// diverges from its ID — "google" is the name users actually type and
-// recognize, while the id stays "gemini-direct" until W5's full rename.
-// Every other preset's Label equals its own ID.
+// DECISION-3). Every preset's Label equals its own ID since the 2026-08-27
+// rename dropped the old "gemini-direct" id in favor of "google" outright.
 func TestLabelFor(t *testing.T) {
 	cases := map[string]string{
-		"gemini-direct": "google",
-		"omniroute":     "omniroute",
-		"openai":        "openai",
-		"anthropic":     "anthropic",
-		"nvidia":        "nvidia",
+		"google":    "google",
+		"omniroute": "omniroute",
+		"openai":    "openai",
+		"anthropic": "anthropic",
+		"nvidia":    "nvidia",
 	}
 	for id, want := range cases {
 		got, ok := config.LabelFor(id)

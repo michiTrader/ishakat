@@ -386,7 +386,7 @@ be right for all three at once.
 
 ```toml
 [[provider]]
-id   = "gemini-direct"
+id   = "google"
 # …
 hide = ["*-tts*", "veo-*", "lyria-*"]
 keep = ["gemini-3.1-flash-image"]   # yes, I do want this one
@@ -518,14 +518,14 @@ mechanism from becoming a support burden:
 
 ```
 $ ishakat models --why gemini-embedding-2
-gemini-direct/gemini-embedding-2
+google/gemini-embedding-2
   discovered   yes (provider lists it)
   models.dev   matched (normalized)
   hidden by    catalog.curate.chat_only
   because      limit.output = 1 — cannot emit a conversational turn
                (note: its output modality IS text, so the modality
                 check alone would not have caught it)
-  still usable yes — `/model gemini-direct/gemini-embedding-2` by exact ref
+  still usable yes — `/model google/gemini-embedding-2` by exact ref
   to show it   add "gemini-embedding-2" to [catalog.curate].keep
 ```
 
@@ -556,11 +556,11 @@ $XDG_CONFIG_HOME/ishakat/config.toml    # written by you, never by the TUI
 {
   "v": 1,
   "hidden": [
-    { "ref": "gemini-direct/gemini-embedding-2",        "at": "2026-08-05T18:22:04Z" },
-    { "ref": "gemini-direct/veo-3.1-generate-preview",  "at": "..." }
+    { "ref": "google/gemini-embedding-2",        "at": "2026-08-05T18:22:04Z" },
+    { "ref": "google/veo-3.1-generate-preview",  "at": "..." }
   ],
   "kept": [
-    { "ref": "gemini-direct/gemini-3.1-flash-image",    "at": "..." }
+    { "ref": "google/gemini-3.1-flash-image",    "at": "..." }
   ]
 }
 ```
@@ -621,7 +621,7 @@ redacted. Build **that**, read-only, first:
  ── config · effective ────────────────
  layers   defaults + config.toml
           + credentials.toml
- model    gemini-direct/gemini-3.5-flash
+ model    google/gemini-3.5-flash
  theme    ascua
  stream   on
  ── catalog ───────────────────────────
@@ -631,7 +631,7 @@ redacted. Build **that**, read-only, first:
  hide             2 globs             ▸
  curated          26 shown · 15 hidden
  ── providers ─────────────────────────
- ● gemini-direct        26/41  key ✓  ▸
+ ● google        26/41  key ✓  ▸
  ○ openai                   —  key ✗  ▸
  ── tools ─────────────────────────────
  enabled  true      write  ask
@@ -690,11 +690,11 @@ The report's own framing — "when I add the Gemini API, a pile of models loads"
 provider-scoped, and §1.3 measured why per-provider policy is *necessary* rather
 than merely nice: Google duplicates by `-preview`, Anthropic and OpenAI by date
 stamp, NVIDIA by neither. Reached with `enter` on a provider row in `/config`, or
-`/provider gemini-direct`:
+`/provider google`:
 
 ```
 1...5....0....5....0....5....0....5....0
- ── gemini-direct ─────────────────────
+ ── google ─────────────────────
  name      Google Gemini
  kind      openai (compat shim)
  base_url  …googleapis.com/v1beta/openai
@@ -756,11 +756,11 @@ lets a user stop doing by hand.
 
 ```toml
 [roles]
-chat    = "gemini-direct/gemini-3.5-flash"
+chat    = "google/gemini-3.5-flash"
 coding  = "omniroute/anthropic/claude-sonnet-4-5"
-cheap   = "gemini-direct/gemini-3.1-flash-lite"
+cheap   = "google/gemini-3.1-flash-lite"
 compact = "cheap"                              # roles may point at roles
-vision  = "gemini-direct/gemini-3.1-pro-preview"
+vision  = "google/gemini-3.1-pro-preview"
 ```
 
 `/model @coding` switches; `ctrl+o` rotates roles. That key is already bound

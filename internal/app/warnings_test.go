@@ -15,7 +15,7 @@ func TestFilterWarningsForProvidersKeepsUnscopedWarnings(t *testing.T) {
 		{Where: "credentials.toml", Msg: "insecure permissions"},
 		{Where: "provider[2]", Msg: `kind "weird" no soportado`},
 	}
-	got := FilterWarningsForProviders(warns, "gemini-direct")
+	got := FilterWarningsForProviders(warns, "google")
 	if len(got) != len(warns) {
 		t.Fatalf("FilterWarningsForProviders dropped an unscoped warning: got %d, want %d\n%+v",
 			len(got), len(warns), got)
@@ -26,14 +26,14 @@ func TestFilterWarningsForProvidersDropsUnwantedProviderWarning(t *testing.T) {
 	warns := []config.Warning{
 		{Where: "provider[openai]", Msg: "missing $OPENAI_API_KEY; the provider is left unauthenticated"},
 		{Where: "provider[anthropic]", Msg: "missing $ANTHROPIC_API_KEY; the provider is left unauthenticated"},
-		{Where: "provider[gemini-direct]", Msg: "missing $GEMINI_API_KEY; the provider is left unauthenticated"},
+		{Where: "provider[google]", Msg: "missing $GEMINI_API_KEY; the provider is left unauthenticated"},
 	}
-	got := FilterWarningsForProviders(warns, "gemini-direct")
+	got := FilterWarningsForProviders(warns, "google")
 	if len(got) != 1 {
-		t.Fatalf("got %d warnings, want exactly 1 (only gemini-direct): %+v", len(got), got)
+		t.Fatalf("got %d warnings, want exactly 1 (only google): %+v", len(got), got)
 	}
-	if got[0].Where != "provider[gemini-direct]" {
-		t.Errorf("got %+v, want the gemini-direct warning kept", got[0])
+	if got[0].Where != "provider[google]" {
+		t.Errorf("got %+v, want the google warning kept", got[0])
 	}
 }
 

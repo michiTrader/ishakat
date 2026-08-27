@@ -391,17 +391,17 @@ scratch for whichever providers are enabled at that point.
 opening an editor:
 
 ```sh
-ishakat model set gemini-direct/gemini-2.5-flash            # sets app.default_model
-ishakat model set gemini-direct/gemini-2.5-flash-lite -c     # sets app.compact_model (-c/--compact)
+ishakat model set google/gemini-2.5-flash            # sets app.default_model
+ishakat model set google/gemini-2.5-flash-lite -c     # sets app.compact_model (-c/--compact)
 ishakat model set openai/gpt-4o-mini -f                      # sets app.fallback_model (-f/--fallback)
-ishakat model set gemini-direct/gemini-2.5-pro -a             # sets all three at once (-a/--all)
+ishakat model set google/gemini-2.5-pro -a             # sets all three at once (-a/--all)
 ishakat model set "" --compact                                # resets compact_model to "follow default_model"
 
-ishakat model alias set smart gemini-direct/gemini-2.5-pro
+ishakat model alias set smart google/gemini-2.5-pro
 ishakat model alias remove smart
 
-ishakat model favorite add gemini-direct/gemini-2.5-flash
-ishakat model favorite remove gemini-direct/gemini-2.5-flash
+ishakat model favorite add google/gemini-2.5-flash
+ishakat model favorite remove google/gemini-2.5-flash
 ```
 
 None of these subcommands verify the reference against a live provider —

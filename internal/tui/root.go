@@ -272,7 +272,7 @@ type Root struct {
 	// at startup, and no path that changes m.model afterwards (/model, the
 	// picker, /resume, the confirm dialog's remedies, /compact's
 	// finishSwitchAfterCompact) ever touched eng. A user who picked, say,
-	// gemini-direct/... from the picker saw the footer say "gemini-direct"
+	// google/... from the picker saw the footer say "google"
 	// while every request kept going out over whatever HTTP client
 	// default_model had bound at boot — silently the wrong provider's
 	// base_url and credentials, not a missing one, which is why the

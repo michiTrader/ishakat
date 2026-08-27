@@ -100,16 +100,16 @@ func TestWriteModelsHiddenEmpty(t *testing.T) {
 // note, plus the hidden-by/because/still-usable/to-show-it block.
 func TestWriteModelWhyHiddenModel(t *testing.T) {
 	cache := catalog.NewCache("")
-	cache.SetProvider("gemini-direct", []catalog.DiscoveredModel{
+	cache.SetProvider("google", []catalog.DiscoveredModel{
 		{WireID: "gemini-embedding-2", Output: 1},
 	}, timeNowForTest())
 	index := catalog.NewIndex()
-	index.ByProvider["gemini-direct"] = map[string]catalog.MDModel{
+	index.ByProvider["google"] = map[string]catalog.MDModel{
 		"gemini-embedding-2": {ID: "gemini-embedding-2", Modalities: []string{"text"}},
 	}
 
 	m := catalog.Model{
-		Ref: "gemini-direct/gemini-embedding-2", Provider: "gemini-direct",
+		Ref: "google/gemini-embedding-2", Provider: "google",
 		WireID: "gemini-embedding-2", MaxOutput: 1, Modalities: []string{"text"},
 		Source: catalog.SourceDiscover | catalog.SourceModelsDev,
 	}
@@ -122,7 +122,7 @@ func TestWriteModelWhyHiddenModel(t *testing.T) {
 	cfg := &config.Config{
 		Schema: config.Schema,
 		Providers: []config.Provider{{
-			ID: "gemini-direct", Enabled: true, Discover: true,
+			ID: "google", Enabled: true, Discover: true,
 		}},
 	}
 
@@ -133,13 +133,13 @@ func TestWriteModelWhyHiddenModel(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"gemini-direct/gemini-embedding-2",
+		"google/gemini-embedding-2",
 		"discovered   yes",
 		"models.dev   matched",
 		"hidden by    catalog.curate.chat_only",
 		"limit.output = 1",
 		"modality IS text",
-		"still usable yes — `/model gemini-direct/gemini-embedding-2` by exact ref",
+		"still usable yes — `/model google/gemini-embedding-2` by exact ref",
 		`to show it   add "gemini-embedding-2" to [catalog.curate].keep`,
 	} {
 		if !strings.Contains(text, want) {

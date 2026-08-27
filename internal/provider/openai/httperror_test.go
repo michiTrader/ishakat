@@ -28,7 +28,7 @@ func errorBodyServer(t *testing.T, status int, body string) *httptest.Server {
 // interface would show.
 func errText(t *testing.T, srv *httptest.Server) string {
 	t.Helper()
-	p, err := New(provider.Settings{ID: "gemini-direct", BaseURL: srv.URL, APIKey: "k"})
+	p, err := New(provider.Settings{ID: "google", BaseURL: srv.URL, APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -47,7 +47,7 @@ func errText(t *testing.T, srv *httptest.Server) string {
 
 // TestHTTPErrorReadsGeminiArrayEnvelope is the regression test for an error
 // message that destroyed its own diagnostic. A user on Gemini saw exactly
-// `⚠ gemini-direct: HTTP 400: [{` on every failing turn — enough to know
+// `⚠ google: HTTP 400: [{` on every failing turn — enough to know
 // something broke and nothing else, which is worse than no message at all
 // because it looks like the program already explained itself.
 //

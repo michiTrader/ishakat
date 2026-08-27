@@ -216,7 +216,7 @@ func (p *Provider) buildBody(req provider.Request, msgs []ChatMessage) ([]byte, 
 //
 // It matches on the host and not on the provider id or the model name, because
 // neither is reliable: the id is whatever the user typed in the TOML
-// ("gemini-direct" is only a preset default), and a Gemini model reached
+// ("google" is only a preset default), and a Gemini model reached
 // *through* OmniRoute or OpenRouter is not on a Google host and must not get
 // Google's private request fields. The host is the one thing that actually
 // decides who parses the body.

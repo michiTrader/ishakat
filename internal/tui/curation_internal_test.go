@@ -400,10 +400,10 @@ func rootWithCatalogAndHidden(cat *catalog.Catalog, hidden []catalog.Hidden) Roo
 // catalog about which ref is which.
 func TestHiddenByRefFindsExactRefCaseInsensitively(t *testing.T) {
 	root := rootWithCatalogAndHidden(catalogWithModels("other/unrelated"), []catalog.Hidden{
-		{Model: catalog.Model{Ref: "gemini-direct/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
+		{Model: catalog.Model{Ref: "google/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
 	})
 
-	h, ok := root.hiddenByRef("GEMINI-DIRECT/Gemini-Embedding-2")
+	h, ok := root.hiddenByRef("GOOGLE/Gemini-Embedding-2")
 	if !ok {
 		t.Fatal("hiddenByRef should find the ref case-insensitively")
 	}
@@ -426,7 +426,7 @@ func TestHiddenByRefFindsExactRefCaseInsensitively(t *testing.T) {
 // ordinary switch or silently opening the picker on a plausible-looking
 // query.
 func TestSlashModelExactRefOnAnAutomaticallyHiddenModelStillSwitches(t *testing.T) {
-	hiddenRef := "gemini-direct/gemini-embedding-2"
+	hiddenRef := "google/gemini-embedding-2"
 	root := rootWithCatalogAndHidden(catalogWithModels("other/unrelated"), []catalog.Hidden{
 		{Model: catalog.Model{Ref: hiddenRef}, Reason: catalog.ReasonNonChatLimit},
 	})
@@ -507,7 +507,7 @@ func TestSlashModelOrdinaryMatchNoticeUnaffectedByEmptyHidden(t *testing.T) {
 // unresolved query into a false "not found in the hidden list either".
 func TestSlashModelAmbiguousQueryStillOpensPickerWhenNotAnExactHiddenRef(t *testing.T) {
 	root := rootWithCatalogAndHidden(catalogWithModels("a/gpt-5", "b/gpt-5"), []catalog.Hidden{
-		{Model: catalog.Model{Ref: "gemini-direct/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
+		{Model: catalog.Model{Ref: "google/gemini-embedding-2"}, Reason: catalog.ReasonNonChatLimit},
 	})
 	var m tea.Model = root
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

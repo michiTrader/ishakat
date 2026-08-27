@@ -250,17 +250,19 @@ func TestRenderPickerRowFallsBackToTwoLinesWhenTooNarrow(t *testing.T) {
 
 // TestRenderPickerRowShowsProviderLabel is F11
 // (docs/ROADMAP-ux-2026-08-20.md's DECISION-3): the row must show the
-// provider's short display label — "google", not the raw "gemini-direct"
-// id — dimmed, in brackets, next to the model id. The id itself stays
-// exactly what catalog.SplitRef already extracted; only the label is new.
+// provider's short display label — "google" — dimmed, in brackets, next to
+// the model id. "google" is both this preset's id and its Label since the
+// 2026-08-27 rename dropped the old "gemini-direct" id (see
+// credentials.go), so this now also confirms the bracket keeps rendering
+// even when id and Label happen to match, not just when they differ.
 func TestRenderPickerRowShowsProviderLabel(t *testing.T) {
 	g := unicodeGlyphs
 	st := theme.NewStyles(theme.Load(""), theme.CapTruecolor, theme.GlyphsUnicode)
 	row := pickerRow{
-		provider: "gemini-direct",
+		provider: "google",
 		cand: catalog.Candidate{Model: catalog.Model{
-			Ref:      "gemini-direct/gemini-3.6-flash",
-			Provider: "gemini-direct",
+			Ref:      "google/gemini-3.6-flash",
+			Provider: "google",
 			Context:  200_000,
 		}},
 	}
@@ -272,9 +274,6 @@ func TestRenderPickerRowShowsProviderLabel(t *testing.T) {
 	}
 	if !strings.Contains(joined, "[google]") {
 		t.Errorf("row must show the provider's display label in brackets, got %q", joined)
-	}
-	if strings.Contains(joined, "gemini-direct") {
-		t.Errorf("row must not leak the raw provider id, got %q", joined)
 	}
 }
 

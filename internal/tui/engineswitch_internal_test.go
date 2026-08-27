@@ -47,7 +47,7 @@ func failingFactory(err error) EngineFactory {
 // destination ref and swap m.eng, not just relabel m.model.
 func TestModelSwitchViaPickerRebuildsTheEngine(t *testing.T) {
 	factory, calls := trackingFactory(t)
-	root := rootWithCatalog(catalogWithModels("omni/son45", "gemini-direct/models/gemini-3.1-flash-lite"))
+	root := rootWithCatalog(catalogWithModels("omni/son45", "google/models/gemini-3.1-flash-lite"))
 	root.engineFor = factory
 	root.model = "omni/son45"
 	originalEng := root.eng
@@ -67,10 +67,10 @@ func TestModelSwitchViaPickerRebuildsTheEngine(t *testing.T) {
 	m, _ = m.Update(cmd())
 
 	got := m.(Root)
-	if got.model != "gemini-direct/models/gemini-3.1-flash-lite" {
+	if got.model != "google/models/gemini-3.1-flash-lite" {
 		t.Fatalf("model = %q, want the gemini ref", got.model)
 	}
-	if len(*calls) != 1 || (*calls)[0] != "gemini-direct/models/gemini-3.1-flash-lite" {
+	if len(*calls) != 1 || (*calls)[0] != "google/models/gemini-3.1-flash-lite" {
 		t.Fatalf("engineFor calls = %v, want exactly one call for the destination ref", *calls)
 	}
 	if got.eng == originalEng {
@@ -83,15 +83,15 @@ func TestModelSwitchViaPickerRebuildsTheEngine(t *testing.T) {
 // which funnels through applyModelChosen exactly like the picker does.
 func TestApplyModelChosenDirectlyRebuildsTheEngine(t *testing.T) {
 	factory, calls := trackingFactory(t)
-	root := rootWithCatalog(catalogWithModels("omni/son45", "gemini-direct/models/gemini-3.1-flash-lite"))
+	root := rootWithCatalog(catalogWithModels("omni/son45", "google/models/gemini-3.1-flash-lite"))
 	root.engineFor = factory
 	root.model = "omni/son45"
 	originalEng := root.eng
 
-	got, _ := root.applyModelChosen("gemini-direct/models/gemini-3.1-flash-lite")
+	got, _ := root.applyModelChosen("google/models/gemini-3.1-flash-lite")
 	m := got.(Root)
 
-	if m.model != "gemini-direct/models/gemini-3.1-flash-lite" {
+	if m.model != "google/models/gemini-3.1-flash-lite" {
 		t.Fatalf("model = %q, want the gemini ref", m.model)
 	}
 	if len(*calls) != 1 {
@@ -109,16 +109,16 @@ func TestApplyModelChosenDirectlyRebuildsTheEngine(t *testing.T) {
 // warning instead of pretending the switch fully succeeded, and the old
 // engine must not be silently kept in place mislabeled as the new provider.
 func TestApplyModelChosenSurfacesAFactoryErrorButStillRelabels(t *testing.T) {
-	wantErr := errors.New(`provider "gemini-direct" is not declared`)
-	root := rootWithCatalog(catalogWithModels("omni/son45", "gemini-direct/models/gemini-3.1-flash-lite"))
+	wantErr := errors.New(`provider "google" is not declared`)
+	root := rootWithCatalog(catalogWithModels("omni/son45", "google/models/gemini-3.1-flash-lite"))
 	root.engineFor = failingFactory(wantErr)
 	root.model = "omni/son45"
 	originalEng := root.eng
 
-	got, _ := root.applyModelChosen("gemini-direct/models/gemini-3.1-flash-lite")
+	got, _ := root.applyModelChosen("google/models/gemini-3.1-flash-lite")
 	m := got.(Root)
 
-	if m.model != "gemini-direct/models/gemini-3.1-flash-lite" {
+	if m.model != "google/models/gemini-3.1-flash-lite" {
 		t.Fatalf("model = %q, the picker's own choice should still be shown", m.model)
 	}
 	if m.eng != originalEng {
@@ -134,14 +134,14 @@ func TestApplyModelChosenSurfacesAFactoryErrorButStillRelabels(t *testing.T) {
 // any caller with nothing wired) never sets engineFor, and must keep
 // switching only the label, exactly as before this fix.
 func TestApplyModelChosenWithNilEngineForKeepsTheOldRelabelOnlyBehaviour(t *testing.T) {
-	root := rootWithCatalog(catalogWithModels("omni/son45", "gemini-direct/models/gemini-3.1-flash-lite"))
+	root := rootWithCatalog(catalogWithModels("omni/son45", "google/models/gemini-3.1-flash-lite"))
 	root.model = "omni/son45"
 	originalEng := root.eng
 
-	got, _ := root.applyModelChosen("gemini-direct/models/gemini-3.1-flash-lite")
+	got, _ := root.applyModelChosen("google/models/gemini-3.1-flash-lite")
 	m := got.(Root)
 
-	if m.model != "gemini-direct/models/gemini-3.1-flash-lite" {
+	if m.model != "google/models/gemini-3.1-flash-lite" {
 		t.Fatalf("model = %q, want the gemini ref", m.model)
 	}
 	if m.eng != originalEng {

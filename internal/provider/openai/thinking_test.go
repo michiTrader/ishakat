@@ -2,7 +2,7 @@
 // the extra_body opt-in on the way out, and thought-marked content becoming
 // provider.EventReasoning on the way back.
 //
-// This is the path that actually matters for a user on `gemini-direct`: the
+// This is the path that actually matters for a user on `google`: the
 // "gemini" credentials preset is Kind "openai", not the native adapter, so
 // fixing only internal/provider/gemini would have left the reported symptom
 // exactly where it was — a reasoning preview that never shows anything.

@@ -64,15 +64,15 @@ func TestLoadFutureVersionDegradesGracefully(t *testing.T) {
 func TestHideThenIsHiddenRoundTrips(t *testing.T) {
 	s := &Store{}
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	s.Hide("gemini-direct/gemini-embedding-2", at)
+	s.Hide("google/gemini-embedding-2", at)
 
-	if !s.IsHidden("gemini-direct/gemini-embedding-2") {
+	if !s.IsHidden("google/gemini-embedding-2") {
 		t.Fatal("IsHidden() = false, want true for a ref that was just Hide()n")
 	}
-	if !s.IsHidden("GEMINI-DIRECT/Gemini-Embedding-2") {
+	if !s.IsHidden("GOOGLE/Gemini-Embedding-2") {
 		t.Fatal("IsHidden() = false, want true (lookup should be case-insensitive)")
 	}
-	if s.IsKept("gemini-direct/gemini-embedding-2") {
+	if s.IsKept("google/gemini-embedding-2") {
 		t.Fatal("IsKept() = true, want false for a hidden-only ref")
 	}
 }

@@ -472,7 +472,7 @@ func TestHeadlessSystemPrompt(t *testing.T) {
 
 // TestHeadlessFallsBackWhenDefaultModelIsUnusable is P2's headless-mode
 // integration test: app.default_model names a disabled provider, a second
-// provider (gemini-direct, a real preset id) is usable and points at the
+// provider (google, a real preset id) is usable and points at the
 // same fake server, and `ishakat -p "..."` must still answer — with a
 // single ⚠ line on stderr naming what it did, instead of exiting 1 the way
 // it did before ResolveModelForBoot existed (the exact headless failure
@@ -486,7 +486,7 @@ func TestHeadlessFallsBackWhenDefaultModelIsUnusable(t *testing.T) {
 	cfg := cfgFor(t, srv.URL)
 	cfg.Providers[0].Enabled = false
 	cfg.Providers = append(cfg.Providers, config.Provider{
-		ID: "gemini-direct", Kind: "openai", BaseURL: srv.URL,
+		ID: "google", Kind: "openai", BaseURL: srv.URL,
 		APIKey: "test-key", Enabled: true, AuthOK: true,
 	})
 
@@ -497,7 +497,7 @@ func TestHeadlessFallsBackWhenDefaultModelIsUnusable(t *testing.T) {
 	if out != "hi\n" {
 		t.Errorf("stdout = %q, expected %q", out, "hi\n")
 	}
-	if !strings.Contains(errs, "gemini-direct") {
+	if !strings.Contains(errs, "google") {
 		t.Errorf("stderr must name the fallback provider, got: %q", errs)
 	}
 }
