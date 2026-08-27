@@ -69,6 +69,23 @@ type Grid struct {
 	// does: writing past the last column wraps, and past the last row scrolls.
 	cx, cy int
 
+	// scrollTop/scrollBot are the DECSTBM scrolling region, 0-based and
+	// inclusive, defaulting to the whole screen. This exists because Bubble
+	// Tea's cursed renderer does not always repaint a changed frame from
+	// scratch: for the alternate screen it can choose to reuse already-drawn
+	// rows by setting a margin (CSI Pt;Pb r) and issuing SD/SU (CSI Ps T / CSI
+	// Ps S) to shift them, then writing only the rows that actually changed at
+	// their new positions. A grid that silently dropped 'r'/'T'/'S' — which is
+	// what this type did before this field existed — never performs that
+	// shift, so the follow-up writes land at the *pre-scroll* row/column
+	// offsets instead of the post-scroll ones the real terminal would have
+	// them at. That is a harness bug, not a renderer bug: it manufactures
+	// exactly the kind of stale-trailing-characters corruption a genuine
+	// erase-to-end-of-line omission would cause, indistinguishable from the
+	// real thing until someone reads the bytes by hand. See the 2026-08-27
+	// investigation this field closes out.
+	scrollTop, scrollBot int
+
 	// scrollback holds rows that left the top of the screen, oldest first.
 	scrollback []string
 
@@ -138,7 +155,7 @@ func New(w, h int) *Grid {
 	if h < 1 {
 		h = 1
 	}
-	g := &Grid{W: w, H: h, autowrap: true}
+	g := &Grid{W: w, H: h, autowrap: true, scrollTop: 0, scrollBot: h - 1}
 	g.cells = blank(w, h)
 
 	p := ansi.NewParser()
@@ -208,6 +225,10 @@ func (g *Grid) Resize(w, h int) {
 	g.cx = min(g.cx, w-1)
 	g.cy = min(g.cy, h-1)
 	g.wrapNext = false
+	// A real terminal resets the scrolling region to the full screen on
+	// resize (there is no sensible way to preserve an old margin against a
+	// new height), and a program that wants a margin has to set it again.
+	g.scrollTop, g.scrollBot = 0, h-1
 }
 
 // --- handlers -------------------------------------------------------------
@@ -267,20 +288,30 @@ func (g *Grid) execute(b byte) {
 	}
 }
 
-// newline moves down one row, scrolling if already on the last one. Scrolling
-// is where the top row enters the scrollback — on the main screen only, since
-// the alternate screen has none. That asymmetry is the mechanical reason
-// fullscreen costs native scrolling.
+// newline moves down one row, scrolling if already on the last row of the
+// active scrolling region (DECSTBM; the whole screen when the program never
+// set one). Scrolling is where the top row enters the scrollback — on the
+// main screen only, since the alternate screen has none. That asymmetry is
+// the mechanical reason fullscreen costs native scrolling. It is also,
+// separately, only correct when the region is the default whole-screen one:
+// a margin above the cursor's row does not stop LF from moving the cursor,
+// real terminals only special-case the bottom margin line, but no code path
+// in this program issues LF while a non-default margin is active, so the
+// narrower "bottom of screen" case below is what actually needs to be exact.
 func (g *Grid) newline() {
-	if g.cy < g.H-1 {
-		g.cy++
-		return
+	switch {
+	case g.cy < g.scrollBot || g.cy > g.scrollBot:
+		// Either not yet at the region's bottom, or parked below the region
+		// altogether (a cursor position DECSTBM does not forbid) — either
+		// way LF is a plain move, clamped to the physical screen.
+		g.cy = min(g.cy+1, g.H-1)
+	default:
+		// At the bottom of the active region: scroll it, don't just move.
+		if g.scrollTop == 0 && g.scrollBot == g.H-1 && !g.altScreen {
+			g.scrollback = append(g.scrollback, rowString(g.cells[0]))
+		}
+		g.scrollRegion(1)
 	}
-	if !g.altScreen {
-		g.scrollback = append(g.scrollback, rowString(g.cells[0]))
-	}
-	copy(g.cells, g.cells[1:])
-	g.cells[g.H-1] = blankRow(g.W)
 }
 
 func (g *Grid) esc(cmd ansi.Cmd) {
@@ -353,8 +384,70 @@ func (g *Grid) csi(cmd ansi.Cmd, params ansi.Params) {
 	case 'd': // VPA
 		g.cy = clamp(arg(0, 1)-1, 0, g.H-1)
 		g.wrapNext = false
+	case 'r': // DECSTBM, set top/bottom margins
+		top := clamp(arg(0, 1)-1, 0, g.H-1)
+		bot := clamp(arg(1, g.H)-1, 0, g.H-1)
+		if top >= bot {
+			// An invalid or degenerate region is ignored, the same as real
+			// terminals do, rather than left half-applied.
+			return
+		}
+		g.scrollTop, g.scrollBot = top, bot
+		// DECSTBM also homes the cursor, which is why the renderer can
+		// immediately follow it with a bare row/col move that only makes
+		// sense relative to (0,0).
+		g.cx, g.cy = 0, 0
+		g.wrapNext = false
+	case 'S': // SU, scroll up n lines within the margin
+		g.scrollRegion(arg(0, 1))
+	case 'T': // SD, scroll down n lines within the margin
+		g.scrollRegion(-arg(0, 1))
 	case 'h', 'l':
 		g.mode(cmd, params, cmd.Final() == 'h')
+	}
+}
+
+// scrollRegion shifts the rows between scrollTop and scrollBot (inclusive) by
+// n rows: n > 0 scrolls the region's content up (new blank rows appear at the
+// bottom of the region, as SU does), n < 0 scrolls it down (new blank rows
+// appear at the top, as SD does). This is the same physical move a real
+// terminal performs to satisfy CSI Ps S / CSI Ps T, and is what
+// [Grid.newline] also uses for the un-parameterised case of scrolling at the
+// bottom of the default (whole-screen) region.
+//
+// Content leaving the region is simply dropped, never appended to
+// scrollback: SU/SD operate on the margin the program asked for, which on the
+// alternate screen is not "the top of the screen" in the DECSTBM-less sense
+// newline's own doc comment describes, and real terminals do not append
+// margin-scrolled rows to scrollback either.
+func (g *Grid) scrollRegion(n int) {
+	top, bot := g.scrollTop, g.scrollBot
+	if top < 0 || bot >= g.H || top > bot || n == 0 {
+		return
+	}
+	height := bot - top + 1
+	if n > height {
+		n = height
+	}
+	if n < -height {
+		n = -height
+	}
+
+	if n > 0 {
+		// Scroll up: rows shift towards top, blanks appear at bot.
+		copy(g.cells[top:bot+1], g.cells[top+n:bot+1])
+		for y := bot - n + 1; y <= bot; y++ {
+			g.cells[y] = blankRow(g.W)
+		}
+	} else {
+		// Scroll down: rows shift towards bot, blanks appear at top.
+		n = -n
+		for y := bot; y >= top+n; y-- {
+			g.cells[y] = g.cells[y-n]
+		}
+		for y := top; y < top+n; y++ {
+			g.cells[y] = blankRow(g.W)
+		}
 	}
 }
 

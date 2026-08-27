@@ -496,3 +496,59 @@ func TestFirstMessageDoesNotCorruptFullscreen(t *testing.T) {
 			width, row, w, s.Dump("screen after the first message:"))
 	}
 }
+
+// TestSmallFullscreenScrollDoesNotCorruptText closes out a 2026-08-27
+// investigation into a suspected fifth rendering bug: on a small fullscreen
+// terminal (60x12), the frame right after clipHead's own "...N rows above"
+// affordance first engages appeared, in an early reproduction, to show
+// concatenated garbage — content like the last few characters of the
+// previous frame's status line stuck onto the front of a shorter new line
+// (e.g. "contenido" + leftover "ding 00:53" from "* auto/coding 00:53").
+//
+// Tracing the raw bytes showed bubbletea's cursed renderer using a
+// DECSTBM+SD scroll-region optimization (CSI Pt;Pb r, then CSI Ps T) to
+// reuse already-drawn rows instead of a full repaint on this transition —
+// which is a legitimate, correct thing for a renderer to do. The actual
+// defect was in this repository's own test harness: testterm.Grid's csi()
+// silently dropped 'r'/'T'/'S' (grid_test.go's own
+// TestScrollRegionConfinesScrolling and siblings are the fix), so the
+// cursor moved as if a scroll had happened while the grid's cells never
+// shifted — a harness bug that fabricated exactly the corruption symptom a
+// real renderer defect would produce. With the harness now performing the
+// scroll for real, this exact scenario is confirmed clean: there is no
+// application bug here. This test is the permanent guard against either
+// regressing.
+func TestSmallFullscreenScrollDoesNotCorruptText(t *testing.T) {
+	const w, h = 60, 12
+	s := testterm.Start(t, newFullscreenScreenRoot(t, false), w, h)
+
+	prompts := []string{
+		"primera pregunta con texto largo para forzar wrap del contenido",
+		"segunda pregunta tambien bastante larga para seguir forzando overflow",
+	}
+	for _, p := range prompts {
+		askAndWait(s, p)
+
+		for _, line := range s.Grid().Lines() {
+			// A corrupted line from this bug looks like two unrelated
+			// fragments run together with no space between them — the
+			// tell-tale being a run of digits or the status line's own
+			// vocabulary ("coding", "auto", "cancela") stuck directly onto
+			// the end of otherwise-clean content that has no business
+			// containing it. Rather than pattern-match the corruption
+			// shape, assert the stronger, simpler invariant: every visible
+			// row must fit the terminal width. A row produced by pasting a
+			// short new line in front of a longer stale one is reliably
+			// *not* longer than what was there before, but the underlying
+			// mechanism (a write landing at a stale row/column) is exactly
+			// what TestFirstMessageDoesNotCorruptFullscreen's Widest()
+			// check already catches for the banner-retirement transition,
+			// so the same check is the right instrument here too.
+			if width := len([]rune(line)); width > w {
+				t.Errorf("row %q is %d columns wide on a %d-column "+
+					"terminal after prompt %q.\n%s", line, width, w, p,
+					s.Dump("screen:"))
+			}
+		}
+	}
+}

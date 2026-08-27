@@ -351,6 +351,111 @@ func TestInsertAndDeleteLines(t *testing.T) {
 	}
 }
 
+// TestScrollRegionConfinesScrolling is DECSTBM (CSI Pt;Pb r) plus SD/SU (CSI
+// Ps T / CSI Ps S), the sequences a renderer's scroll-region-diff
+// optimization uses to reuse already-drawn rows instead of a full repaint —
+// see cursed_renderer.go / ultraviolet's scrollOptimize, which the fullscreen
+// alt screen path exercises. Before this test (and the field it protects)
+// existed, Grid's csi() silently dropped 'r', 'T' and 'S': a write using this
+// optimization moved the cursor as if the scroll had happened but the grid's
+// cells never actually shifted, so later writes landed at row/column offsets
+// that no longer matched what the bytes assumed — manufacturing a corruption
+// artifact (stale trailing characters from the pre-scroll row concatenated
+// onto shorter new content) that looked exactly like a real renderer bug and
+// was not one. The 2026-08-27 investigation traced a reported fullscreen
+// corruption to precisely this gap; this test is what makes the gap not
+// recur silently.
+func TestScrollRegionConfinesScrolling(t *testing.T) {
+	g := New(6, 6)
+	g.Write([]byte("r0\r\nr1\r\nr2\r\nr3\r\nr4\r\nr5"))
+
+	// Confine the region to rows 2..4 (1-based Pt=2, Pb=5 means 0-based
+	// rows 1..4) and scroll it down by 2: rows above/below the region must
+	// be untouched, and the region's own rows shift within it, With SD's
+	// blanks entering at its top and its bottom rows falling off the region
+	// entirely (not the screen — DECSTBM confines the whole operation).
+	g.Write([]byte("\x1b[2;5r\x1b[2T"))
+	lines := g.Lines()
+	if lines[0] != "r0" {
+		t.Errorf("row 0 (outside the region) = %q, want r0 untouched", lines[0])
+	}
+	if lines[5] != "r5" {
+		t.Errorf("row 5 (outside the region) = %q, want r5 untouched", lines[5])
+	}
+	if lines[1] != "" || lines[2] != "" {
+		t.Errorf("rows 1-2 (top of the scrolled region) = %q, %q, want both blank after SD 2", lines[1], lines[2])
+	}
+	if lines[3] != "r1" || lines[4] != "r2" {
+		t.Errorf("rows 3-4 (bottom of the scrolled region) = %q, %q, want r1, r2 shifted down by 2", lines[3], lines[4])
+	}
+
+	// DECSTBM homes the cursor, which is why a renderer can immediately
+	// follow it with a bare relative move that only makes sense from (0,0).
+	if x, y := g.Cursor(); x != 0 || y != 0 {
+		t.Errorf("cursor after DECSTBM = (%d,%d), want (0,0)", x, y)
+	}
+}
+
+// TestScrollUpWithinRegion is SU's (CSI Ps S) direction: content moves
+// towards the top of the region and blanks enter at its bottom, the mirror
+// of the SD case TestScrollRegionConfinesScrolling exercises.
+func TestScrollUpWithinRegion(t *testing.T) {
+	g := New(6, 6)
+	g.Write([]byte("r0\r\nr1\r\nr2\r\nr3\r\nr4\r\nr5"))
+	g.Write([]byte("\x1b[2;5r\x1b[1S"))
+	lines := g.Lines()
+	if lines[0] != "r0" || lines[5] != "r5" {
+		t.Errorf("rows outside the region = %q, %q, want r0, r5 untouched", lines[0], lines[5])
+	}
+	if lines[1] != "r2" || lines[2] != "r3" || lines[3] != "r4" {
+		t.Errorf("region after SU 1 = %q, %q, %q, want r2, r3, r4 shifted up by 1", lines[1], lines[2], lines[3])
+	}
+	if lines[4] != "" {
+		t.Errorf("row 4 (bottom of the scrolled region) = %q, want blank after SU", lines[4])
+	}
+}
+
+// TestNewlineScrollsTheActiveRegionNotTheWholeScreen: once a margin is set,
+// LF at the region's own bottom row must scroll only the region — the same
+// distinction a real terminal makes and testterm's Grid did not before this
+// fix, since it only ever knew about scrolling the whole screen.
+func TestNewlineScrollsTheActiveRegionNotTheWholeScreen(t *testing.T) {
+	g := New(6, 5)
+	g.Write([]byte("top\r\na\r\nb\r\nc\r\nbottom"))
+	// Region rows 1..3 (0-based), cursor parked at the region's bottom row.
+	g.Write([]byte("\x1b[2;4r\x1b[4;1H"))
+	g.Write([]byte("\r\nnew"))
+
+	lines := g.Lines()
+	if lines[0] != "top" {
+		t.Errorf("row 0 (outside the region) = %q, want top untouched by a scroll confined to rows 1-3", lines[0])
+	}
+	if lines[4] != "bottom" {
+		t.Errorf("row 4 (outside the region) = %q, want bottom untouched", lines[4])
+	}
+	if lines[1] != "b" || lines[2] != "c" || lines[3] != "new" {
+		t.Errorf("region after LF at its bottom row = %q, %q, %q, want b, c, new", lines[1], lines[2], lines[3])
+	}
+}
+
+// TestResizeResetsTheScrollRegion: a real terminal has no sensible way to
+// preserve a margin against a new height, and a program that wants one has to
+// set it again after a resize — the same "terminal does not helpfully cope"
+// stance TestResizeDoesNotReflow takes for content.
+func TestResizeResetsTheScrollRegion(t *testing.T) {
+	g := New(6, 6)
+	g.Write([]byte("\x1b[2;4r"))
+	g.Resize(6, 4)
+	// Five lines on a 4-row screen forces exactly one scroll of the whole
+	// screen if (and only if) the region was actually reset; a surviving
+	// 2..4 (1-based) margin would confine that scroll to rows 1-3 and leave
+	// row 0 untouched instead.
+	g.Write([]byte("\x1b[1;1Hr0\r\nr1\r\nr2\r\nr3\r\nr4"))
+	if lines := g.Lines(); lines[0] == "r0" {
+		t.Errorf("row 0 = %q after 5 lines on a 4-row screen; the pre-resize scroll region must not have survived", lines[0])
+	}
+}
+
 func TestTabStops(t *testing.T) {
 	g := New(20, 2)
 	g.Write([]byte("a\tb"))
@@ -383,6 +488,13 @@ func TestGridNeverPanicsOnHostileInput(t *testing.T) {
 		"\x1b[99999L",
 		"\x1b[99999M",
 		"\x1b[99999X",
+		"\x1b[99999;1r",
+		"\x1b[1;99999r",
+		"\x1b[5;1r", // top >= bot, degenerate
+		"\x1b[99999T",
+		"\x1b[99999S",
+		"\x1b[0T",
+		"\x1b[0S",
 		"\x1b8",
 		"\x1bM",
 		strings.Repeat("\x1b[A", 100),
