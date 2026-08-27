@@ -324,7 +324,7 @@ func TestResolveModelNoProviderEnabledSuggestsProviderAdd(t *testing.T) {
 // TestResolveModelForBootFallsBackWhenDefaultHasNoCredential is P2's core
 // case: app.default_model names a declared, enabled provider that has no
 // working credential (omniroute, AuthOK: false below) while a second
-// provider (gemini-direct) IS usable. Boot must not fail the way
+// provider (google) IS usable. Boot must not fail the way
 // ResolveModel alone would — it must land on the usable provider instead,
 // using the exact VerifyModel wire id config.VerifyModelFor knows for that
 // preset, and report what it did via the returned *BootFallback.
@@ -334,7 +334,7 @@ func TestResolveModelForBootFallsBackWhenDefaultHasNoCredential(t *testing.T) {
 		App:    config.App{DefaultModel: "omniroute/auto/coding"},
 		Providers: []config.Provider{
 			{ID: "omniroute", Kind: "openai", Enabled: true, AuthOK: false, MissingEnv: "OMNIROUTE_API_KEY"},
-			{ID: "gemini-direct", Kind: "openai", Enabled: true, AuthOK: true},
+			{ID: "google", Kind: "openai", Enabled: true, AuthOK: true},
 		},
 	}
 
@@ -342,8 +342,8 @@ func TestResolveModelForBootFallsBackWhenDefaultHasNoCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v, want a successful fallback", err)
 	}
-	if ref.Provider != "gemini-direct" {
-		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "gemini-direct")
+	if ref.Provider != "google" {
+		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "google")
 	}
 	if ref.WireID != "gemini-2.0-flash" {
 		t.Errorf("ref.WireID = %q, want the gemini preset's VerifyModel", ref.WireID)
@@ -357,8 +357,8 @@ func TestResolveModelForBootFallsBackWhenDefaultHasNoCredential(t *testing.T) {
 	if fb.From != "omniroute/auto/coding" {
 		t.Errorf("fb.From = %q, want %q", fb.From, "omniroute/auto/coding")
 	}
-	if fb.To != "gemini-direct/gemini-2.0-flash" {
-		t.Errorf("fb.To = %q, want %q", fb.To, "gemini-direct/gemini-2.0-flash")
+	if fb.To != "google/gemini-2.0-flash" {
+		t.Errorf("fb.To = %q, want %q", fb.To, "google/gemini-2.0-flash")
 	}
 	if !strings.Contains(fb.Reason, "credential") {
 		t.Errorf("fb.Reason = %q, want it to mention the missing credential", fb.Reason)
@@ -422,7 +422,7 @@ func TestResolveModelForBootNeverOverridesAnExplicitModelFlag(t *testing.T) {
 		App:    config.App{DefaultModel: "omniroute/auto/coding"},
 		Providers: []config.Provider{
 			{ID: "omniroute", Kind: "openai", Enabled: false, AuthOK: true},
-			{ID: "gemini-direct", Kind: "openai", Enabled: true, AuthOK: true},
+			{ID: "google", Kind: "openai", Enabled: true, AuthOK: true},
 		},
 	}
 
@@ -503,7 +503,7 @@ func userReportedCfg() *config.Config {
 	return &config.Config{
 		Schema: config.Schema,
 		Providers: []config.Provider{{
-			ID: "gemini-direct", Name: "Google Gemini", Kind: "openai",
+			ID: "google", Name: "Google Gemini", Kind: "openai",
 			BaseURL:  "https://generativelanguage.googleapis.com/v1beta/openai",
 			Discover: true, Enabled: true, AuthOK: true,
 		}},
@@ -519,8 +519,8 @@ func TestResolveModelForBootNoDefaultModelPicksAUsableProvider(t *testing.T) {
 			"credentialed provider must not fail to boot just because "+
 			"app.default_model is unset", err)
 	}
-	if ref.Provider != "gemini-direct" {
-		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "gemini-direct")
+	if ref.Provider != "google" {
+		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "google")
 	}
 	if ref.WireID == "" {
 		t.Error("ref.WireID is empty: the fallback must name a concrete model")
@@ -542,13 +542,13 @@ func TestResolveModelForBootNoDefaultModelPicksAUsableProvider(t *testing.T) {
 // would have rendered "app.default_model () is not set; using X instead" —
 // an empty pair of parentheses in the very first line of output.
 func TestBootFallbackDescribeUnsetNamesNoEmptyRef(t *testing.T) {
-	fb := &BootFallback{To: "gemini-direct/gemini-3-flash", Reason: "is not set"}
+	fb := &BootFallback{To: "google/gemini-3-flash", Reason: "is not set"}
 
 	got := fb.Describe()
 	if strings.Contains(got, "()") {
 		t.Errorf("Describe() = %q, must not contain an empty '()' pair", got)
 	}
-	if !strings.Contains(got, "gemini-direct/gemini-3-flash") {
+	if !strings.Contains(got, "google/gemini-3-flash") {
 		t.Errorf("Describe() = %q, want it to name the model actually used", got)
 	}
 	if !strings.Contains(got, "model set") {
@@ -654,7 +654,7 @@ func catModel(provider, wireID string, opts ...func(*catalog.Model)) catalog.Mod
 // has moved on gets booted onto a model that may no longer exist.
 func TestResolveModelForBootPrefersTheCatalogOverThePreset(t *testing.T) {
 	cfg := userReportedCfg()
-	cat := catalogOf(catModel("gemini-direct", "gemini-3.1-flash-lite"))
+	cat := catalogOf(catModel("google", "gemini-3.1-flash-lite"))
 
 	ref, fb, err := ResolveModelForBoot(cfg, cat, "")
 	if err != nil {
@@ -664,7 +664,7 @@ func TestResolveModelForBootPrefersTheCatalogOverThePreset(t *testing.T) {
 		t.Errorf("ref.WireID = %q, want the catalog's model, not the preset's "+
 			"compiled-in %q", ref.WireID, "gemini-2.0-flash")
 	}
-	if fb == nil || fb.To != "gemini-direct/gemini-3.1-flash-lite" {
+	if fb == nil || fb.To != "google/gemini-3.1-flash-lite" {
 		t.Errorf("fb = %+v, want it to report the catalog model it chose", fb)
 	}
 }
@@ -691,13 +691,13 @@ func TestResolveModelForBootFallsBackToPresetWithoutACatalog(t *testing.T) {
 func TestResolveModelForBootSkipsDeprecatedAndUnusableCatalogEntries(t *testing.T) {
 	cfg := userReportedCfg()
 	cat := catalogOf(
-		catModel("gemini-direct", "gemini-1.0-retired", func(m *catalog.Model) {
+		catModel("google", "gemini-1.0-retired", func(m *catalog.Model) {
 			m.Tags = []string{catalog.TagDeprecated}
 		}),
-		catModel("gemini-direct", "gemini-locked", func(m *catalog.Model) {
+		catModel("google", "gemini-locked", func(m *catalog.Model) {
 			m.Health = catalog.HealthUnauthenticated
 		}),
-		catModel("gemini-direct", "gemini-3.1-flash-lite"),
+		catModel("google", "gemini-3.1-flash-lite"),
 	)
 
 	ref, _, err := ResolveModelForBoot(cfg, cat, "")
@@ -716,15 +716,15 @@ func TestResolveModelForBootIgnoresOtherProvidersCatalogEntries(t *testing.T) {
 	cfg := userReportedCfg()
 	cat := catalogOf(
 		catModel("openai", "gpt-4o"),
-		catModel("gemini-direct", "gemini-3.1-flash-lite"),
+		catModel("google", "gemini-3.1-flash-lite"),
 	)
 
 	ref, _, err := ResolveModelForBoot(cfg, cat, "")
 	if err != nil {
 		t.Fatalf("ResolveModelForBoot() error = %v", err)
 	}
-	if ref.Provider != "gemini-direct" || ref.WireID != "gemini-3.1-flash-lite" {
-		t.Errorf("ref = %q, want a gemini-direct model: openai is not even declared "+
+	if ref.Provider != "google" || ref.WireID != "gemini-3.1-flash-lite" {
+		t.Errorf("ref = %q, want a google model: openai is not even declared "+
 			"in this configuration", ref.Ref)
 	}
 }

@@ -36,19 +36,16 @@ type ProviderPreset struct {
 	// Label is the short, human-facing provider name the picker renders in
 	// `model-id [label] TVR ✓` (docs/ROADMAP-ux-2026-08-20.md's DECISION-3),
 	// dimmed, next to every row. It exists purely for display: `id` remains
-	// the only thing configs, refs and session files ever store or persist
-	// (DECISION-3's own words), so this field carries no config.toml
-	// counterpart and no user-override mechanism — it is a compile-time
-	// constant of the preset, looked up at render time via LabelFor below.
-	// Almost every preset's Label equals its own ID (omniroute, openai,
-	// anthropic, nvidia); "gemini-direct" is the one exception, labelled
-	// "google" because that's the name every user actually recognizes —
-	// DECISION-3 overruled making "google" the real id for W4 (that full
-	// rename is deliberately deferred to W5, after the rendering and loop
-	// waves), so for now the mismatch between id and Label is the whole
-	// point: it's what lets the picker show "google" today without
-	// touching anything a provider ref, config file or session transcript
-	// stores.
+	// the only thing configs, refs and session files ever store or persist,
+	// so this field carries no config.toml counterpart and no user-override
+	// mechanism — it is a compile-time constant of the preset, looked up at
+	// render time via LabelFor below. Every preset's Label equals its own ID
+	// today (omniroute, openai, anthropic, nvidia, google): the provider
+	// previously shipped as "gemini-direct" with a "google" display label
+	// was renamed outright to "google" as its real id (2026-08-27), since
+	// this codebase is still a prototype nobody has installed and the
+	// alias/migration machinery DECISION-3 had planned for that rename buys
+	// compatibility nothing actually depends on yet.
 	Label string
 
 	// Notes is a short, honest caveat about what this preset's chosen kind
@@ -143,8 +140,8 @@ var providerPresets = map[string]ProviderPreset{
 			"models alongside chat models; not everything discovery finds " +
 			"here can hold a conversation.",
 	},
-	"gemini": {
-		ID: "gemini-direct", Name: "Google Gemini", Kind: "openai", Label: "google",
+	"google": {
+		ID: "google", Name: "Google Gemini", Kind: "openai", Label: "google",
 		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Discover: true,
 		Environment: "GEMINI_API_KEY", VerifyModel: "gemini-2.0-flash",
 		Notes: "Google's OpenAI-compatible layer has historically rejected " +
@@ -161,10 +158,6 @@ var providerPresets = map[string]ProviderPreset{
 	},
 }
 
-func init() {
-	providerPresets["google"] = providerPresets["gemini"]
-}
-
 // ProviderPresets returns the supported setup names in stable display order.
 func ProviderPresets() []ProviderPreset {
 	return []ProviderPreset{
@@ -172,7 +165,7 @@ func ProviderPresets() []ProviderPreset {
 		providerPresets["openai"],
 		providerPresets["anthropic"],
 		providerPresets["nvidia"],
-		providerPresets["gemini"],
+		providerPresets["google"],
 	}
 }
 
@@ -182,7 +175,7 @@ func ResolveProviderPreset(name string) (ProviderPreset, error) {
 	if p, ok := providerPresets[key]; ok {
 		return p, nil
 	}
-	return ProviderPreset{}, fmt.Errorf("unknown provider %q (use omniroute, openai, anthropic, nvidia or gemini)", name)
+	return ProviderPreset{}, fmt.Errorf("unknown provider %q (use omniroute, openai, anthropic, nvidia or google)", name)
 }
 
 func presetByID(id string) (ProviderPreset, bool) {

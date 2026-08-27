@@ -57,7 +57,7 @@ func TestStreamCapturesThoughtSignature(t *testing.T) {
 data: [DONE]
 
 `
-	p := &Provider{set: provider.Settings{ID: "gemini-direct"}}
+	p := &Provider{set: provider.Settings{ID: "google"}}
 	calls := drainToolCalls(t, func(ch chan provider.Event) error {
 		return p.pumpSSE(context.Background(), strings.NewReader(body), ch)
 	})
@@ -153,7 +153,7 @@ data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"function":{"argum
 data: [DONE]
 
 `
-	p := &Provider{set: provider.Settings{ID: "gemini-direct"}}
+	p := &Provider{set: provider.Settings{ID: "google"}}
 	calls := drainToolCalls(t, func(ch chan provider.Event) error {
 		return p.pumpSSE(context.Background(), strings.NewReader(body), ch)
 	})
@@ -226,7 +226,7 @@ data: [DONE]
 func TestPumpWholeCarriesIDAndSignature(t *testing.T) {
 	body := `{"choices":[{"message":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"` + liveSignature + `"}},"function":{"arguments":"{\"city\":\"Paris\"}","name":"get_weather"},"id":"z7uCjJDW","type":"function"}]}}]}`
 
-	p := &Provider{set: provider.Settings{ID: "gemini-direct"}}
+	p := &Provider{set: provider.Settings{ID: "google"}}
 	calls := drainToolCalls(t, func(ch chan provider.Event) error {
 		return p.pumpWhole(context.Background(), strings.NewReader(body), ch)
 	})

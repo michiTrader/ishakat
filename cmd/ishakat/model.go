@@ -56,13 +56,13 @@ USAGE
   ishakat model set <ref> --all            sets default_model, compact_model and fallback_model together
   ishakat model set "" --compact           resets compact_model to "follow default_model"
 
-  ishakat model alias set <name> <ref>     ishakat model alias set smart gemini-direct/gemini-2.0-pro
+  ishakat model alias set <name> <ref>     ishakat model alias set smart google/gemini-2.0-pro
   ishakat model alias remove <name>
 
-  ishakat model favorite add <ref>         ishakat model favorite add gemini-direct/gemini-2.0-flash
+  ishakat model favorite add <ref>         ishakat model favorite add google/gemini-2.0-flash
   ishakat model favorite remove <ref>
 
-<ref> is a model reference: "provider/wire_id" (e.g. "gemini-direct/gemini-2.0-flash"),
+<ref> is a model reference: "provider/wire_id" (e.g. "google/gemini-2.0-flash"),
 a bare wire_id (uses the first enabled provider), or an existing alias.
 None of these subcommands verify the reference against a live provider —
 use `+"`ishakat models`"+` to see what is actually discovered, or `+"`ishakat provider add`"+`

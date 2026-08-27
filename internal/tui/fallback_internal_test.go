@@ -22,7 +22,7 @@ func TestFinishTurnTwoFailuresTriggersFallback(t *testing.T) {
 	root := newHeadlessRoot()
 	root.engineFor = factory
 	root.model = "omni/son45"
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	originalEng := root.eng
 
 	root.live.start("omni/son45")
@@ -42,16 +42,16 @@ func TestFinishTurnTwoFailuresTriggersFallback(t *testing.T) {
 	m2, _ := got.finishTurn(errors.New("connection refused"), false)
 	got2 := m2.(Root)
 
-	if got2.model != "gemini-direct/flash" {
+	if got2.model != "google/flash" {
 		t.Fatalf("model = %q, want the fallback ref after the second consecutive failure", got2.model)
 	}
-	if got2.footer.Model != "gemini-direct/flash" {
+	if got2.footer.Model != "google/flash" {
 		t.Fatalf("footer.Model = %q, want the fallback ref", got2.footer.Model)
 	}
 	if got2.consecutiveFailures != 0 {
 		t.Fatalf("consecutiveFailures = %d after the switch fired, want reset to 0", got2.consecutiveFailures)
 	}
-	if len(*calls) != 1 || (*calls)[0] != "gemini-direct/flash" {
+	if len(*calls) != 1 || (*calls)[0] != "google/flash" {
 		t.Fatalf("engineFor calls = %v, want exactly one call for the fallback ref", *calls)
 	}
 	if got2.eng == originalEng {
@@ -59,7 +59,7 @@ func TestFinishTurnTwoFailuresTriggersFallback(t *testing.T) {
 	}
 	found := false
 	for _, e := range got2.transcript {
-		if strings.Contains(e.text, "omni/son45") && strings.Contains(e.text, "gemini-direct/flash") {
+		if strings.Contains(e.text, "omni/son45") && strings.Contains(e.text, "google/flash") {
 			found = true
 		}
 	}
@@ -74,7 +74,7 @@ func TestFinishTurnTwoFailuresTriggersFallback(t *testing.T) {
 // one more failure never accumulates into a switch.
 func TestFinishTurnSuccessResetsTheStreak(t *testing.T) {
 	root := newHeadlessRoot()
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	root.model = "omni/son45"
 
 	root.live.start("omni/son45")
@@ -100,7 +100,7 @@ func TestFinishTurnSuccessResetsTheStreak(t *testing.T) {
 // fault, so it must not extend the streak either.
 func TestFinishTurnAbortedDoesNotCountAsAFailure(t *testing.T) {
 	root := newHeadlessRoot()
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	root.model = "omni/son45"
 	root.consecutiveFailures = 1
 
@@ -140,13 +140,13 @@ func TestCheckFallbackIsANoOpWithNoFallbackConfigured(t *testing.T) {
 // (e.g. the fallback itself is the one failing) has nothing to switch to.
 func TestCheckFallbackIsANoOpWhenFallbackEqualsActiveModel(t *testing.T) {
 	root := newHeadlessRoot()
-	root.model = "gemini-direct/flash"
-	root.fallbackModel = "gemini-direct/flash"
+	root.model = "google/flash"
+	root.fallbackModel = "google/flash"
 	root.consecutiveFailures = 2
 
 	got, _ := root.checkFallback()
 	m := got.(Root)
-	if m.model != "gemini-direct/flash" {
+	if m.model != "google/flash" {
 		t.Fatalf("model = %q, want unchanged", m.model)
 	}
 	if m.consecutiveFailures != 2 {
@@ -160,17 +160,17 @@ func TestCheckFallbackIsANoOpWhenFallbackEqualsActiveModel(t *testing.T) {
 // switches (so the footer/next turn are honest about what is active) but
 // the notice becomes a double warning instead of a plain confirmation.
 func TestCheckFallbackReportsAFactoryErrorButStillSwitchesTheLabel(t *testing.T) {
-	wantErr := errors.New(`provider "gemini-direct" is not declared`)
+	wantErr := errors.New(`provider "google" is not declared`)
 	root := newHeadlessRoot()
 	root.model = "omni/son45"
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	root.consecutiveFailures = 2
 	root.engineFor = failingFactory(wantErr)
 	originalEng := root.eng
 
 	got, _ := root.checkFallback()
 	m := got.(Root)
-	if m.model != "gemini-direct/flash" {
+	if m.model != "google/flash" {
 		t.Fatalf("model = %q, want the fallback ref even when the rebuild failed", m.model)
 	}
 	if m.eng != originalEng {
@@ -187,7 +187,7 @@ func TestCheckFallbackReportsAFactoryErrorButStillSwitchesTheLabel(t *testing.T)
 // [tools].enabled = true would never trip the fallback at all.
 func TestFinishAgentTurnTracksTheSameStreak(t *testing.T) {
 	root := newHeadlessRoot()
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	root.model = "omni/son45"
 	root.live.start("omni/son45")
 
@@ -214,7 +214,7 @@ func TestFinishAgentTurnTracksTheSameStreak(t *testing.T) {
 // is failing, so it must not extend the streak.
 func TestFinishAgentTurnStoppedDoesNotCountAsAFailure(t *testing.T) {
 	root := newHeadlessRoot()
-	root.fallbackModel = "gemini-direct/flash"
+	root.fallbackModel = "google/flash"
 	root.model = "omni/son45"
 	root.consecutiveFailures = 1
 	root.live.start("omni/son45")

@@ -135,7 +135,7 @@ type Block struct {
 	// step. Dropping it on the way back is not a quality loss but a hard
 	// HTTP 400, "Function call is missing a thought_signature in functionCall
 	// parts", which is exactly what made every turn after a tool call fail
-	// against gemini-direct while the same model worked through a gateway
+	// against google while the same model worked through a gateway
 	// that preserved the field. Anthropic's extended thinking signs its
 	// thinking blocks the same way.
 	//

@@ -82,12 +82,12 @@ func TestBuildEngineFallsBackAndWarnsWhenDefaultModelIsUnusable(t *testing.T) {
 
 	cfg := cfgFor(t, srv.URL)
 	cfg.App.DefaultModel = "omniroute/auto/coding"
-	// omniroute is now disabled; gemini-direct (a real preset id, so
+	// omniroute is now disabled; google (a real preset id, so
 	// config.VerifyModelFor has a wire id for it) points at the same fake
 	// server and is the one that must end up serving the turn.
 	cfg.Providers[0].Enabled = false
 	cfg.Providers = append(cfg.Providers, config.Provider{
-		ID: "gemini-direct", Kind: "openai", BaseURL: srv.URL,
+		ID: "google", Kind: "openai", BaseURL: srv.URL,
 		APIKey: "test-key", Enabled: true, AuthOK: true,
 	})
 
@@ -98,10 +98,10 @@ func TestBuildEngineFallsBackAndWarnsWhenDefaultModelIsUnusable(t *testing.T) {
 	if eng == nil {
 		t.Fatal("eng is nil: the whole point of P2 is that a fallback still produces a usable engine")
 	}
-	if ref.Provider != "gemini-direct" {
-		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "gemini-direct")
+	if ref.Provider != "google" {
+		t.Errorf("ref.Provider = %q, want %q", ref.Provider, "google")
 	}
-	if warn == "" || !strings.Contains(warn, "gemini-direct") {
+	if warn == "" || !strings.Contains(warn, "google") {
 		t.Errorf("warn = %q, want it to name the fallback provider", warn)
 	}
 }

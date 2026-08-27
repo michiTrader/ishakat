@@ -763,7 +763,7 @@ func TestCurationRulesMapsConfigToCatalogRules(t *testing.T) {
 			},
 		},
 		Providers: []config.Provider{
-			{ID: "gemini-direct", Hide: []string{"veo-*"}, Keep: []string{"gemini-3.1-pro-preview"}},
+			{ID: "google", Hide: []string{"veo-*"}, Keep: []string{"gemini-3.1-pro-preview"}},
 			{ID: "omniroute"}, // no hide/keep of its own: must not appear in Providers
 		},
 	}
@@ -783,15 +783,15 @@ func TestCurationRulesMapsConfigToCatalogRules(t *testing.T) {
 	if _, ok := r.Providers["omniroute"]; ok {
 		t.Error("Providers[\"omniroute\"] present even though that provider declared no hide/keep")
 	}
-	pr, ok := r.Providers["gemini-direct"]
+	pr, ok := r.Providers["google"]
 	if !ok {
-		t.Fatal("Providers[\"gemini-direct\"] missing")
+		t.Fatal("Providers[\"google\"] missing")
 	}
 	if len(pr.Hide) != 1 || pr.Hide[0] != "veo-*" {
-		t.Errorf("gemini-direct Hide = %v, want [veo-*]", pr.Hide)
+		t.Errorf("google Hide = %v, want [veo-*]", pr.Hide)
 	}
 	if len(pr.Keep) != 1 || pr.Keep[0] != "gemini-3.1-pro-preview" {
-		t.Errorf("gemini-direct Keep = %v, want [gemini-3.1-pro-preview]", pr.Keep)
+		t.Errorf("google Keep = %v, want [gemini-3.1-pro-preview]", pr.Keep)
 	}
 }
 

@@ -206,13 +206,13 @@ func TestFileCurationStoreNeverTouchesConfigTOML(t *testing.T) {
 	// exactly what ctrl+x/ctrl+h, /model hide|keep, and /models reset all
 	// eventually call.
 	store := newFileCurationStore(xdg.CurationFile())
-	if err := store.Hide("gemini-direct/gemini-embedding-2"); err != nil {
+	if err := store.Hide("google/gemini-embedding-2"); err != nil {
 		t.Fatalf("Hide: %v", err)
 	}
 	if err := store.Keep("other/kept-model"); err != nil {
 		t.Fatalf("Keep: %v", err)
 	}
-	if err := store.Unhide("gemini-direct/gemini-embedding-2"); err != nil {
+	if err := store.Unhide("google/gemini-embedding-2"); err != nil {
 		t.Fatalf("Unhide: %v", err)
 	}
 	if err := store.Hide("omni/hidden-again"); err != nil {

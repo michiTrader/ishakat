@@ -701,13 +701,13 @@ func renderPickerRow(g glyphs, st theme.Styles, width int, row pickerRow, select
 	}
 	id := fmt.Sprintf("%s %s %s", pointer, mark, wireID)
 	// F11 (docs/ROADMAP-ux-2026-08-20.md's DECISION-3): append the
-	// provider's short display label — "google", not the raw
-	// "gemini-direct" id — dimmed, in brackets. DECISION-3 explicitly
-	// keeps `id` as the only thing configs, refs and session files ever
-	// store; this label is purely a render-time decoration looked up
-	// against the static preset table, never persisted. A provider the
-	// user declared entirely by hand (no matching preset) has no known
-	// label, so the bracket is simply omitted rather than guessed.
+	// provider's short display label — "google" — dimmed, in brackets.
+	// DECISION-3 explicitly keeps `id` as the only thing configs, refs
+	// and session files ever store; this label is purely a render-time
+	// decoration looked up against the static preset table, never
+	// persisted. A provider the user declared entirely by hand (no
+	// matching preset) has no known label, so the bracket is simply
+	// omitted rather than guessed.
 	if label, ok := config.LabelFor(providerID); ok {
 		id += " " + st.Dim.Render("["+label+"]")
 	}

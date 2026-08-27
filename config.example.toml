@@ -232,7 +232,7 @@ enabled = false
 # mileage behind it.
 # export GEMINI_API_KEY=...
 [[provider]]
-id = "gemini-direct"
+id = "google"
 name = "Google Gemini"
 kind = "openai"
 base_url = "https://generativelanguage.googleapis.com/v1beta/openai"

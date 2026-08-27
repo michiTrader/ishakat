@@ -13,35 +13,35 @@ import (
 func TestSetAppModelDefault(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if err := config.SetAppModel(config.AppModelDefault, "gemini-direct/gemini-2.5-flash"); err != nil {
+	if err := config.SetAppModel(config.AppModelDefault, "google/gemini-2.5-flash"); err != nil {
 		t.Fatalf("SetAppModel() error = %v", err)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.App.DefaultModel != "gemini-direct/gemini-2.5-flash" {
-		t.Errorf("DefaultModel = %q, want %q", cfg.App.DefaultModel, "gemini-direct/gemini-2.5-flash")
+	if cfg.App.DefaultModel != "google/gemini-2.5-flash" {
+		t.Errorf("DefaultModel = %q, want %q", cfg.App.DefaultModel, "google/gemini-2.5-flash")
 	}
 }
 
 func TestSetAppModelCompactAndFallback(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if err := config.SetAppModel(config.AppModelCompact, "gemini-direct/gemini-2.5-flash-lite"); err != nil {
+	if err := config.SetAppModel(config.AppModelCompact, "google/gemini-2.5-flash-lite"); err != nil {
 		t.Fatalf("SetAppModel(compact) error = %v", err)
 	}
-	if err := config.SetAppModel(config.AppModelFallback, "gemini-direct/gemini-2.5-flash"); err != nil {
+	if err := config.SetAppModel(config.AppModelFallback, "google/gemini-2.5-flash"); err != nil {
 		t.Fatalf("SetAppModel(fallback) error = %v", err)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.App.CompactModel != "gemini-direct/gemini-2.5-flash-lite" {
+	if cfg.App.CompactModel != "google/gemini-2.5-flash-lite" {
 		t.Errorf("CompactModel = %q, want the lite model", cfg.App.CompactModel)
 	}
-	if cfg.App.FallbackModel != "gemini-direct/gemini-2.5-flash" {
+	if cfg.App.FallbackModel != "google/gemini-2.5-flash" {
 		t.Errorf("FallbackModel = %q, want the flash model", cfg.App.FallbackModel)
 	}
 }
@@ -146,14 +146,14 @@ func TestSetEvolveModePreservesOtherEvolveSettings(t *testing.T) {
 func TestSetAliasCreatesNewEntry(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if err := config.SetAlias("smart", "gemini-direct/gemini-2.5-pro"); err != nil {
+	if err := config.SetAlias("smart", "google/gemini-2.5-pro"); err != nil {
 		t.Fatalf("SetAlias() error = %v", err)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Alias["smart"] != "gemini-direct/gemini-2.5-pro" {
+	if cfg.Alias["smart"] != "google/gemini-2.5-pro" {
 		t.Errorf("alias[smart] = %q, want the pro model. Alias = %+v", cfg.Alias["smart"], cfg.Alias)
 	}
 }
@@ -225,14 +225,14 @@ func TestRemoveAliasOfMissingNameIsNotAnError(t *testing.T) {
 func TestAddFavorite(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if err := config.AddFavorite("gemini-direct/gemini-2.5-flash"); err != nil {
+	if err := config.AddFavorite("google/gemini-2.5-flash"); err != nil {
 		t.Fatalf("AddFavorite() error = %v", err)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "gemini-direct/gemini-2.5-flash" {
+	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "google/gemini-2.5-flash" {
 		t.Errorf("Favorites.List = %v, want exactly one entry", cfg.Favorites.List)
 	}
 }
@@ -263,7 +263,7 @@ func TestAddFavoriteMultipleEntries(t *testing.T) {
 	if err := config.AddFavorite("openai/gpt-4o-mini"); err != nil {
 		t.Fatalf("AddFavorite() error = %v", err)
 	}
-	if err := config.AddFavorite("gemini-direct/gemini-2.5-flash"); err != nil {
+	if err := config.AddFavorite("google/gemini-2.5-flash"); err != nil {
 		t.Fatalf("AddFavorite() error = %v", err)
 	}
 	cfg, err := config.Load(config.Options{SkipProject: true})
@@ -281,7 +281,7 @@ func TestRemoveFavorite(t *testing.T) {
 	if err := config.AddFavorite("openai/gpt-4o-mini"); err != nil {
 		t.Fatalf("AddFavorite() error = %v", err)
 	}
-	if err := config.AddFavorite("gemini-direct/gemini-2.5-flash"); err != nil {
+	if err := config.AddFavorite("google/gemini-2.5-flash"); err != nil {
 		t.Fatalf("AddFavorite() error = %v", err)
 	}
 	if err := config.RemoveFavorite("openai/gpt-4o-mini"); err != nil {
@@ -292,8 +292,8 @@ func TestRemoveFavorite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "gemini-direct/gemini-2.5-flash" {
-		t.Errorf("Favorites.List = %v, want only gemini-direct left", cfg.Favorites.List)
+	if len(cfg.Favorites.List) != 1 || cfg.Favorites.List[0] != "google/gemini-2.5-flash" {
+		t.Errorf("Favorites.List = %v, want only google left", cfg.Favorites.List)
 	}
 }
 

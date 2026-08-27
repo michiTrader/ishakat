@@ -4,7 +4,7 @@
 // `doctor`, `provider list` — they call config.Load directly and print
 // cfg.Warnings unfiltered, on purpose, because a deliberate audit wants to
 // see every configured provider's state). Startup (headless and the TUI) is
-// different: a user who only configured "gemini-direct" got a warning about
+// different: a user who only configured "google" got a warning about
 // every other declared-but-unused provider's missing environment variable
 // on every single run, for providers this run never asked to use — noise
 // that once sent a debugging session chasing app.default_model/omniroute

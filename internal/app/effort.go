@@ -24,7 +24,7 @@
 //     thinkingBudget behind the scenes: see
 //     https://ai.google.dev/gemini-api/docs/openai#thinking's own mapping
 //     table. So a Gemini model reached through the openai dialect (the
-//     "gemini-direct" preset's default kind, per credentials.go) uses this
+//     "google" preset's default kind, per credentials.go) uses this
 //     same flat key, NOT the nested gemini-native one below.
 //   - gemini (the native generateContent/streamGenerateContent adapter):
 //     a nested field, "generationConfig.thinkingConfig.thinkingLevel",
@@ -85,7 +85,7 @@ import (
 // kind is the provider's own dialect (config.Provider.Kind, already
 // lower-cased the way wiring.Settings lower-cases it — see FindProvider's
 // caller in whatever assembles ModelRef+provider.Kind together), not the
-// provider id: "gemini-direct" is a preset id whose default kind is
+// provider id: "google" is a preset id whose default kind is
 // "openai" (its OpenAI-compatible shim), and only a hand-written
 // kind = "gemini" in the TOML reaches this function's "gemini" branch.
 //

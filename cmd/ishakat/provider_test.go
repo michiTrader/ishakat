@@ -169,9 +169,9 @@ func TestPickProviderInteractivelyByNumber(t *testing.T) {
 
 func TestPickProviderInteractivelyByName(t *testing.T) {
 	var out strings.Builder
-	got, ok := pickProviderInteractively(strings.NewReader("gemini\n"), &out)
-	if !ok || got != "gemini" {
-		t.Errorf("pickProviderInteractively(\"gemini\") = %q, %v, want %q, true", got, ok, "gemini")
+	got, ok := pickProviderInteractively(strings.NewReader("google\n"), &out)
+	if !ok || got != "google" {
+		t.Errorf("pickProviderInteractively(\"google\") = %q, %v, want %q, true", got, ok, "google")
 	}
 }
 
