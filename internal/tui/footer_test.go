@@ -97,6 +97,51 @@ func TestRenderFooterEnvuelveEnVezDeSoltar(t *testing.T) {
 	}
 }
 
+// TestRenderFooterEnvuelveConAutonomyYEffort is the 2026-08-27 feedback
+// batch's own follow-up to RC-7: adding FooterState.Effort (and, before it,
+// Autonomy) grew footerItemOrder from six items to eight without anyone
+// re-checking that BPEstrecho's own wrap-to-two-rows policy still holds —
+// the exact class of regression TestRenderFooterEnvuelveEnVezDeSoltar
+// already guards for the original six, just not for the two items added
+// since. Same BPEstrecho width and the same six original items, now with
+// Autonomy and Effort both set and included in the requested item list:
+// every item, old and new, must still survive wrapped across
+// lay.FooterSections() rows rather than any of them silently starting to
+// get dropped now that the footer carries more to say.
+func TestRenderFooterEnvuelveConAutonomyYEffort(t *testing.T) {
+	lay := tui.NewLayout(45, 40, 0, false, false) // BPEstrecho
+	if lay.Breakpoint != tui.BPEstrecho {
+		t.Fatalf("width 45 should classify as BPEstrecho, got breakpoint %v", lay.Breakpoint)
+	}
+	st := tui.FooterState{
+		Model:      "sonnet-4-5",
+		Autonomy:   "auto",
+		Effort:     "high",
+		ContextPct: 0.18,
+		Tokens:     36000,
+		CostUSD:    0.04,
+		GitBranch:  "algo",
+		CWD:        "~/proyectos/api",
+	}
+	items := []string{"model", "autonomy", "effort", "context", "tokens", "cost", "git", "cwd"}
+	line := tui.RenderFooter(lay, st, items)
+
+	rows := strings.Split(line, "\n")
+	if got, want := len(rows), lay.FooterSections(); got > want {
+		t.Fatalf("RenderFooter() en BPEstrecho con autonomy+effort devolvió %d filas, lay.FooterSections() permite %d: %q", got, want, line)
+	}
+	for _, want := range []string{"sonnet-4-5", "auto", "high", "18%", "36k", "$0.04", "algo", "~/proyectos/api"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("RenderFooter() = %q, esperaba que el envoltorio conservara %q en vez de soltarlo ahora que hay 8 items", line, want)
+		}
+	}
+	for _, row := range rows {
+		if got := lipgloss.Width(row); got > lay.ContentWidth() {
+			t.Errorf("fila %q de %d columnas excede el ancho de contenido (%d)", row, got, lay.ContentWidth())
+		}
+	}
+}
+
 // TestRenderFooterAbreviaAntesDeSoltar checks the middle step of RC-7's
 // policy directly: an item just a little too wide to sit alongside the
 // others gets shortened (path.go's own truncateRunes/ShortenPath patterns —
