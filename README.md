@@ -195,6 +195,22 @@ make windows-arm64    # -> bin/ishakat-windows-arm64.exe
 `go run ./cmd/ishakat` works on Windows regardless, because the temporary
 binary the toolchain builds is named correctly for you.
 
+### One-line install (no Go toolchain required)
+
+```powershell
+irm https://raw.githubusercontent.com/michiTrader/ishakat/main/install.ps1 | iex
+```
+
+This downloads the latest `ishakat-windows-amd64.exe` release asset,
+verifies its published `sha256` checksum, installs it to
+`%LOCALAPPDATA%\Programs\ishakat\ishakat.exe`, and adds that folder to your
+user `PATH` (no admin rights needed for either step — open a new terminal
+afterwards so the `PATH` change takes effect). Re-running it just overwrites
+the binary with the newest release. Only `windows/amd64` is published today;
+`windows/arm64` machines get a clear message pointing at `go build`/`make
+windows-arm64` instead. Linux, macOS and Termux use the equivalent
+`install.sh` — see `install.sh`'s own header comment for its one-liner.
+
 ### Which console
 
 Both problems people hit on Windows are properties of the console, not of the
