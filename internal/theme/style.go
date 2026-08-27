@@ -359,7 +359,28 @@ const ansiFullReset = ansi.ResetStyle
 // Background set, so the probe's prefix/suffix both come back empty and the
 // whole function is a byte-for-byte no-op — no separate "if plain" branch
 // needed here, same as every other Styles method.
-func (s Styles) PaintBackground(block string) string {
+//
+// width is the column the caller wants the *background* to reach, not the
+// text — a reported defect (2026-08-27, "las letras no tengan foreground
+// unicamente en las letras sino en todas las lineas del mensaje": the paint
+// should cover the whole line, not just sit under the glyphs). Before this
+// parameter existed, a short line (a one-word reply, the last wrapped line
+// of a paragraph, a blank-looking line that is actually just spaces) closed
+// its prefix/suffix pair right after its own last visible cell, so the
+// coloured strip stopped exactly where the text did — on screen that reads
+// as "highlighted letters" rather than "a message bubble", because every
+// line's background is a different length depending on how much text
+// happened to be on it. Padding with plain spaces *before* suffix (so the
+// padding sits between prefix/any reapplied prefix and the closing suffix,
+// i.e. still inside the coloured span) fixes that without touching a single
+// visible character. ansi.StringWidth is used rather than len/utf8.RuneCountInString
+// because the line still carries embedded ANSI escapes and possibly wide
+// runes at this point — a raw byte or rune count would over- or
+// under-pad depending on the theme's own colouring and the language of the
+// message. width <= 0 means "do not pad" (the pre-existing behaviour,
+// still exercised by callers — mostly tests — that only care about the
+// reset-patching and have no real line width to pad to).
+func (s Styles) PaintBackground(block string, width int) string {
 	probe := s.UserBG.Render("\x00")
 	i := strings.IndexByte(probe, 0)
 	if i < 0 {
@@ -375,6 +396,11 @@ func (s Styles) PaintBackground(block string) string {
 			continue
 		}
 		patched := strings.ReplaceAll(ln, ansiFullReset, ansiFullReset+prefix)
+		if width > 0 {
+			if pad := width - ansi.StringWidth(ln); pad > 0 {
+				patched += strings.Repeat(" ", pad)
+			}
+		}
 		lines[idx] = prefix + patched + suffix
 	}
 	return strings.Join(lines, "\n")

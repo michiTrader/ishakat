@@ -42,6 +42,26 @@ func TestLayoutContentWidthLimitaSoloEnAncho(t *testing.T) {
 	}
 }
 
+// TestLayoutInputWidthIgnoraMaxWidth is the regression test for the
+// 2026-08-27 fix ("la barra inferior de input de texto tiene un tamaño
+// maximo horizontal, mejor deberia ser del tamaño maximo de la terminal
+// horizontalmente"): unlike ContentWidth, InputWidth must always reach the
+// terminal's full width even in BPAncho with ui.max_width configured
+// smaller than the terminal — the input box is not prose being read back,
+// it is the line the user is actively typing into.
+func TestLayoutInputWidthIgnoraMaxWidth(t *testing.T) {
+	l := tui.NewLayout(120, 40, 80, false, false)
+	if l.Breakpoint != tui.BPAncho {
+		t.Fatalf("esperaba BPAncho, tengo %v", l.Breakpoint)
+	}
+	if got := l.ContentWidth(); got != 80 {
+		t.Fatalf("ContentWidth() = %d, want 80 (para confirmar que sí se recorta)", got)
+	}
+	if got := l.InputWidth(); got != 120 {
+		t.Errorf("InputWidth() = %d, want 120 (no debe recortarse a max_width)", got)
+	}
+}
+
 func TestLayoutShowBannerRequiereTTYYAlto(t *testing.T) {
 	base := tui.NewLayout(80, 24, 0, false, false)
 	if !base.ShowBanner(true) {

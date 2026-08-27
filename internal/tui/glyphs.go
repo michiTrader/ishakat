@@ -90,6 +90,14 @@ type glyphs struct {
 	// already vetted as present in both WGL4 and cp437, so no new font risk
 	// is introduced.
 	scrollMark string
+
+	// effortMark labels the footer's effort item (footer.go, F9's /effort
+	// picker surfaced in the status bar, 2026-08-27). Reuses modelMark's own
+	// "•"/"*" rather than inventing a third bullet glyph: both are short,
+	// low-emphasis "here's a label" markers and the two items never sit
+	// right next to each other without other text between them, so there is
+	// no ambiguity in reusing the shape.
+	effortMark string
 }
 
 var unicodeGlyphs = glyphs{
@@ -110,6 +118,7 @@ var unicodeGlyphs = glyphs{
 	foldMark:      "▸",
 	clipMark:      "…",
 	scrollMark:    "↕",
+	effortMark:    "•",
 }
 
 var asciiGlyphs = glyphs{
@@ -130,6 +139,7 @@ var asciiGlyphs = glyphs{
 	foldMark:      ">",
 	clipMark:      "...",
 	scrollMark:    "|",
+	effortMark:    "*",
 }
 
 // glyphsFor returns the table for a set. Every field of both tables is filled

@@ -108,6 +108,29 @@ func (l Layout) ContentWidth() int {
 	return w
 }
 
+// InputWidth es el ancho útil para la caja de entrada: siempre el ancho
+// completo de la terminal, sin el recorte de ui.max_width que ContentWidth
+// aplica en BPAncho.
+//
+// Reported 2026-08-27 ("la barra inferior de input de texto tiene un tamaño
+// maximo horizontal, mejor deberia ser del tamaño maximo de la terminal
+// horizontalmente"): ui.max_width exists to keep long *prose* readable — a
+// paragraph stretched across a 200-column terminal is hard to read left to
+// right — but the input box is a single line the user is actively typing
+// into, not prose being read back; capping it the same way only wastes the
+// terminal's own columns on both sides without helping readability, and
+// forces wrapping sooner than the terminal could actually support. Every
+// other call site that wants the max_width-aware limit keeps calling
+// ContentWidth() unchanged; this is a separate method precisely so that
+// decision does not ride along with it.
+func (l Layout) InputWidth() int {
+	w := l.Width
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
 // ShowBanner decide si el banner de arranque (§9.2) cabe y corresponde:
 // necesita TTY, animaciones no forzosamente pero sí alto suficiente, y nunca
 // aparece en BPMinimo porque a 40 columnas el ASCII art no entra limpio.

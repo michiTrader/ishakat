@@ -182,8 +182,12 @@ func renderTranscriptLine(styles theme.Styles, g glyphs, width int, role, name, 
 		// applied to the whole rendered bubble (header + body) via
 		// PaintBackground so it survives the header's own User colour and
 		// any code/prose styling in the body without losing the paint at
-		// their embedded resets (see PaintBackground's doc comment).
-		body = styles.PaintBackground(body)
+		// their embedded resets (see PaintBackground's doc comment). width
+		// is passed through (2026-08-27 fix) so every line's background
+		// reaches the same right edge instead of stopping right after that
+		// line's own last visible glyph — a full-width band behind the
+		// whole bubble, not a highlight confined to the letters.
+		body = styles.PaintBackground(body, width)
 	}
 	return body
 }
