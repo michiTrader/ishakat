@@ -82,6 +82,14 @@ type glyphs struct {
 	// purpose for this one job, so it gets its own explicit ASCII spelling
 	// ("...") rather than depending on the fold ever seeing it.
 	clipMark string
+
+	// scrollMark labels the fullscreen scroll-position indicator
+	// (view.go's scrollBarText, called from clipHead) — the reported "no
+	// rectangle shows the vertical scroll position" gap. U+2195 sits inside
+	// U+2190..U+2195, the same arrow block spinner's own comment (above)
+	// already vetted as present in both WGL4 and cp437, so no new font risk
+	// is introduced.
+	scrollMark string
 }
 
 var unicodeGlyphs = glyphs{
@@ -101,6 +109,7 @@ var unicodeGlyphs = glyphs{
 	warnMark:      "⚠",
 	foldMark:      "▸",
 	clipMark:      "…",
+	scrollMark:    "↕",
 }
 
 var asciiGlyphs = glyphs{
@@ -120,6 +129,7 @@ var asciiGlyphs = glyphs{
 	warnMark:      "!",
 	foldMark:      ">",
 	clipMark:      "...",
+	scrollMark:    "|",
 }
 
 // glyphsFor returns the table for a set. Every field of both tables is filled
