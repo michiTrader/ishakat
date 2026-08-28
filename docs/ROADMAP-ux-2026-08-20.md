@@ -784,6 +784,38 @@ six-liner, plus DECISION-3.
   is "extensions" or stays tool-shaped. This is a design question, so it gets a
   companion document rather than a wave item.
 
+**Closes:** F1, F6.
+
+> **Status (2026-08-28): W6 CLOSED — both items landed.** F1: `install.ps1`
+> (new file), the PowerShell counterpart of `install.sh` — platform detection
+> (`windows-amd64` only, matching `release.yml`'s current asset matrix),
+> latest-tag resolution via the GitHub redirect, sha256 checksum verification,
+> install to `%LOCALAPPDATA%\Programs\ishakat`, `PATH` persisted through the
+> `HKCU` registry hive so "just type `ishakat`" holds in new terminals, a
+> final `ishakat doctor` hint — verified end-to-end against the live
+> `v0.1.0` GitHub release with a portable PowerShell 7.4.6 interpreter (a real
+> whitespace-splitting bug in the checksum-parsing code was caught this way
+> and fixed before merge); `README.md` gained a matching one-line-install
+> subsection under `## Windows`. F1's "just type `ishakat`" first-run
+> experience needed no new code: `internal/app.go`'s `Run()` already degrades
+> gracefully with no provider configured, and `internal/app/modelref.go`
+> already prints the exact remedy (`` `ishakat provider add <name>` ``) at
+> the point it matters. F6: `docs/DESIGN-subagent-surface.md` (new)
+> audits `internal/tools/dispatch.go` and its callers against §21.11's four
+> concrete promises — recursion-cap and mission-inheritance are real and
+> tested; the one-sentence-goal convention is honored but not hard-enforced;
+> turn-boundary gating, parallel fan-out and the live swarm display were
+> never built, because they need a concurrent multi-sub-agent engine
+> mechanism `docs/PLAN.md` §11's own Step 31 entry already names as blocked
+> — and recommends **keeping the surface tool-shaped**, rejecting an
+> "extensions" rename as a label change with no matching capability change
+> (Pi's own named/authored/reusable per-agent config is a materially larger
+> feature than today's anonymous, task-string-only, model-invoked
+> `dispatch`), reversible once that engine actually exists. See
+> `docs/PLAN.md` §17, 2026-08-27 "W6 (part 1)" and 2026-08-28 "W6 (part 2,
+> closing)" for the full detail. **Every wave in the approved
+> W0→W1→W3→W2→W4→W5→W6 order is now closed.**
+
 ---
 
 ## 5. Deliberately not in any wave
